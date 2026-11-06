@@ -1,0 +1,20 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Scrolling Text|r
+## Notes: Damage, healing and notices scrolling around your character.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## X-ZacUI-Part: Scrolling text
+
+# Part of ZacUI. Shares ZacUI's namespace (_G.ZacUI) and its saved
+# variables: every setting lives in ZacUIDB.sct and rides in profiles.
+
+SCT_Settings.lua
+SCT_Display.lua
+SCT_Events.lua
+SCT_Alerts.lua
+SCT_PlateText.lua
+SCT_Movers.lua
+Config_PagesSCT.lua

@@ -1,0 +1,23 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Buff Reminders|r
+## Notes: ZacUI buff reminders: your class's group buffs (Battle Shout, Arcane Intellect, Fortitude, Mark of the Wild...) - a reminder when you or the group miss one, and a tracker of who needs it, with a click to cast.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Readycheck, Readycheck_Reminders
+## X-ZacUI-Part: BuffReminders
+
+# Part of ZacUI. Shares ZacUI's namespace (_G.ZacUI, published by
+# Core_Boot) and its saved variables (ZacUIDB.buffRem, in profiles).
+# Readycheck keeps its own Battle Shout reminder and party tracker; this
+# part reads their settings once when asked (the import) and can switch
+# Readycheck's off, never anything else.
+
+BR_Data.lua
+BR_Core.lua
+BR_Icon.lua
+BR_Tracker.lua
+BR_Import.lua
+BR_Config.lua

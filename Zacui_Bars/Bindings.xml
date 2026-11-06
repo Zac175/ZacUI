@@ -1,0 +1,5 @@
+<Bindings>
+	<!-- Intentionally empty. ZacUI bar key names live in Zacui\Bindings.xml;
+	     the client indexes Bindings.xml files at startup and warns if one it
+	     has seen goes missing, so this placeholder keeps that list stable. -->
+</Bindings>

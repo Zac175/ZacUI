@@ -1,0 +1,11 @@
+<!-- Key bindings: the game's Keybindings > OpenMap. Each runs an action of the map's menu
+     (Panel.lua's ZacuiWorldMap_Binding), opening the map first if it's closed; their names are set there.
+     A section of its own (as Leatrix Plus has), each name starting OpenMap: so a search finds them -->
+<Bindings>
+	<Binding name="ZACUIMAP_FIND" category="ZacUI Map">ZacuiWorldMap_Binding("find")</Binding>
+	<Binding name="ZACUIMAP_PIN" category="ZacUI Map">ZacuiWorldMap_Binding("pin")</Binding>
+	<Binding name="ZACUIMAP_PINS" category="ZacUI Map">ZacuiWorldMap_Binding("pins")</Binding>
+	<Binding name="ZACUIMAP_QUILL" category="ZacUI Map">ZacuiWorldMap_Binding("quill")</Binding>
+	<Binding name="ZACUIMAP_QUESTLOG" category="ZacUI Map">ZacuiWorldMap_Binding("questlog")</Binding>
+	<Binding name="ZACUIMAP_MENU" category="ZacUI Map">ZacuiWorldMap_Binding("menu")</Binding>
+</Bindings>

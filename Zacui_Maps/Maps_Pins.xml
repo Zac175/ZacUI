@@ -1,0 +1,16 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!--
+        The map canvas hands out pins from a frame pool, and a frame pool
+        needs a template - there is no Lua-only way to register one. This
+        is the whole reason ZacUI has an XML file at all.
+
+        Inheriting BaseMapPoiPinTemplate rather than rolling our own gets
+        the canvas integration (positioning, scaling, layer awareness) and
+        the tooltip, which reads the name and description straight off the
+        info table the data provider passes in. ZacUIMapPinMixin is set as
+        a global in Maps_Icons.lua; the attribute is resolved from _G when
+        a pin is first created, not when this file loads.
+    -->
+    <Frame name="ZacUIMapPinTemplate" inherits="BaseMapPoiPinTemplate"
+           mixin="ZacUIMapPinMixin" enableMouse="true" virtual="true"/>
+</Ui>

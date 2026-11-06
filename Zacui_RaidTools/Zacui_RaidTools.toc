@@ -1,0 +1,32 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Raid tools|r
+## Notes: The raid helpers ZacUI's boss mods lean on: /pull, /break and /range in every boss mod's language, the raid sync between raiders, and the raid callouts' speech settings.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Zacui_Auras, LibSharedMedia-3.0
+## X-ZacUI-Part: Raid tools
+
+# Part of ZacUI. It shares ZacUI's namespace (_G.ZacUI, published by
+# Core_Boot) and its saved variables; its settings live in ZacUIDB under
+# the aura engine's key and travel with that profile section.
+#
+# Zacui_Auras is an optional dependency so that, when the engine is on,
+# it has loaded first: the raid sync uses the engine's own codec and comm
+# framing.
+#
+# No media. The raid callouts are spoken by the game's text-to-speech,
+# the alert sounds are the game's own (Zacui\Core\Core_Sounds.lua), and
+# the raid mods' shapes are in Zacui_RaidMods\Media\Own.
+#
+# LibSharedMedia is embedded so ZacUI's fonts and bar textures can be
+# looked up by name whatever else is enabled; LibStub keeps the first
+# copy loaded, so this is a no-op when another addon already carries it.
+
+Libs\LibStub.lua
+Libs\CallbackHandler-1.0.lua
+Libs\LibSharedMedia-3.0.lua
+
+RaidTools.lua

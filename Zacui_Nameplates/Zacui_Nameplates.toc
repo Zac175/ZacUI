@@ -1,0 +1,33 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Nameplates|r
+## Notes: ZacUI nameplates, plate scripts, soft targeting and the crosshair. Replaces Plater.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Plater, Readycheck
+## X-ZacUI-Part: Nameplates
+
+# Part of ZacUI. These files were lifted out of the main addon so this
+# piece can be switched off in the AddOns list on its own. They share
+# ZacUI's namespace (_G.ZacUI, published by Core_Boot) and its saved
+# variables; every setting still lives in ZacUIDB and in profiles.
+# Load order within this file is the same as it was inside ZacUI.
+
+NP_PortData.lua
+NP_Core.lua
+NP_FX.lua
+NP_Health.lua
+NP_Cast.lua
+NP_Auras.lua
+NP_Extras.lua
+NP_Threat.lua
+NP_Scripts.lua
+NP_SoftTarget.lua
+NP_Debuffs.lua
+NP_Preview.lua
+Crosshair_Core.lua
+NP_Crosshair.lua
+Config_PagesNameplates.lua
+Config_PagesNPScripts.lua

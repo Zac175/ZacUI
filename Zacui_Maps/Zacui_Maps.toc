@@ -1,0 +1,31 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Maps|r
+## Notes: ZacUI world map, battlefield map and minimap markers. Replaces Leatrix Maps.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Leatrix_Maps, Questie
+## X-ZacUI-Part: Maps
+
+# Part of ZacUI. These files were lifted out of the main addon so this
+# piece can be switched off in the AddOns list on its own. They share
+# ZacUI's namespace (_G.ZacUI, published by Core_Boot) and its saved
+# variables; every setting still lives in ZacUIDB and in profiles.
+# Load order within this file is the same as it was inside ZacUI.
+
+Maps_Data.lua
+Maps_Core.lua
+Maps_Pins.xml
+Maps_Frame.lua
+Maps_Skin.lua
+Maps_Reveal.lua
+Maps_HDTiles.lua
+Maps_HD.lua
+Maps_Icons.lua
+Maps_Group.lua
+Maps_Battlefield.lua
+Maps_Module.lua
+Minimap_Pins.lua
+Config_PagesMaps.lua

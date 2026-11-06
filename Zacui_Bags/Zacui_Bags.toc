@@ -1,0 +1,22 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Bags|r
+## Notes: ZacUI combined bag and auction house.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Baganator, Syndicator, Auctionator
+## X-ZacUI-Part: Bags
+
+# Part of ZacUI. These files were lifted out of the main addon so this
+# piece can be switched off in the AddOns list on its own. They share
+# ZacUI's namespace (_G.ZacUI, published by Core_Boot) and its saved
+# variables; every setting still lives in ZacUIDB and in profiles.
+# Load order within this file is the same as it was inside ZacUI.
+
+Bags_Core.lua
+Bags_Sort.lua
+Bags_Frame.lua
+AH_Core.lua
+AH_Frame.lua

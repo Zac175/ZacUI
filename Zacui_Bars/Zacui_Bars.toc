@@ -1,0 +1,24 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Bars|r
+## Notes: ZacUI action bars and bar loadouts. Replaces Bartender4 and Myslot.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Bartender4, Myslot
+## X-ZacUI-Part: Bars
+
+# Part of ZacUI. These files were lifted out of the main addon so this
+# piece can be switched off in the AddOns list on its own. They share
+# ZacUI's namespace (_G.ZacUI, published by Core_Boot) and its saved
+# variables; every setting still lives in ZacUIDB and in profiles.
+# Load order within this file is the same as it was inside ZacUI.
+
+AB_Core.lua
+AB_ActionBars.lua
+AB_Extras.lua
+AB_Import.lua
+AB_Loadouts.lua
+AB_Preview.lua
+Config_PagesBars.lua

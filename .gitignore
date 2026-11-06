@@ -1,0 +1,8 @@
+luac.out
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini
+.release/
+ZacLayout*/

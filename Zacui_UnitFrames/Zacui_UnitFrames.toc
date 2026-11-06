@@ -1,0 +1,65 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Unit frames|r
+## Notes: ZacUI's unit frames: player, target, pet, party and raid frames with incoming heals. The addon that used to be ZacUF.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Unit Frames
+## Dependencies: Zacui
+## OptionalDeps: LibSharedMedia-3.0, ZacUF
+## X-ZacUI-Part: Unit frames
+
+# Part of ZacUI. This was the standalone ZacUF addon; it moved in whole.
+# Unlike the other parts it keeps a PRIVATE namespace (its code was written
+# against its own `ns`), reaching ZacUI through ns.ZUI (= _G.ZacUI) for the
+# config page and the header art. Its settings live in ZacUIDB.unitframes,
+# so profiles carry them; the first login adopts the old ZacUFDB when the
+# ZacUF settings-carrier addon is still installed (OptionalDeps, so it
+# loads first).
+
+# --- Client compatibility (must load before any library) ---
+# Repairs C_UnitAuras.GetAuraDataBySpellName on 1.15.9, which LibHealComm's
+# HoT tracking depends on. See Compat.lua.
+Compat.lua
+
+# --- Embedded libraries ---
+# Both heal libraries are loaded; Heal.lua picks LibHealPredict when it is
+# present and healthy, and falls back to LibHealComm otherwise. LibHealPredict
+# needs no comms, so it sees healers who run no addon at all.
+#@no-lib-strip@
+libs\Ace-3.0\LibStub\LibStub.lua
+libs\Ace-3.0\CallbackHandler-1.0\CallbackHandler-1.0.xml
+libs\LibHealPredict-1.0\LibHealPredict-1.0.lua
+libs\LibHealComm-4.0\LibHealComm-4.0.xml
+#@end-no-lib-strip@
+
+# --- Core (namespace, db, utilities, init) ---
+Core.lua
+Config.lua
+Media.lua
+Profiles.lua
+
+# --- Standalone UI toolkit (wears ZacUI's header art, otherwise its own) ---
+UI.lua
+
+# --- Incoming heals: color model, then the provider that feeds the renderer.
+#     Both must load before Elements.lua, which wires itself to ns.Heal. ---
+HealColors.lua
+Heal.lua
+
+# --- Frame building blocks + frames ---
+Elements.lua
+Glows.lua
+Units.lua
+Groups.lua
+Mock.lua
+Blizzard.lua
+ShoutAlert.lua
+LowHealth.lua
+
+# --- The settings preview's sample frames (built by the code above) ---
+Preview.lua
+
+# --- In-game configuration window + the ZacUI config page ---
+Options.lua
+MoveDialog.lua

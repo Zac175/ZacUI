@@ -1,0 +1,38 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Auras|r
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\Icons\Spell_Nature_WispSplode
+## Notes: ZacUI's aura engine: runs auras in the WeakAuras format and imports their strings. Turn it on from ZacUI's Aura engine page.
+## X-Category: Interface Enhancements
+## DefaultState: Disabled
+## SavedVariables: ZacUIAurasSaved
+## Dependencies: Zacui
+## X-ZacUI-Part: Auras
+
+# Part of ZacUI. The engine is ZacUI's own code; the auras it runs keep
+# the WeakAuras format so existing auras and strings work unchanged.
+# Media\ and PowerAurasMedia\ are the art and sounds auras name.
+
+AE_Core.lua
+AE_Load.lua
+AE_Env.lua
+AE_Text.lua
+AE_Regions.lua
+AE_Glow.lua
+AE_SubRegions.lua
+AE_Groups.lua
+AE_Display.lua
+AE_Triggers.lua
+AE_Protos.lua
+AE_TriggerAura.lua
+AE_TriggerGeneric.lua
+AE_Conditions.lua
+AE_Actions.lua
+AE_Codec.lua
+AE_Modernize.lua
+AE_Comm.lua
+AE_Edit.lua
+AE_Options.lua
+AE_OptionsTriggers.lua
+AE_Page.lua

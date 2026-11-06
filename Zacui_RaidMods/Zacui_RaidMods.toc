@@ -1,0 +1,60 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Raid mods|r
+## Notes: Boss mods for Molten Core, Blackwing Lair, Zul'Gurub, Temple of Ahn'Qiraj and Naxxramas as part of ZacUI: timers, warnings, icons, lists, raid frame and nameplate marks, driven by the combat log. ZacUI's own code - no aura engine needed.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui, Zacui_RaidTools
+## OptionalDeps: Zacui_UnitFrames, Zacui_Nameplates, LibSharedMedia-3.0, LibRangeCheck-3.0
+## X-ZacUI-Part: Raid mods
+
+# Part of ZacUI. It shares ZacUI's namespace (_G.ZacUI, published by
+# Core_Boot) and its saved variables; its settings live in ZacUIDB.raidmods.
+#
+# Zacui_RaidTools is required for the globals and slash commands the
+# modules call (/pull, /break, /range, the speech settings, the raid
+# sync), and it carries LibSharedMedia. The unit frames and nameplates
+# are optional: the marks that ride on them simply have nowhere to go
+# without them.
+#
+# Sounds are the game's own: callouts are spoken with text-to-speech
+# ("tts:..."), alerts are the game's interface sounds ("ui:..."), see
+# Zacui\Core\Core_Sounds.lua. Media\Own\ holds ZacUI's own shapes
+# (rings, circles, glows, the Thaddius arrow). Libs\ carries the
+# aura engine's LibCustomGlow (the real pixel / autocast glows) and
+# LibRangeCheck (one range check the MC pack makes), so neither depends
+# on the aura engine being enabled.
+
+# LIBRARIES (LibStub keeps the first copy loaded)
+Libs\LibStub.lua
+Libs\CallbackHandler-1.0.lua
+Libs\LibRangeCheck-3.0.lua
+Libs\LibCustomGlow-1.0.lua
+
+# THE ENGINE
+RM_Core.lua
+RM_Triggers.lua
+RM_Widgets.lua
+RM_Anchors.lua
+RM_Config.lua
+# hand-written helpers on top of the packs (Razuvious on you)
+RM_Extras.lua
+
+# How a raid module is put together, and the behaviours they share
+RM_Own.lua
+RM_OwnKit.lua
+
+# THE RAIDS: settings (<RAID>_Data) and behaviour (<RAID>)
+Own\MC_Data.lua
+Own\MC.lua
+Own\BWL_Data.lua
+Own\BWL.lua
+Own\ZG_Data.lua
+Own\ZG.lua
+Own\AQ40_Data.lua
+Own\AQ40.lua
+Own\NX_Data.lua
+Own\NX.lua
+Own\PullTimers_Data.lua
+Own\PullTimers.lua

@@ -1,0 +1,26 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Meter|r
+## Notes: ZacUI damage meter and threat windows. Replaces Details!.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Details
+## X-ZacUI-Part: Meter
+
+# Part of ZacUI. These files were lifted out of the main addon so this
+# piece can be switched off in the AddOns list on its own. They share
+# ZacUI's namespace (_G.ZacUI, published by Core_Boot) and its saved
+# variables; every setting still lives in ZacUIDB and in profiles.
+# Load order within this file is the same as it was inside ZacUI.
+
+Meter_Data.lua
+Meter_Combat.lua
+Meter_Parser.lua
+Meter_Windows.lua
+Meter_Threat.lua
+Meter_ThreatGlow.lua
+Meter_Info.lua
+Meter_RaidSummary.lua
+Config_PagesMeter.lua

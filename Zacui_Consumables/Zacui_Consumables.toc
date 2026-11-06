@@ -1,0 +1,24 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Consumables|r
+## Notes: ZacUI consumable bars: flasks, elixirs, food and jujus, potions, weapon stones and oils - one click each. Readycheck's consumables, potion and weapon bars, ZacUI's way.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: Readycheck
+## X-ZacUI-Part: Consumables
+
+# Part of ZacUI. Shares ZacUI's namespace (_G.ZacUI, published by
+# Core_Boot) and its saved variables (ZacUIDB.consbars, a profile
+# section; each bar's spot is its mover's, ZacUIDB.movers.consbars_<bar>).
+# Every bar is off until turned on. Readycheck keeps its own bars; the
+# page copies their settings over and can switch Readycheck's off.
+
+CB_Data.lua
+CB_Core.lua
+CB_Button.lua
+CB_Voice.lua
+CB_Bars.lua
+CB_Import.lua
+CB_Config.lua

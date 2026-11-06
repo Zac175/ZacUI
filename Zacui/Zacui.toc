@@ -1,0 +1,203 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI
+## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## SavedVariables: ZacUIDB
+## SavedVariablesPerCharacter: ZacUICharDB
+## X-Category: Interface Enhancements
+## OptionalDeps: LibSharedMedia-3.0, ButtonStash, Readycheck
+
+# ============================================================
+# LOAD ORDER IS THE ARCHITECTURE.
+# Files share state through the `ns` table: each one declares
+# `local Foo = ns.Foo` at the top for what it needs, and
+# `ns.Bar = Bar` at the bottom for what it provides. A local is
+# only bound to what ns held AT LOAD TIME, so a file can never
+# be moved above the file that publishes what it imports.
+# The four tiers below are ordered by that dependency, not by
+# folder:
+#   Core       palette, fonts, the module registry
+#   UI         the primitives that skin and the widgets we build
+#   Modules    one file per surface, each registering into Modules
+#   Boot       apply, config UI, events, slash
+#
+# THE PARTS. The big self-contained pieces live in their own addons
+# next to this one, each a tick box in the AddOns list:
+#   Zacui_Bars        action bars + bar loadouts   (Bartender4, Myslot)
+#   Zacui_Bags        combined bag + auction house
+#   Zacui_Nameplates  nameplates, plate scripts, soft target, crosshair
+#   Zacui_Meter       damage meter + threat         (Details!)
+#   Zacui_Maps        world/battlefield map + minimap markers
+#   Zacui_RaidMods    boss mods for the classic raids PRIVATE
+#   Zacui_WorldMap    the seamless stitched world map  (OpenMap, MIT)
+#   Zacui_QoL         quality of life               (Leatrix Plus)
+#   Zacui_Windows     the rebuilt game windows
+#   Zacui_HUD         class HUDs + Drink Ticker
+#   Zacui_UnitFrames  unit frames + incoming heals   (was ZacUF; own namespace)
+#   Zacui_Auras       the aura engine (runs WeakAuras-format auras)
+#   Zacui_RaidTools   /pull /break /range, raid sync, speech settings
+#   Zacui_SBT         scrolling combat text
+# They depend on this addon, load after all of it, and share its
+# namespace (_G.ZacUI, published by Core_Boot) and its saved variables,
+# so a setting is a setting wherever the code that reads it lives. Core
+# never binds a part's symbol at load time - it looks it up when it
+# needs it and copes with it being absent.
+# ============================================================
+
+# ---------- Libraries ----------
+# LibStub, CallbackHandler, LibDataBroker and LibDBIcon: the minimap
+# button is a LibDBIcon button so every button collector treats it like
+# any other. LibStub picks the newest copy of each across all addons.
+# WoW Forever: the old API names, put back where that client removed them (nothing on Era)
+Core\Core_Forever.lua
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+
+# ---------- Core ----------
+Core\Core_Boot.lua
+# Which game this is (Classic Era, TBC, Forever) and what is off on each.
+# Right after Boot: every later file and every part may ask.
+Core\Core_Flavor.lua
+Core\Core_Colors.lua
+Core\Core_MediaNames.lua
+Core\Core_Sounds.lua
+Core\Core_Fonts.lua
+Core\Core_Registry.lua
+Core\Core_Profiles.lua
+Core\Core_SharedMedia.lua
+Core\Core_Media.lua
+Core\Core_Services.lua
+Core\Core_Encounter.lua
+
+# ---------- UI framework ----------
+# Base before Widgets before Panels: each layer calls down, never up.
+UI\Framework\UIF_Base.lua
+UI\Framework\UIF_Widgets.lua
+UI\Framework\UIF_Panels.lua
+UI\Framework\UIF_Bars.lua
+UI\Framework\UIF_Anim.lua
+# The "a setting changed" signal and the defaults helpers. Before
+# Controls, whose widgets raise the signal.
+UI\Framework\UIF_Settings.lua
+UI\Framework\UIF_Controls.lua
+UI\Framework\UIF_Dialogs.lua
+# Colour, font, texture and animation pickers. After Controls (built
+# from its widgets) and Anim (the animation picker plays ns.Motion).
+UI\Framework\UIF_Pickers.lua
+# The customization standard: one saved shape per family (anchor, frame
+# position, layout, visibility, chrome, per-state styles, text format,
+# sound) with its runtime helper, then the pickers that edit them. After
+# Pickers (built from them) and Anim (FadeTo, Play).
+UI\Framework\UIF_Custom.lua
+UI\Framework\UIF_CustomUI.lua
+UI\Framework\UIF_Pool.lua
+UI\Framework\UIF_Movers.lua
+# Every mover at once over a grid, with the control box. After Movers
+# (it drives the registry) and Controls (it is built from the widgets).
+UI\Framework\UIF_EditMode.lua
+
+# ---------- Minimap button tray ----------
+UI\Tray\Tray_Buttons.lua
+
+# ---------- Aura engine ----------
+# The switch in front of ZacUI's aura engine (the Zacui_Auras part, off
+# by default) and the Auras page while it is off.
+UI\Auras\Auras_Core.lua
+
+# ---------- Blizzard skin modules ----------
+# Hooks first - later modules inherit its self-skinning behaviour.
+Modules\Blizzard\Blz_Hooks.lua
+Modules\Blizzard\Blz_Minimap.lua
+Modules\Blizzard\Blz_Chat.lua
+Modules\Blizzard\Blz_RaidTimer.lua
+Modules\Blizzard\Blz_Tooltip.lua
+Modules\Blizzard\Blz_Auras.lua
+Modules\Blizzard\Blz_ActionBars.lua
+Modules\Blizzard\Blz_UnitFrames.lua
+Modules\Blizzard\Blz_Dialogs.lua
+Modules\Blizzard\Blz_GameMenu.lua
+Modules\Blizzard\Blz_Vendor.lua
+Modules\Blizzard\Blz_Character.lua
+Modules\Blizzard\Blz_Windows.lua
+Modules\Blizzard\Blz_Gossip.lua
+Modules\Blizzard\Blz_LootRoll.lua
+Modules\Blizzard\Blz_AddonList.lua
+Modules\Blizzard\Blz_World.lua
+Modules\Blizzard\Blz_Misc.lua
+Modules\Blizzard\Blz_Options.lua
+Modules\Blizzard\Blz_LoDPanels.lua
+
+# ---------- Third-party addon skins ----------
+
+# ---------- The generic classifier ----------
+# Last of the modules: it should meet a UI the named modules have
+# already claimed, so its rules only handle the long tail.
+Modules\Mod_Classifier.lua
+
+# ---------- Boot: apply + identify ----------
+# Both load before the config UI, which reads from them.
+Boot\Boot_Apply.lua
+Boot\Boot_Identify.lua
+
+# ---------- Minimap options ----------
+# Preferences on top of the Blizzard minimap skin. Before the config
+# window, which reads ns.MinimapOptions to build its page.
+UI\Minimap\Minimap_Options.lua
+
+# ---------- Config window ----------
+UI\Config\Config_Base.lua
+UI\Config\Config_Search.lua
+# The preview dock pages declare with L:Preview. Before the window,
+# which drives it around every page build.
+UI\Config\Config_Preview.lua
+UI\Config\Config_Window.lua
+UI\Config\Config_PagesMain.lua
+UI\Config\Config_PagesStyle.lua
+UI\Config\Config_PagesMotion.lua
+UI\Config\Config_PagesMinimap.lua
+# General > Game versions: what runs on Era, TBC and Forever, and the
+# "Test as" override.
+UI\Config\Config_PagesFlavor.lua
+# Draws AceConfig-shaped option tables in ZacUI widgets (the aura engine's
+# editor and the world map's options use it).
+UI\Config\Config_AceRender.lua
+UI\Config\Config_Import.lua
+UI\Config\Config_Profiles.lua
+
+# ---------- Changelog ----------
+# The version history (data, newest first), then the popup after an
+# update and the General > Changelog page.
+UI\Changelog\Changelog_Data.lua
+UI\Changelog\Changelog.lua
+
+# ---------- Tutorial ----------
+# The first-run welcome and its bookkeeping, quick setup, and the guided
+# tour of the settings window. After every config page and the changelog
+# (the tour opens them and lights their parts; Tour wraps two Layout
+# methods to see what a page builds), before Boot_Events, whose
+# ADDON_LOADED notes whether this is a fresh install.
+UI\Tutorial\Tutorial_Core.lua
+UI\Tutorial\Tutorial_Setup.lua
+UI\Tutorial\Tutorial_Tour.lua
+
+# ---------- Minimap button ----------
+# After the config window: its menu is built from ns.ConfigMenu and opens
+# pages through ns.OpenConfig.
+UI\Minimap\Minimap_Button.lua
+
+# ---------- Boot: events + slash ----------
+# Dead last among ZacUI's own files. Events fires the whole apply pass;
+# slash needs the config window to already exist.
+Boot\Boot_Events.lua
+Boot\Boot_Slash.lua
+
+# Bindings.xml (key names for bars 2 and 7-10, used by Zacui_Bars) is NOT
+# listed here: the client picks a Bindings.xml up from the addon folder by
+# itself, and one loaded as an ordinary UI file only produces "Unrecognized
+# XML" warnings. It stays in THIS folder: the client expects it where it
+# first found it and warns "Couldn't open Zacui/Bindings.xml" otherwise.

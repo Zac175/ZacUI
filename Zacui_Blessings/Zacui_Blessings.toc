@@ -1,0 +1,24 @@
+## Interface: 11509, 20506, 16001
+## Title: ZacUI |cff33ff99Blessings|r
+## Notes: ZacUI paladin blessings: who blesses which class, the casting bar, auras. Talks to paladins running PallyPower. Replaces PallyPower.
+## Author: Zac
+## Version: 2.0.0
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## OptionalDeps: PallyPower
+## X-ZacUI-Part: Blessings
+
+# Part of ZacUI. Shares ZacUI's namespace (_G.ZacUI, published by
+# Core_Boot) and its saved variables (ZacUIDB.blessings, this paladin's
+# own assignments in ZacUICharDB.blessings). Speaks the "PLPWR" addon
+# channel, so PallyPower users in the group see and set the same
+# assignments.
+
+BL_Data.lua
+BL_Core.lua
+BL_Comm.lua
+BL_Bar.lua
+BL_Grid.lua
+BL_Import.lua
+BL_Config.lua
