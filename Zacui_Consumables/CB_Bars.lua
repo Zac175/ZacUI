@@ -237,6 +237,7 @@ local function NewButton(key, id)
     -- the click marks the use, so the swirl lands on this button
     b:HookScript("PreClick", function(self)
         Live.lastUse, Live.lastUseId = GetTime(), self.itemId
+        CB.NoteNamedUse(self.itemId)
         Live.StartFast()
     end)
     -- right click: the stone picker on a weapon button, the pick of a
@@ -746,10 +747,15 @@ end
 -- ============================================================
 local lastConsumables
 local function ConsumableBuffs()
-    local ids = CB.BuffMaps()
+    local ids, names = CB.BuffMaps()
     local out = {}
     for sid, a in pairs(ids) do
         if D.BY_BUFF[sid] then out[sid] = tonumber(a.expirationTime) or 0 end
+    end
+    -- (TBC / Forever: the buffs known only by name, keyed by that name)
+    for n in pairs(D.BY_BUFF_NAME or {}) do
+        local a = names[n]
+        if a and not (a.spellId and D.BY_BUFF[a.spellId]) then out[n] = tonumber(a.expirationTime) or 0 end
     end
     return out
 end
@@ -769,7 +775,7 @@ function Live.CheckAuras()
     CB.ClearGroupCache()
     if InCombatLockdown() then
         for _, sid in ipairs(gained or {}) do
-            for _, id in ipairs(D.BY_BUFF[sid] or {}) do Live.Spend(id) end
+            for _, id in ipairs(D.BY_BUFF[sid] or (D.BY_BUFF_NAME and D.BY_BUFF_NAME[sid]) or {}) do Live.Spend(id) end
         end
         Live.pending.main, Live.pending.potions = true, true
         -- a buff gone mid-fight still shows: the bar comes back (alpha)
@@ -918,7 +924,7 @@ end
 -- bar key, a /use macro) still marks the item, so its swirl shows
 local function MarkUse(id)
     if type(id) ~= "number" then return end
-    if D.BY_ID[id] then Live.lastUse, Live.lastUseId = GetTime(), id end
+    if D.BY_ID[id] then Live.lastUse, Live.lastUseId = GetTime(), id CB.NoteNamedUse(id) end
 end
 if C_Container and C_Container.UseContainerItem and hooksecurefunc then
     hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)

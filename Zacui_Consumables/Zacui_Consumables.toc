@@ -15,6 +15,8 @@
 # Every bar is off until turned on. Readycheck keeps its own bars; the
 # page copies their settings over and can switch Readycheck's off.
 
+CB_Data_TBC.lua
+CB_Data_Forever.lua
 CB_Data.lua
 CB_Core.lua
 CB_Button.lua

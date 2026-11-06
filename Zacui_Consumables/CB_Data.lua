@@ -9,6 +9,8 @@
 -- stone variant), enchantId (an oil: the enchant it puts on), class (only
 -- that class carries it), noBar (never a bar button), minAbsorb /
 -- maxAbsorb / school (a protection potion's shield).
+-- TBC and Forever have their own tables (CB_Data_TBC / CB_Data_Forever),
+-- put in place of these at the end of this file; see there.
 
 local ADDON_NAME = ...
 local ns = _G.ZacUI
@@ -399,9 +401,13 @@ end
 function D.ShortName(full)
     if not full then return "" end
     local s = full
+    -- (TBC / Forever: their own leading words go too, before and after)
+    local extra = D.SHORT_STRIP
+    if extra then for _, p in ipairs(extra) do s = s:gsub(p, "") end end
     s = s:gsub("^Greater%s+", ""):gsub("^Lesser%s+", ""):gsub("^Elixir%s+of%s+the%s+", "")
     s = s:gsub("^Elixir%s+of%s+", ""):gsub("^Flask%s+of%s+", ""):gsub("^Juju%s+", "")
     s = s:gsub("^Spirit%s+of%s+", ""):gsub("^Scroll%s+of%s+", ""):gsub("^Potion%s+of%s+", "")
+    if extra then for _, p in ipairs(extra) do s = s:gsub(p, "") end end
     s = s:gsub("%s+Potion$", ""):gsub("%s+Elixir$", ""):gsub("%s+Protection$", "Prot")
     if #s > 7 then
         local first = s:match("^(%S+)")
@@ -409,4 +415,82 @@ function D.ShortName(full)
     end
     if #s > 7 then s = s:sub(1, 6) .. "." end
     return s
+end
+
+-- ============================================================
+-- TBC AND FOREVER - their own items (CB_Data_TBC / CB_Data_Forever)
+-- ============================================================
+-- Classic Era keeps every table above exactly as it is. On TBC or
+-- Forever (the client, or the game-version override) that game's file
+-- left its tables here at load, and they take the place of Era's before
+-- anything reads them; the lookups are built again from them. Fields
+-- only those games have:
+--   D.FLAVOR          "tbc" | "forever" (nil on Classic Era)
+--   it.buffName       a buff known only by its name (no spell id): the
+--                     bars match it by name (D.BY_BUFF_NAME)
+--   D.GROUP_BLOCKS    group -> the groups whose buffs it clashes with too
+--                     (TBC: a flask fills both elixir slots)
+--   D.DEFAULT_STONE   the weapon buttons' stone when none is picked
+--   D.EATING_IDS / D.EATING_NAMES   the eating aura
+--   D.SHORT_STRIP     leading words a button's short label drops
+--   D.PREVIEW         the settings preview's made-up bags and buffs
+-- A saved pick of an item this game does not have stays saved (and comes
+-- back on Classic Era); it is just not shown.
+do
+    local flavor = ns.Flavor and ns.Flavor()
+    local F = ns.ConsFlavorData and ns.ConsFlavorData[flavor]
+    ns.ConsFlavorData = nil
+    if F then
+        D.FLAVOR = flavor
+        local eraStone = D.STONE_BY_ID
+        local names = {}
+        for k, v in pairs(D.CATEGORY_NAMES) do names[k] = v end
+        for k, v in pairs(F.CATEGORY_NAMES or {}) do names[k] = v end
+        for k, v in pairs(F) do D[k] = v end
+        D.CATEGORY_NAMES = names
+        for _, cat in ipairs(D.CATEGORY_KEYS) do D.ITEMS[cat] = D.ITEMS[cat] or {} end
+
+        -- a class's (or a race's) own rows go to that class only
+        local myClass, myRace
+        if UnitClass then myClass = select(2, UnitClass("player")) end
+        if UnitRace then myRace = select(2, UnitRace("player")) end
+        for _, items in pairs(D.ITEMS) do
+            for id, it in pairs(items) do
+                if (it.class and myClass and it.class ~= myClass) or (it.race and myRace and it.race ~= myRace) then
+                    items[id] = nil
+                end
+            end
+        end
+        if ns.FeatureOn and not ns.FeatureOn("chronoboon") then
+            for id in pairs(D.ITEMS.chronoboon) do D.ITEMS.chronoboon[id] = nil end
+        end
+
+        -- the lookups: id -> item, id -> category, buff id -> item ids, a
+        -- buff's lower-case name -> item ids (the rows with no buff id)
+        D.BY_ID, D.CATEGORY_OF, D.BY_BUFF, D.BY_BUFF_NAME = {}, {}, {}, {}
+        for _, cat in ipairs(D.CATEGORY_KEYS) do
+            for id, it in pairs(D.ITEMS[cat]) do
+                D.BY_ID[id], D.CATEGORY_OF[id] = it, cat
+                if it.buffId then
+                    D.BY_BUFF[it.buffId] = D.BY_BUFF[it.buffId] or {}
+                    table.insert(D.BY_BUFF[it.buffId], id)
+                elseif it.buffName then
+                    local n = it.buffName:lower()
+                    D.BY_BUFF_NAME[n] = D.BY_BUFF_NAME[n] or {}
+                    table.insert(D.BY_BUFF_NAME[n], id)
+                end
+            end
+        end
+        D.GROUP_OF = {}
+        for g, set in pairs(D.CONFLICT) do for id in pairs(set) do D.GROUP_OF[id] = g end end
+
+        -- the picker rows wear the colour of the Era row they name
+        D.STONE_BY_ID, D.POISON_KIND = {}, {}
+        for _, s in ipairs(D.STONES) do
+            local from = s.colorOf and eraStone[s.colorOf]
+            s.color = s.color or (from and from.color) or eraStone[18262].color
+            D.STONE_BY_ID[s.id] = s
+            if s.poison then D.POISON_KIND[s.id] = s.poison end
+        end
+    end
 end

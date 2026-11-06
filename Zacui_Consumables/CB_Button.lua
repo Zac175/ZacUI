@@ -557,6 +557,8 @@ local function OwnState(button, w)
     end
     local it = D.BY_ID[cid] or data
     if it.buffId then return w.Buff(it.buffId) end
+    -- (TBC / Forever: a buff known only by its name)
+    if it.buffName and w.NamedBuff then return w.NamedBuff(it.buffName, cid) end
     return false, 0
 end
 B.OwnState = OwnState

@@ -130,6 +130,53 @@ WH.POTION_LIST = {
     { id = 118,   icon = 134829 }, -- Minor Healing Potion
 }
 
+-- TBC and Forever (the client, or the game-version override): that game's
+-- potions join the list (from the consumables catalogue,
+-- zui_tests/consumes), so the Automatic icon finds them; Classic Era's
+-- stay, they are still in both games. The picker keeps Era's entries.
+-- The icon is the game's, or an Era potion's look on a client that does
+-- not know the item. Classic Era: nothing changes.
+do
+    local fl = ns.Flavor and ns.Flavor()
+    local MANA, BURST, HEAL = 134856, 134821, 134834
+    local MORE = {
+        tbc = { before = {
+            { 31677, MANA },  -- Fel Mana Potion
+            { 22832, MANA },  -- Super Mana Potion
+            { 32948, MANA },  -- Auchenai Mana Potion
+            { 32902, MANA },  -- Bottled Nethergon Energy
+            { 22838, BURST }, -- Haste Potion
+            { 22828, BURST }, -- Insane Strength Potion
+            { 22837, BURST }, -- Heroic Potion
+            { 22839, BURST }, -- Destruction Potion
+            { 22849, BURST }, -- Ironshield Potion
+            { 22829, HEAL },  -- Super Healing Potion
+            { 32947, HEAL },  -- Auchenai Healing Potion
+            { 32905, HEAL },  -- Bottled Nethergon Vapor
+        } },
+        forever = { before = {
+            { 250943, BURST }, -- Major Frenzy Potion
+            { 250942, BURST }, -- Superior Frenzy Potion
+            { 250937, MANA },  -- Major Spellblasting Potion
+            { 250936, MANA },  -- Superior Spellblasting Potion
+            { 250949, HEAL },  -- Major Mender's Potion
+            { 250948, HEAL },  -- Superior Mender's Potion
+        }, after = {
+            { 247242, HEAL },  -- Superior Discolored Healing Potion
+            { 274935, HEAL },  -- Tessa's Tonic
+        } },
+    }
+    local m = fl and MORE[fl]
+    if m then
+        local function Row(e) return { id = e[1], icon = (GetItemIcon and GetItemIcon(e[1])) or e[2] } end
+        local list = {}
+        for _, e in ipairs(m.before or {}) do list[#list + 1] = Row(e) end
+        for _, e in ipairs(WH.POTION_LIST) do list[#list + 1] = e end
+        for _, e in ipairs(m.after or {}) do list[#list + 1] = Row(e) end
+        WH.POTION_LIST = list
+    end
+end
+
 -- Dropdown index -> item (aura_env.dropdownMap). Index 1 = automatic.
 WH.POTION_DROPDOWN = {
     [1]  = nil,                            -- Automatic Icon

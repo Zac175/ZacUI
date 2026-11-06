@@ -58,25 +58,40 @@ end
 function V.Tick(now)
     local c = CB.Cfg()
     local seen = {}
-    local ids = CB.BuffMaps()
+    local ids, names = CB.BuffMaps()
+    -- (shared: the buff's own name said once, not each item's)
+    local function Watch(items, exp, shared)
+        local rem = exp - now
+        for _, id in ipairs(items) do
+            local key = BarOf(id)
+            local cfg = c[key]
+            if cfg and cfg.enabled and cfg.tts then
+                local thr = tonumber(cfg.showBeforeExpiry) or 60
+                seen[id] = rem
+                local p = prev[id]
+                if rem > 0 and rem <= thr and p ~= nil and p > thr and V.ItemOn(id) then
+                    if not shared then V.Say(V.Text(id, D.BY_ID[id] and D.BY_ID[id].name))
+                    elseif shared ~= true then V.Say(shared) shared = true end
+                end
+            end
+        end
+    end
     -- buffs entering their bar's warning time
     for sid, a in pairs(ids) do
         local items = D.BY_BUFF[sid]
         local exp = tonumber(a.expirationTime) or 0
-        if items and exp > 0 then
-            local rem = exp - now
-            for _, id in ipairs(items) do
-                local key = BarOf(id)
-                local cfg = c[key]
-                if cfg and cfg.enabled and cfg.tts then
-                    local thr = tonumber(cfg.showBeforeExpiry) or 60
-                    seen[id] = rem
-                    local p = prev[id]
-                    if rem > 0 and rem <= thr and p ~= nil and p > thr and V.ItemOn(id) then
-                        V.Say(V.Text(id, D.BY_ID[id] and D.BY_ID[id].name))
-                    end
-                end
-            end
+        if items and exp > 0 then Watch(items, exp) end
+    end
+    -- (TBC / Forever: the buffs known only by name; one shared by several
+    -- items speaks for the one last used, or says the buff's name once
+    -- while that is not known)
+    for n, items in pairs(D.BY_BUFF_NAME or {}) do
+        local a = names[n]
+        local exp = a and tonumber(a.expirationTime) or 0
+        if exp > 0 and not (a.spellId and D.BY_BUFF[a.spellId]) then
+            local owner = CB.NamedOwner and CB.NamedOwner(n)
+            if owner or #items == 1 then Watch({ owner or items[1] }, exp)
+            else Watch(items, exp, D.SpokenName(a.name or n)) end
         end
     end
     -- gone: the repeats start

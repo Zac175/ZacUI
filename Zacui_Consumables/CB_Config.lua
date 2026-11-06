@@ -123,6 +123,13 @@ local FAKE_COUNTS = {
 -- minutes, the off hand's poison down to its last charges
 local FAKE_BUFFS = { running = { [17538] = 40, [16323] = 1500, [25661] = 600, [24383] = 2400 },
     low = { [17538] = 12, [16323] = 1500 } }
+-- TBC / Forever (the client, or the game-version override): that game's
+-- items in the same states (CB_Data_TBC / CB_Data_Forever)
+local FAKE_ENCHANT = 2506
+if D.PREVIEW then
+    FAKE_COUNTS, FAKE_BUFFS, FAKE_ENCHANT = D.PREVIEW.counts, D.PREVIEW.buffs, D.PREVIEW.enchant or 2506
+    for id, icon in pairs(D.PREVIEW.icons or {}) do ICONS[id] = icon end
+end
 local fakeMode = "ready"
 function Fake.Now() return GetTime() end
 function Fake.Count(id) return FAKE_COUNTS[id] or 0 end
@@ -132,11 +139,26 @@ function Fake.Buff(buffId)
     if r then return true, r end
     return false, 0
 end
-function Fake.ItemBuff(id) local it = D.BY_ID[id] return Fake.Buff(it and it.buffId) end
+-- (a buff known only by its name: by its lower-case name)
+function Fake.NamedBuff(name)
+    return Fake.Buff(name and name:lower())
+end
+function Fake.ItemBuff(id)
+    local it = D.BY_ID[id]
+    if it and it.buffId == nil and it.buffName then return Fake.NamedBuff(it.buffName) end
+    return Fake.Buff(it and it.buffId)
+end
 function Fake.GroupBuff(g)
     for id in pairs(D.CONFLICT[g] or {}) do
         local h, r = Fake.ItemBuff(id)
         if h then return true, r, id end
+    end
+    -- (TBC: a flask fills both elixir slots, as the live bar reads it)
+    for _, og in ipairs(D.GROUP_BLOCKS and D.GROUP_BLOCKS[g] or {}) do
+        for id in pairs(D.CONFLICT[og] or {}) do
+            local h, r = Fake.ItemBuff(id)
+            if h then return true, r, id end
+        end
     end
     return false, 0, nil
 end
@@ -147,12 +169,14 @@ end
 function Fake.Enchant(slot)
     if fakeMode == "low" then
         -- (as the live reader says it: a poison at its last charges reads 5 s)
-        if slot == "mainhand" then return true, 240, 2506, 0, false, 240 end
+        if slot == "mainhand" then return true, 240, FAKE_ENCHANT, 0, false, 240 end
+        -- (TBC's poisons have no charges: no last charges to show)
+        if (D.POISON_LOW_CHARGES or 10) <= 0 then return true, 1500, nil, 0, false, 1500 end
         return true, 5, nil, (D.POISON_LOW_CHARGES or 10) - 2, true, 1500
     end
     if fakeMode ~= "running" then return false, 0, nil, 0 end
-    if slot == "mainhand" then return true, 1200, 2506, 0 end
-    return true, 35, 2506, 0
+    if slot == "mainhand" then return true, 1200, FAKE_ENCHANT, 0 end
+    return true, 35, FAKE_ENCHANT, 0
 end
 function Fake.BagEnchant() return false, 0 end
 local SWORD, DAGGER = "Interface\\Icons\\INV_Sword_39", "Interface\\Icons\\INV_Weapon_ShortBlade_16"
@@ -171,7 +195,8 @@ function Fake.ItemName(id) local it = D.BY_ID[id] return it and it.name end
 function Fake.ItemIcon(id)
     local live = GetItemIcon and id and GetItemIcon(id)
     if live then return live end
-    return "Interface\\Icons\\" .. (ICONS[id] or "INV_Misc_QuestionMark")
+    local cat = D.PREVIEW and D.PREVIEW.catIcons and D.CATEGORY_OF[id]
+    return "Interface\\Icons\\" .. (ICONS[id] or (cat and D.PREVIEW.catIcons[cat]) or "INV_Misc_QuestionMark")
 end
 CB.FakeWorld = Fake
 
@@ -468,16 +493,23 @@ local function Tab_items(L)
         if not seen[k] then order[#order + 1] = k seen[k] = true end
     end
     local items = {}
+    -- (TBC / Forever: a saved place of an item this game does not have
+    -- stays in the saved order, unlisted)
+    local custom = CB.T(c, "customItems")
+    local function Here(id)
+        return not D.FLAVOR or id == CB.MH or id == CB.OH or id == 999903 or D.BY_ID[id] ~= nil
+            or (custom and (custom[id] or custom[tostring(id)])) and true or false
+    end
     for _, id in ipairs(order) do
         local label = (id == CB.MH and "Main hand stone") or (id == CB.OH and "Off hand stone")
             or (id == 999903 and "Bag weapons") or ItemName(id)
-        items[#items + 1] = { value = id, text = label }
+        if Here(id) then items[#items + 1] = { value = id, text = label } end
     end
     if #items == 0 then
         L:Desc("Nothing on the bar yet: the order follows the items you carry.")
     else
         local pick = Cfg().consOrderPick
-        if not seen[pick] then pick = items[1].value end
+        if not seen[pick] or not Here(pick) then pick = items[1].value end
         Drop(L, "Item", items, function() return pick end, function(v) Cfg().consOrderPick = v Rebuild() end)
         local function Move(d)
             local at
@@ -577,7 +609,9 @@ local function Tab_items(L)
     -- what the voice says for one item
     L:Card("What the voice says")
     local vitems = {}
-    for _, e in ipairs(list) do if e.data.buffId then vitems[#vitems + 1] = { value = e.id, text = e.data.name } end end
+    for _, e in ipairs(list) do
+        if e.data.buffId or e.data.buffName then vitems[#vitems + 1] = { value = e.id, text = e.data.name } end
+    end
     if #vitems > 0 then
         local vid = Cfg().consVoiceItem
         local okV = false
@@ -622,7 +656,7 @@ local function Tab_weapons(L)
     L:Card("The stone or oil")
     local stones = {}
     for _, s in ipairs(D.STONES) do stones[#stones + 1] = { value = s.id, text = CB.StoneName(s.id) } end
-    Drop(L, "Put on", stones, function() return g.stone or 18262 end, function(v) g.stone = v end, 260)
+    Drop(L, "Put on", stones, function() return g.stone or D.DEFAULT_STONE or 18262 end, function(v) g.stone = v end, 260)
     L:Desc("Right click a weapon button to change it there. Not in your bags: the best one you carry.")
     Check(L, "Weapon icons on the hand buttons", g.weaponIcons ~= false, function(v) g.weaponIcons = v and true or false end,
         "Off: the stone's icon. Both bars.")

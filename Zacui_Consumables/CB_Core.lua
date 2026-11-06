@@ -53,7 +53,7 @@ local function Merge(base, extra)
     return t
 end
 CB.DEFAULTS = {
-    stone = 18262,              -- the stone / oil the weapon buttons put on
+    stone = D.DEFAULT_STONE or 18262,   -- the stone / oil the weapon buttons put on
     weaponIcons = true,         -- the hand buttons show the weapon, not the stone
     potionReadyTTS = false,     -- "Potion ready" when the potion cooldown ends
     ttsRepeat = false, ttsRepeatCount = 1, ttsRepeatInterval = 60,
@@ -250,7 +250,37 @@ function W.Buff(buffId)
 end
 function W.ItemBuff(id)
     local it = D.BY_ID[id] or (CB._custom and CB._custom[id])
+    if it and it.buffId == nil and it.buffName then return W.NamedBuff(it.buffName, id) end
     return W.Buff(it and it.buffId)
+end
+
+-- TBC / Forever: a buff known only by its name (Forever's "Well Fed").
+-- Never another consumable's buff that has an id (TBC's foods are "Well
+-- Fed" too). Several items sharing the name: the one last used owns it;
+-- none used yet, each of them reads it.
+local namedLast = {}
+function CB.NoteNamedUse(id)
+    local it = id and D.BY_ID[id]
+    if it and it.buffId == nil and it.buffName then namedLast[it.buffName:lower()] = id end
+end
+-- the item a name-only buff belongs to (nil: not known which)
+function CB.NamedOwner(lname)
+    local id = namedLast[lname]
+    local list = D.BY_BUFF_NAME and D.BY_BUFF_NAME[lname]
+    if not (id and list) then return nil end
+    for _, x in ipairs(list) do if x == id then return id end end
+    return nil
+end
+function W.NamedBuff(name, id)
+    if not name then return false, 0 end
+    local _, names = BuffMaps()
+    local lname = name:lower()
+    local a = names[lname]
+    if not a or (a.spellId and D.BY_BUFF[a.spellId]) then return false, 0 end
+    local owner = id and CB.NamedOwner(lname)
+    if owner and owner ~= id then return false, 0 end
+    local exp = tonumber(a.expirationTime) or 0
+    return true, exp > 0 and (exp - GetTime()) or 0
 end
 
 -- a clash group's live member: a rival's buff, or the explosives' shared
@@ -276,6 +306,16 @@ function W.GroupBuff(g)
             if not has then
                 local h, r = W.ItemBuff(id)
                 if h then has, rem, who = true, r, id end
+            end
+        end
+        -- TBC: a flask fills both elixir slots (and an elixir the flask's)
+        local also = D.GROUP_BLOCKS and D.GROUP_BLOCKS[g]
+        for _, og in ipairs(also or {}) do
+            for id in pairs(D.CONFLICT[og] or {}) do
+                if not has then
+                    local h, r = W.ItemBuff(id)
+                    if h then has, rem, who = true, r, id end
+                end
             end
         end
     end
@@ -417,10 +457,16 @@ function W.GCD()
 end
 function W.Eating()
     if InCombatLockdown() then return false, 0 end
-    local ids = BuffMaps()
+    local ids, names = BuffMaps()
     local now = GetTime()
-    for _, sid in ipairs({ 24800, 18124 }) do
+    for _, sid in ipairs(D.EATING_IDS or { 24800, 18124 }) do
         local a = ids[sid]
+        local exp = a and tonumber(a.expirationTime) or 0
+        if exp > now then return true, exp - now end
+    end
+    -- (TBC / Forever: the eating aura by its name too)
+    for _, n in ipairs(D.EATING_NAMES or {}) do
+        local a = names[n]
         local exp = a and tonumber(a.expirationTime) or 0
         if exp > now then return true, exp - now end
     end
@@ -466,10 +512,10 @@ function CB.ValidStone(slot, w)
             end
         end
     end
-    local cur = c.stone or 18262
+    local cur = c.stone or D.DEFAULT_STONE or 18262
     if w.Count(cur) > 0 then return cur end
     for _, s in ipairs(D.STONES) do if w.Count(s.id) > 0 then return s.id end end
-    return 18262
+    return D.DEFAULT_STONE or 18262
 end
 function CB.StoneName(id)
     if D.STONE_NAMES[id] then return D.STONE_NAMES[id] end
@@ -649,7 +695,11 @@ function CB.Collect(key, cfg, w)
             local cid = it.baseItemId or e.id
             local n = w.Count(cid)
             local has, rem = w.Buff(it.buffId)
-            if it.buffId == nil then has, rem = false, 0 end
+            if it.buffId == nil then
+                has, rem = false, 0
+                -- (TBC / Forever: a buff known only by its name)
+                if it.buffName and w.NamedBuff then has, rem = w.NamedBuff(it.buffName, cid) end
+            end
             local skip = (not has) and onlyAvail and n == 0
             if not skip then
                 local show, skipGroup = false, false
