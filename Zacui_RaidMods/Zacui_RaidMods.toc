@@ -1,6 +1,6 @@
 ## Interface: 11509, 20506, 16001
 ## Title: ZacUI |cff33ff99Raid mods|r
-## Notes: Boss mods for Molten Core, Blackwing Lair, Zul'Gurub, Temple of Ahn'Qiraj and Naxxramas as part of ZacUI: timers, warnings, icons, lists, raid frame and nameplate marks, driven by the combat log. ZacUI's own code - no aura engine needed.
+## Notes: Boss mods for the Classic Era raids (Molten Core to Naxxramas) and, on TBC, Karazhan to the Sunwell, as part of ZacUI: timers, warnings, icons, lists, raid frame and nameplate marks, driven by the combat log. ZacUI's own code - no aura engine needed.
 ## Author: Zac
 ## Version: 2.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
@@ -56,5 +56,26 @@ Own\AQ40_Data.lua
 Own\AQ40.lua
 Own\NX_Data.lua
 Own\NX.lua
+# The TBC Anniversary raids (ZacUI running as TBC only): facts per raid
+# (<RAID>_Data), built into pieces by TBC_Kit
+Own\TBC_Kit.lua
+Own\KZ_Data.lua
+Own\KZ.lua
+Own\GL_Data.lua
+Own\GL.lua
+Own\ML_Data.lua
+Own\ML.lua
+Own\SSC_Data.lua
+Own\SSC.lua
+Own\TK_Data.lua
+Own\TK.lua
+Own\HY_Data.lua
+Own\HY.lua
+Own\BT_Data.lua
+Own\BT.lua
+Own\ZA_Data.lua
+Own\ZA.lua
+Own\SWP_Data.lua
+Own\SWP.lua
 Own\PullTimers_Data.lua
 Own\PullTimers.lua

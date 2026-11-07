@@ -886,19 +886,13 @@ local function TabText(L)
     local Z = ZC()
     local key, cfg = FramePicker(L)
     L:Card("Font")
+    -- one font: every frame text wears ZacUI's font (a face an old save
+    -- picked here is kept in media.font, and ignored)
     local face = UI.Field(L.current, "Unit frames font", function(h)
-        return UI.FontFaceDropdown(h, { width = 260, defaultLabel = "Friz Quadrata TT",
-            list = function()
-                local out = {}
-                for _, n in ipairs(ns.Media:ListFonts()) do if n ~= "Friz Quadrata TT" then out[#out + 1] = n end end
-                return out
-            end,
-            defaultPath = function() return ns.Media:Font("Friz Quadrata TT") end,
-            get = function() return db.media.font ~= "Friz Quadrata TT" and db.media.font or nil end,
-            set = function(v) db.media.font = v or "Friz Quadrata TT" Apply() end })
+        return UI.OneFontNote(h, 260)
     end, { width = 260 })
     L:Add(face, 8)
-    L:Desc("Every text on the frames uses it unless it picks its own below. ZacUI > Fonts & Textures can set it for everything at once.")
+    L:Desc("Every text on the frames is in ZacUI's font (Fonts & Textures). Each text below keeps its own size, outline and shadow.")
     if not ns.Media:HasLSM() then
         L:Desc("SharedMedia isn't loaded - the game's own fonts and textures still work.")
     end
@@ -1426,9 +1420,15 @@ do
             label = "Unit frames",
             desc = "Frame font, bar texture and name-strip texture.",
             order = 10,
-            apply = function(font, bar)
+            -- still on its shipped font
+            untouched = function()
+                local f = ns.db and ns.db.media and ns.db.media.font
+                return f == nil or f == "" or f == "Friz Quadrata TT"
+            end,
+            apply = function(font, bar, cleared)
                 if not (ns.db and ns.db.media) then return end
-                if font then ns.db.media.font = font end
+                if font then ns.db.media.font = font
+                elseif cleared then ns.db.media.font = "Friz Quadrata TT" end
                 if bar then ns.db.media.bar = bar; ns.db.media.nameBar = bar end
                 if ns.ApplySettings then ns.ApplySettings() end
             end,

@@ -438,6 +438,22 @@ local function ScanTargetHamstring()
     if not UnitExists("target") then return end
     local wanted = S.buffNames.hamstring
     if not wanted then return end
+    if HUD.HIDDEN_AURAS then
+        -- WoW Forever: found by its name while the game shows it; a
+        -- hidden timer is shown as it is (hamstringEntry.hidden). With
+        -- the name hidden too it can't be told from your other debuffs.
+        HUD.EachMyTargetDebuff(function(name, a)
+            if S.hamstring or name ~= wanted then return end
+            if ns.AuraFieldsHidden(a) then
+                hamstringEntry.duration, hamstringEntry.expirationTime, hamstringEntry.hidden = 0, 0, a
+            else
+                hamstringEntry.duration, hamstringEntry.expirationTime = a.duration or 0, a.expirationTime or 0
+                hamstringEntry.hidden = nil
+            end
+            S.hamstring = hamstringEntry
+        end)
+        return
+    end
     for i = 1, 40 do
         local name, _, _, _, duration, expirationTime, source = CompatUnitAura("target", i, "HARMFUL")
         if not name then break end
@@ -667,6 +683,8 @@ local HS_NAME, CLEAVE_NAME = nil, nil
 local function RescaleSwing()
     if not UnitAttackSpeed then return end
     local mhSpeed, ohSpeed = UnitAttackSpeed("player")
+    -- (WoW Forever may hide your attack speed: the swing keeps its pace)
+    if ns.Hidden(mhSpeed, ohSpeed) then return end
     local now = GetTime()
     local sw = S.swing
     for i = 1, 2 do
@@ -734,6 +752,18 @@ local function OnCombatLogEvent(_, subevent, _, sourceGUID, _, _, _, destGUID, _
             S.swing.mh.duration = mhSpeed or 0
         end
     end
+end
+
+-- WoW Forever: no combat log, so your swings come from the game's own
+-- swing event (ns.Swings, PLAYER_SWING). Each one starts that hand's
+-- bar over at the game's swing time; Heroic Strike and Cleave are a
+-- main-hand swing there too. A parry of yours brings the next main-hand
+-- swing sooner, as the combat log's parry did.
+local function OnSwing(hand, now, dur)
+    if hand == "parry" then ParryHaste(now) return end
+    if hand ~= "mh" and hand ~= "oh" then return end
+    local t = (hand == "oh") and S.swing.oh or S.swing.mh
+    t.start, t.duration = now, dur or 0
 end
 
 -- The Overpower window: the last time any target dodged one of your
@@ -871,6 +901,7 @@ local function OnPlayerAuras() dirty.auras = true end
 RegisterHotEvents = function()
     S.inCombat = InCombatLockdown() or UnitAffectingCombat("player")
     ns.CLEU.On("WarriorHUD.core", SWING_SUBS, OnCombatLogEvent)
+    ns.Swings.On("WarriorHUD.core", OnSwing)
     ns.Misses.On("WarriorHUD.dodge", OnMiss)
     -- the player's auras: ZacUI's shared read tells us when they moved
     ns.PlayerAuras.On("WarriorHUD.auras", OnPlayerAuras)
@@ -884,6 +915,7 @@ RegisterHotEvents = function()
 end
 UnregisterHotEvents = function()
     ns.CLEU.Off("WarriorHUD.core")
+    ns.Swings.On("WarriorHUD.core", nil)
     ns.Misses.On("WarriorHUD.dodge", nil)
     ns.PlayerAuras.On("WarriorHUD.auras", nil)
     ev:UnregisterEvent("UNIT_AURA")

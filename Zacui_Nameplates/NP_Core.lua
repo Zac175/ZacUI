@@ -595,6 +595,10 @@ local function RegisterMedia()
 end
 
 local function FontPath()
+    -- one font: ZacUI's, whenever one is chosen (the plate font saved in
+    -- fontName counts only while ZacUI has none)
+    local one = ns.OneFace and ns.OneFace()
+    if one then return one end
     local d = DB()
     local name = d.fontName
     name = ns.NewMediaName and ns.NewMediaName(name) or name
@@ -625,20 +629,14 @@ local function SetNPFont(fs, size)
         fs:SetFont(STANDARD_TEXT_FONT or [[Fonts\FRIZQT__.TTF]], size, "OUTLINE")
     end
     fs:SetShadowOffset(0, 0)
+    -- the plate font (ZacUI's unless the page picks one), kept up when it
+    -- changes - the lines outside a plate too (the priority count)
+    if ns.TrackHouseFont then ns.TrackHouseFont(fs, function(s) SetNPFont(s, size) end) end
 end
 
--- One text's own face, for a font spec that names one; nil/false/"" is
--- the plate font above.
+-- One text's face: the plate font above, always. A face saved in a text's
+-- font spec (the per-text pickers of old) is kept there and ignored.
 local function FaceFile(face)
-    if face == nil or face == false or face == "" then return FontPath() end
-    face = ns.NewMediaName and ns.NewMediaName(face) or face
-    if LOCAL_MEDIA.font[face] then return LOCAL_MEDIA.font[face] end
-    local lsm = LSM()
-    if lsm then
-        local p = lsm:Fetch("font", face, true)
-        if p then return p end
-    end
-    if ns.ResolveFontFace then return ns.ResolveFontFace(face) end
     return FontPath()
 end
 
@@ -655,6 +653,9 @@ local function ApplyNPFont(fs, spec, size)
     if not TrySetFont(fs, FaceFile(spec.face), size, flags)
        and not TrySetFont(fs, FontPath(), size, flags) then
         fs:SetFont(STANDARD_TEXT_FONT or [[Fonts\FRIZQT__.TTF]], size, flags)
+    end
+    if ns.TrackHouseFont then
+        ns.TrackHouseFont(fs, function(s) ApplyNPFont(s, spec, size) end)
     end
     if spec.shadow then
         if fs.SetShadowColor then fs:SetShadowColor(0, 0, 0, 1) end
@@ -1514,9 +1515,15 @@ if ns.Media and ns.Media.RegisterTarget then
         label = "Nameplates",
         desc = "Plate font, health bar and cast bar textures.",
         order = 20,
-        apply = function(font, bar)
+        -- still on its shipped font (or on ZacUI's)
+        untouched = function()
+            local n = DB().fontName
+            return n == nil or n == false or n == "" or n == DEFAULTS.fontName
+        end,
+        apply = function(font, bar, cleared)
             local d = DB()
-            if font then d.fontName = font end
+            if font then d.fontName = font
+            elseif cleared then d.fontName = DEFAULTS.fontName end
             if bar then d.healthTexture = bar; d.castTexture = bar end
             NP.RefreshAll()
         end,

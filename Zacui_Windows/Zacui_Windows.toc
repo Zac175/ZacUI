@@ -37,5 +37,7 @@ Win_Loot.lua
 Win_Macros.lua
 Win_Gossip.lua
 Win_Trade.lua
+Win_FlightTimes.lua
 Win_Taxi.lua
 Config_PagesWindows.lua
+Config_PagesFlight.lua

@@ -176,7 +176,9 @@ function R.Font(name)
     local path = name and lib and lib:Fetch("font", name, true)
     if not path and ns.ResolveFontPath then path = ns.ResolveFontPath(name) end
     if not path and IsPath(name) then path = name end
-    return path or STANDARD_TEXT_FONT
+    -- (no face of its own: the game's, not STANDARD_TEXT_FONT - that is
+    -- ZacUI's font of the session's start once ZacUI has set it)
+    return path or ns.GAME_FONT or STANDARD_TEXT_FONT
 end
 
 function R.Statusbar(name)
@@ -230,8 +232,23 @@ local function TrySetFont(fs, path, size, flags)
     local ok, set = pcall(fs.SetFont, fs, path, size, flags)
     return (ok and set) and true or false
 end
+-- Every text of every display (saved, just imported, made or edited in
+-- the editor, a sub-text added later, the import preview) is dressed
+-- here, so this is where ZacUI's one font wins: the face is ZacUI's font
+-- whenever one is chosen, and the aura's own face (kept untouched in its
+-- data, so an export still carries it) only while none is. Size and
+-- outline stay the aura's. The string is kept up by ZacUI's font keeper,
+-- so a later change of ZacUI's font reaches it at once.
+local function RedoAuraFont(fs)
+    R.SetFont(fs, rawget(fs, "_zAeFont"), rawget(fs, "_zAeSize"), rawget(fs, "_zAeOutline"))
+end
 function R.SetFont(fs, font, size, outline)
-    if not TrySetFont(fs, R.Font(font), tonumber(size) or 12, R.Outline(outline)) then pcall(fs.SetFont, fs, STANDARD_TEXT_FONT, tonumber(size) or 12, "OUTLINE") end
+    local path = (ns.OneFace and ns.OneFace()) or R.Font(font)
+    if not TrySetFont(fs, path, tonumber(size) or 12, R.Outline(outline)) then pcall(fs.SetFont, fs, STANDARD_TEXT_FONT, tonumber(size) or 12, "OUTLINE") end
+    rawset(fs, "_zAeFont", font)
+    rawset(fs, "_zAeSize", size)
+    rawset(fs, "_zAeOutline", outline)
+    if ns.TrackHouseFont then ns.TrackHouseFont(fs, RedoAuraFont) end
 end
 
 -- a texture path, file id or atlas onto a texture. A path into the old

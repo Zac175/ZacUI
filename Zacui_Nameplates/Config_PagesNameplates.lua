@@ -1424,14 +1424,14 @@ RegisterPage("Nameplates", function(L)
     -- ============================================================
     local function Tab_text(L)
         L:Card("Plate font")
+        -- one font: every plate text wears ZacUI's font (a face an old
+        -- save picked here is kept in fontName, and ignored)
         local face = UI.Field(L.current, "Font for every plate text", function(h)
-            return UI.FontFaceDropdown(h, { width = 260, defaultLabel = "ZacUI's font",
-                get = function() local v = d.fontName if v == false then return nil end return v end,
-                set = function(v) d.fontName = v or false NPRefresh() RefreshConfig() end })
+            return UI.OneFontNote(h, 260)
         end, { width = 260 })
         L:Add(face, 8)
-        L:Desc("Each text below starts in this font; give any of them a font of "
-            .. "its own. ZacUI's font is the one on Appearance > Fonts & Textures.")
+        L:Desc("Every plate text is in ZacUI's font (Appearance > Fonts & Textures). "
+            .. "Each text below keeps its own size, outline and shadow.")
         L:EndCard()
 
         local side = TextSide()

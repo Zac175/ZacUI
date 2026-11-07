@@ -20,7 +20,7 @@ local SetNPFont = NP.SetNPFont
 -- ============================================================
 local function CastOnUpdate(cb)
     local startMS, endMS = cb.startMS, cb.endMS
-    if not startMS then return end
+    if not startMS then return end   -- (also a hidden cast: the game's timer drives it)
     local now = GetTime() * 1000
     local total = endMS - startMS
     if total <= 0 then total = 1 end
@@ -251,12 +251,18 @@ function NP.CheckCast(f)
     -- WoW Forever hides an enemy's cast in combat (secret values: no
     -- compare, no arithmetic): no bar until it reads again
     local Sec = ns.IsSecret
-    if Sec and (Sec(name) or Sec(startMS) or Sec(endMS)) then NP.StopCast(f) return end
+    if Sec and (Sec(name) or Sec(startMS) or Sec(endMS)) then
+        if NP.FillHiddenCast(f, name, texture, false) then return end
+        NP.StopCast(f) return
+    end
     local channeling = false
     if not name and UnitChannelInfo then
         local cName, _, cTexture, cStartMS, cEndMS, _, cNotInterruptible,
             cSpellID = UnitChannelInfo(f.unit)
-        if Sec and (Sec(cName) or Sec(cStartMS) or Sec(cEndMS)) then NP.StopCast(f) return end
+        if Sec and (Sec(cName) or Sec(cStartMS) or Sec(cEndMS)) then
+            if NP.FillHiddenCast(f, cName, cTexture, true) then return end
+            NP.StopCast(f) return
+        end
         if cName then
             name, texture, startMS, endMS, notInterruptible, spellID =
                 cName, cTexture, cStartMS, cEndMS, cNotInterruptible, cSpellID
@@ -294,6 +300,37 @@ function NP.CheckCast(f)
     end
 end
 
+-- WoW Forever hides an enemy's cast in combat (secret values: no compare,
+-- no arithmetic). The bar still shows it: the game's own duration object
+-- for the cast drives the fill (UnitCastingDuration / UnitChannelDuration
+-- -> StatusBar:SetTimerDuration, ZacUI's display helpers), the spell's
+-- name and icon go onto the text and icon as they are. What needs the
+-- spell's id or the caster's target (cast alerts, the scripts, "cast
+-- target on spell name") and whether it can be interrupted are hidden
+-- too: it wears the plain casting / channel colour. false when this
+-- client can't (the bar then goes, as before).
+function NP.FillHiddenCast(f, name, texture, channeling)
+    local cb = f.cast
+    if not (ns.CastDuration and ns.ShowCastTimer) then return false end
+    local dur = ns.CastDuration(f.unit, channeling)
+    if not dur or not ns.ShowCastTimer(cb, dur, channeling) then return false end
+    cb.startMS, cb.endMS, cb.channeling, cb.spellID = nil, nil, channeling, nil
+    cb._scriptKey = nil
+    cb._zTimer = true
+    pcall(cb.spell.SetText, cb.spell, name)
+    pcall(cb.icon.SetTexture, cb.icon, texture)
+    PaintCast(cb, nil)
+    if cb:IsShown() then return true end
+    local a = DB().anim
+    local spec = a and a.cast
+    if ns.Motion and spec and spec.style and spec.style ~= "none" then
+        ns.Motion.Show(cb, spec)
+    else
+        cb:Show()
+    end
+    return true
+end
+
 -- The bar for one cast from its facts - the live read above and the
 -- settings preview's samples both paint through here. tn / color: the
 -- cast's target and its colour string, shown only with Cast target on.
@@ -305,6 +342,8 @@ function NP.FillCast(f, name, texture, startMS, endMS, notInterruptible, spellID
     if tn and d.extras.castTargetName then
         text = ("%s |c%s[%s]|r"):format(name, color or "ffffffff", tn)
     end
+    -- (after a hidden cast on WoW Forever: back to the 0-1 fill)
+    if cb._zTimer then cb._zTimer = nil cb:SetMinMaxValues(0, 1) end
     cb.startMS, cb.endMS, cb.channeling = startMS, endMS, channeling
     cb.spellID = spellID
     cb.spell:SetText(text)

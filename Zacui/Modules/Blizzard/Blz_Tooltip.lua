@@ -206,6 +206,24 @@ function TipLook.HealthText(cur, maxv, cfg)
     return ShortNum(cur) .. " / " .. ShortNum(maxv) .. "  " .. pct .. "%"
 end
 
+-- WoW Forever, the health hidden: "cur / max  pct%" as TipLook.HealthText
+-- words it, from the hidden values as they are (whole numbers: shortening
+-- them is maths). true when it drew.
+function TipLook.HiddenHealthText(fs, unit)
+    if not (ns.ShowText and ns.HealthPercent) then return false end
+    local cur, maxv = UnitHealth(unit), UnitHealthMax(unit)
+    local pct = ns.HealthPercent(unit)
+    if pct == nil then return false end
+    local drawn
+    if not ns.Hidden(maxv) and maxv <= 100 then
+        drawn = ns.ShowText(fs, "%.0f%%", pct)
+    else
+        drawn = ns.ShowText(fs, "%d / %d  %.0f%%", cur, maxv, pct)
+    end
+    if drawn then fs:Show() end
+    return drawn
+end
+
 -- Tooltip text: Blizzard's three tooltip font objects, set from the
 -- page's specs. An unset spec leaves the object alone (or puts back what
 -- it had before ZacUI touched it).
@@ -250,7 +268,7 @@ function TipLook.ApplyFonts(cfg)
                     for k, v in pairs(spec) do use[k] = v end
                     use.size = math.max(6, spec.size - f.smaller)
                 end
-                ns.ApplyFontSpec(o, use, { face = s[1], size = s[2] or 12,
+                ns.ApplyFontSpec(o, use, { fallbackFace = s[1], size = s[2] or 12,
                     outline = (s[3] and s[3] ~= "") and s[3] or "none",
                     shadow = (s[4] or 0) ~= 0 or (s[5] or 0) ~= 0,
                     shadowX = s[4], shadowY = s[5] })
@@ -523,8 +541,14 @@ Modules.tooltip = function()
                     local hidden = ns.IsSecret and (ns.IsSecret(value)
                         or (u0 and UnitHealthMax and ns.IsSecret(UnitHealthMax(u0))))
                     if hidden then
-                        -- WoW Forever hides health in combat: no numbers then
-                        fs:SetText("")
+                        -- WoW Forever hides health in combat: the numbers
+                        -- still show, handed to the text as they are (the
+                        -- unit's health and the game's own percent, ZacUI's
+                        -- display helpers); a saved line format can't be
+                        -- filled from hidden values, so the plain line shows
+                        if not (cfg.healthText and u0 and TipLook.HiddenHealthText(fs, u0)) then
+                            fs:SetText("")
+                        end
                     elseif cfg.healthText then
                         local _, maxv = self:GetMinMaxValues()
                         local cur = tonumber(value) or self:GetValue() or 0

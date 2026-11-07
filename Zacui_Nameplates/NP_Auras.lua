@@ -17,11 +17,27 @@ local SetNPFont = NP.SetNPFont
 -- ============================================================
 -- AURA READ - two client generations of the same call
 -- ============================================================
+-- WoW Forever hides an enemy's auras in combat. On that client an aura
+-- with hidden details answers false plus its table, and the row shows its
+-- icon, stacks and timer straight from it (the game takes hidden values
+-- as they are: ZacUI's display helpers, Core_Flavor); a read the game
+-- refuses answers false alone and the walk goes past it. Every other
+-- client reads exactly as before.
+local hiddenClient = _G.ZACUI_IS_FOREVER and true or false
 local function GetAura(unit, index, filter)
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
-        local a = C_UnitAuras.GetAuraDataByIndex(unit, index, filter)
-        -- (WoW Forever hides an enemy's auras in combat: read as none)
-        if not a or (ns.AuraHidden and ns.AuraHidden(a)) then return end
+        local a
+        if hiddenClient then
+            a = ns.ReadAura(unit, index, filter)
+            if a == false then return false end
+        else
+            a = C_UnitAuras.GetAuraDataByIndex(unit, index, filter)
+        end
+        if not a then return end
+        if ns.AuraHidden and ns.AuraHidden(a) then
+            if hiddenClient then return false, a end
+            return
+        end
         return a.icon, a.applications, a.duration, a.expirationTime
     elseif UnitAura then
         local name, icon, count, _, duration, expirationTime =
@@ -124,9 +140,21 @@ function NP.UpdateAuras(f)
     while shown < d.auras.max do
         local icon, count, duration, expirationTime =
             GetAura(f.unit, index, filter)
-        if not icon then break end
+        if icon == nil or (hiddenClient and index > 40) then break end
         index = index + 1
 
+        if icon == false then
+            -- (WoW Forever: hidden details; `count` holds the aura's table)
+            if count then
+                shown = shown + 1
+                local btn = AcquireIcon(holder, shown)
+                pcall(btn.tex.SetTexture, btn.tex, count.icon)
+                if not ns.ShowAuraCount(btn.count, f.unit, count) then btn.count:SetText("") end
+                btn._cdStart, btn._cdDur = nil, nil
+                if ns.ShowAuraTimer(btn.cd, f.unit, count) then btn.cd:Show() else btn.cd:Hide() end
+                btn:Show()
+            end
+        else
         shown = shown + 1
         -- This runs per icon on every UNIT_AURA of the plate, which in a
         -- pull is many times a second. Size and font are set once, at birth
@@ -148,6 +176,7 @@ function NP.UpdateAuras(f)
             btn.cd:Hide()
         end
         btn:Show()
+        end
     end
 
     for i = shown + 1, #holder.icons do

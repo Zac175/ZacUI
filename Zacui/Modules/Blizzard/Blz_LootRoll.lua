@@ -200,12 +200,16 @@ local function Font(bar, key, spec, defaults)
     local fs = bar[TEXT_FIELD[key]]
     if type(spec) == "table" and next(spec) then
         local t = bar._zTpl[key]
-        ns.ApplyFontSpec(fs, spec, { face = t[1], size = t[2] or 12, outline = (t[3] and t[3] ~= "") and t[3] or "none",
+        ns.ApplyFontSpec(fs, spec, { fallbackFace = t[1], size = t[2] or 12, outline = (t[3] and t[3] ~= "") and t[3] or "none",
             shadow = defaults and defaults.shadow })
         fs._zLRCustom = true
     elseif fs._zLRCustom then
         local t = bar._zTpl[key]
-        if t[1] then pcall(fs.SetFont, fs, t[1], t[2] or 12, t[3] or "") end
+        -- (back in ZacUI's font, which its template wore)
+        if t[1] then
+            if ns.FollowFont then ns.FollowFont(fs, t[2] or 12, t[3] or "")
+            else pcall(fs.SetFont, fs, t[1], t[2] or 12, t[3] or "") end
+        end
         fs._zLRCustom = nil
     end
 end

@@ -70,7 +70,15 @@ local function fetch(mediatype, name, default)
     return default
 end
 
-function M:Font(name)      return fetch("font", name, DEFAULT_FONT) end
+-- One font: every text the frames draw wears ZacUI's font whenever one is
+-- chosen (Fonts & Textures), whatever face is named; the name only counts
+-- while ZacUI has none.
+function M:Font(name)
+    local Z = _G.ZacUI
+    local one = Z and Z.OneFace and Z.OneFace()
+    if one then return one end
+    return fetch("font", name, DEFAULT_FONT)
+end
 function M:Statusbar(name) return fetch("statusbar", name, DEFAULT_BAR) end
 
 local function listOf(mediatype)

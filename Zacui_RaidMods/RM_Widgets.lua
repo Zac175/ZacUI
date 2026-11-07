@@ -30,13 +30,16 @@ local floor, abs, max, min = math.floor, math.abs, math.max, math.min
 local SafeCall = RM.SafeCall
 
 local function LSM() return LibStub and LibStub("LibSharedMedia-3.0", true) end
--- ONE FONT, ONE BAR TEXTURE. The settings decide: db.font (nil = the
--- pack's own font per text, which is Barlow Semi Condensed Black nearly
--- everywhere) and db.barTexture (every bar; "ZacUI Flat" to begin with,
--- which is what ZacUI uses elsewhere).
+-- ONE FONT, ONE BAR TEXTURE. The font is ZacUI's (Fonts & Textures); with
+-- none chosen, the pack's own per text (Barlow Semi Condensed Black nearly
+-- everywhere). db.barTexture: every bar ("ZacUI Flat" to begin with, which
+-- is what ZacUI uses elsewhere).
 local function FontPath(name)
-    local db = RM.DB()
-    if db and db.font and db.font ~= "" then name = db.font end
+    -- one font: ZacUI's, whenever one is chosen - the pack's own faces only
+    -- while ZacUI has none (db.font, a face picked on the Raid mods page
+    -- before, is kept and ignored)
+    local one = ns.OneFace and ns.OneFace()
+    if one then return one end
     local p = ns.ResolveFontPath and ns.ResolveFontPath(name)
     if p and p ~= name then return p end
     if type(name) == "string" and name:find("\\") then return name end
@@ -59,13 +62,19 @@ W.FontPath, W.BarTexture = FontPath, BarTexture
 if ns.Media and ns.Media.RegisterTarget then
     ns.Media.RegisterTarget("raidmods", {
         label = "Raid mods",
-        desc = "The boss mods' bars (always) and texts (when 'Use ZacUI's font' is ticked on the Raid mods page).",
+        desc = "The boss mods' bars (always) and texts (unless the Raid mods page picks a font of its own).",
         order = 60,
-        apply = function(font, bar)
+        -- following ZacUI's font, still on the pack's own
+        untouched = function()
+            local db = RM.DB()
+            return db ~= nil and db.fontFromZacUI == true and (db.font == nil or db.font == "")
+        end,
+        apply = function(font, bar, cleared)
             local db = RM.DB()
             if not db then return end
             if bar and bar ~= "" then db.barTexture = bar end
-            if db.fontFromZacUI then db.font = font end
+            -- (un-ticked, it is only restyled: nothing written)
+            if db.fontFromZacUI and (font or cleared) then db.font = font end
             if W.RefreshAll then W.RefreshAll() end
         end,
     })
@@ -538,6 +547,9 @@ local function AnchorSubText(fs, w, sub)
     fs:SetJustifyH(j)
 end
 
+local function RedoFont(fs)
+    pcall(fs.SetFont, fs, FontPath(rawget(fs, "_zRmFont")), rawget(fs, "_zRmSize") or 12, rawget(fs, "_zRmFlags") or "")
+end
 local function StyleFontString(fs, font, size, flags, shadow, sx, sy)
     local path = FontPath(font)
     size = tonumber(size) or 12
@@ -546,6 +558,11 @@ local function StyleFontString(fs, font, size, flags, shadow, sx, sy)
     if f == "None" or f == "NONE" then f = "" end
     if f == "MONOCHROMEOUTLINE" then f = "MONOCHROME, OUTLINE" end
     fs:SetFont(path, size, f or "")
+    -- kept up by ZacUI's font keeper: a change of ZacUI's font reaches it
+    if ns.TrackHouseFont then
+        rawset(fs, "_zRmFont", font) rawset(fs, "_zRmSize", size) rawset(fs, "_zRmFlags", f or "")
+        ns.TrackHouseFont(fs, RedoFont)
+    end
     if shadow then
         fs:SetShadowColor(Color4(shadow, 0, 0, 0, 1))
         fs:SetShadowOffset(tonumber(sx) or 1, tonumber(sy) or -1)

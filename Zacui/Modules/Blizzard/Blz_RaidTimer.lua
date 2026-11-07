@@ -30,7 +30,9 @@ local GetColor, Hex, Print = ns.GetColor, ns.Hex, ns.Print
 local T = {}
 RM.Timer = T
 
--- the raids' last bosses: their kill ends the run
+-- the raids' last bosses: their kill ends the run (Classic Era's; another
+-- game version's are asked of Core_FlavorRaids, and a game whose raids are
+-- not listed ends a run once the lockout says every boss is down)
 local FINAL = {
     ["Ragnaros"] = true, ["Nefarian"] = true, ["Hakkar"] = true, ["C'Thun"] = true,
     ["Kel'Thuzad"] = true, ["Onyxia"] = true, ["Ossirian the Unscarred"] = true,
@@ -128,14 +130,23 @@ function T.OnCombat()
     T.Paint()
 end
 
-function T.OnKill(name)
+function T.OnKill(name, id)
     local r = Run()
     if not (r and not r.done and name) then return end
     if InstanceName() ~= r.inst or r.splits[name] then return end
     r.splits[name] = time() - r.start
     r.order[#r.order + 1] = name
     r.touched = time()
-    if FINAL[name] then Finish(r) end
+    if FINAL[name] or (ns.RaidLastBoss and ns.RaidLastBoss(id, name)) then
+        Finish(r)
+    elseif ns.RaidEndsByLockout and ns.RaidEndsByLockout() then
+        ns.WhenRaidCleared("RaidTimer", function()
+            if Run() == r and not r.done then
+                Finish(r)
+                T.Paint()
+            end
+        end)
+    end
     T.Paint()
 end
 
@@ -259,10 +270,10 @@ local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("ENCOUNTER_END")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
-ev:SetScript("OnEvent", function(_, event, _, name, _, _, success)
+ev:SetScript("OnEvent", function(_, event, id, name, _, _, success)
     if event == "PLAYER_REGEN_DISABLED" then T.OnCombat()
     elseif event == "ENCOUNTER_END" then
-        if success == 1 then T.OnKill(name) end
+        if success == 1 then T.OnKill(name, id) end
     else
         C_Timer.After(2, T.Paint)
     end

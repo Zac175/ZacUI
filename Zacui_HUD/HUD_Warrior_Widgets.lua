@@ -644,6 +644,41 @@ function IconProto:SetText(key, text)
     end
 end
 
+-- WoW Forever: an aura whose details the game hides in combat. Its icon,
+-- timer and stacks go straight to the widgets (ns.ShowAuraTimer and the
+-- rest of Core_Flavor's display helpers) with no maths on them. The
+-- remembered values the plain setters above compare against are
+-- cleared, so the next plain value always lands.
+function IconProto:SetHiddenTexture(tex)
+    self.curTexture = nil
+    pcall(self.icon.SetTexture, self.icon, tex)
+    local w, h = self:GetWidth(), self:GetHeight()
+    self._zw, self._zh, self._zz, self._zk = w, h, self.zoom, self.keepAspect
+    ApplyZoom(self.icon, w, h, self.zoom, self.keepAspect)
+end
+
+function IconProto:SetHiddenSwipe(unit, aura)
+    if not self.cd then return false end
+    self.cdStart, self.cdDuration = -1, -1
+    return ns.ShowAuraTimer(self.cd, unit, aura)
+end
+
+-- a text from hidden values (SetFormattedText takes them as they are)
+function IconProto:SetHiddenText(key, fmt, ...)
+    local fs = self.texts[key]
+    if not fs then return end
+    fs.lastText = nil
+    if not ns.ShowText(fs, fmt, ...) then fs:SetText("") end
+end
+
+-- the aura's stacks as the game words them ("" under two)
+function IconProto:SetHiddenCount(key, unit, aura)
+    local fs = self.texts[key]
+    if not fs then return end
+    fs.lastText = nil
+    if not ns.ShowAuraCount(fs, unit, aura) then fs:SetText("") end
+end
+
 -- All glow styles render as the pulsing border (style arg kept for WA call sites).
 function IconProto:AddGlow(key, style, opts)
     local g = CreateBorderGlow(self, opts)

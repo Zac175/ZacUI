@@ -122,21 +122,32 @@ end
 -- the font system reaches our own UI and not just Blizzard's.
 -- (FontApply sets everything a string's look depends on; a pooled string
 -- is handed back through it too)
-local function FontApply(fs, size, opts)
-    opts = opts or {}
+-- (the face, size and outline alone: what a change of ZacUI's font redoes)
+local function FontDress(fs, size, outline, fixedSize)
     local cfg = ZacUIDB and ZacUIDB.font or {}
+    local delta = fixedSize and 0 or (cfg.delta or 0)
     local path = ResolveFontPath(cfg.name)
-    local flags = opts.outline
+    local flags = outline
     if flags == nil then
         flags = (cfg.outline == "NONE") and "" or "OUTLINE"
     end
-    local curPath = select(1, fs:GetFont())
+    -- the face the string was handed out with: "Blizzard default" puts it back
+    local curPath = ns.HouseOrig and ns.HouseOrig(fs) or select(1, fs:GetFont())
     -- pcall: a registered font whose file is missing throws (see HUD.ApplyFont)
     -- and one that will not load returns false, leaving the string with no font
-    local ok, set = pcall(fs.SetFont, fs, path or curPath, (size or F.LABEL) + (cfg.delta or 0), flags)
+    local ok, set = pcall(fs.SetFont, fs, path or curPath or "Fonts\\FRIZQT__.TTF", (size or F.LABEL) + delta, flags)
     if not (ok and set) then
-        pcall(fs.SetFont, fs, curPath or "Fonts\\FRIZQT__.TTF", (size or F.LABEL) + (cfg.delta or 0), flags)
+        pcall(fs.SetFont, fs, curPath or "Fonts\\FRIZQT__.TTF", (size or F.LABEL) + delta, flags)
     end
+    if ns.TrackHouseFont then
+        ns.TrackHouseFont(fs, function(s) FontDress(s, size, outline, fixedSize) end)
+    end
+end
+UI._zFontDress = FontDress
+
+local function FontApply(fs, size, opts)
+    opts = opts or {}
+    FontDress(fs, size, opts.outline)
     if opts.justify then fs:SetJustifyH(opts.justify) end
     if opts.width then
         fs:SetWidth(opts.width)
@@ -1347,10 +1358,7 @@ function UI.EditBox(parent, opts)
     eb:SetPoint("BOTTOMRIGHT", -6, 2)
     eb:SetAutoFocus(false)
     eb:SetFontObject("GameFontHighlightSmall")
-    local cfg = ZacUIDB and ZacUIDB.font or {}
-    local path = ResolveFontPath(cfg.name)
-    local cur = select(1, eb:GetFont())
-    eb:SetFont(path or cur, F.LABEL + (cfg.delta or 0), "")
+    FontDress(eb, F.LABEL, "")
     eb:SetText(opts.text or "")
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     eb:SetScript("OnEnterPressed", function(self)
@@ -1467,9 +1475,8 @@ function UI.TextBox(parent, opts)
         eb:SetWidth(w - 14)
     end
     eb:SetFontObject("GameFontHighlightSmall")
-    local cfg = ZacUIDB and ZacUIDB.font or {}
-    local cur = select(1, eb:GetFont())
-    eb:SetFont(ResolveFontPath(cfg.name) or cur, F.SMALL, "")
+    -- (no size adjustment here, as before: the box is a fixed size)
+    FontDress(eb, F.SMALL, "", true)
     eb:SetText(opts.text or "")
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     -- Selecting everything on focus is the whole interaction for an

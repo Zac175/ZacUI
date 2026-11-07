@@ -164,7 +164,7 @@ end
 -- Entries not seen this pass are dropped afterwards, so a reader finds
 -- exactly what a rebuilt table would hold.
 local scanPass = 0
-local function PutAura(out, lname, pass, name, icon, count, duration, expirationTime)
+local function PutAura(out, lname, pass, name, icon, count, duration, expirationTime, hidden)
     local e = out[lname]
     if e and e.pass == pass then return end
     if not e then
@@ -173,6 +173,9 @@ local function PutAura(out, lname, pass, name, icon, count, duration, expiration
     end
     e.pass = pass
     e.name, e.icon, e.count, e.duration, e.expirationTime = name, icon, count, duration, expirationTime
+    -- (WoW Forever: the game's aura table when its icon or timer is
+    -- hidden - the row shows those straight from it)
+    e.hidden = hidden
 end
 local function DropUnseen(out, pass)
     for lname, e in pairs(out) do
@@ -197,6 +200,26 @@ end
 local function ScanTargetDebuffs()
     scanPass = scanPass + 1
     local pass = scanPass
+    if HUD.HIDDEN_AURAS then
+        -- WoW Forever: hidden details shown as they are; debuffs whose
+        -- very names are hidden go to S.targetHidden (see the row)
+        local extra = S.targetHidden
+        if not extra then extra = {} S.targetHidden = extra end
+        wipe(extra)
+        if UnitExists("target") then
+            HUD.EachMyTargetDebuff(function(name, a)
+                if not name then
+                    extra[#extra + 1] = a
+                elseif ns.AuraFieldsHidden(a) then
+                    PutAura(S.targetDebuffs, name:lower(), pass, name, a.icon, nil, nil, nil, a)
+                else
+                    PutAura(S.targetDebuffs, name:lower(), pass, name, a.icon, a.applications, a.duration, a.expirationTime)
+                end
+            end)
+        end
+        DropUnseen(S.targetDebuffs, pass)
+        return
+    end
     if UnitExists("target") then
         for i = 1, 40 do
             local name, icon, count, _, duration, expirationTime, source =
@@ -739,6 +762,13 @@ local function RefreshDebuffRow(V, cfg)
     local VS = V.S
     wipe(V.debuffActive)
     local d = cfg.debuffRow
+    -- WoW Forever: your debuffs whose names the game hides take the row's
+    -- free icons in the game's order (only their own icons tell them
+    -- apart). nil on every other client.
+    local extra = VS.targetHidden
+    if extra and (#extra == 0 or V.preview or not On(V, cfg) or not d.enabled) then extra = nil end
+    local free = extra and (V._freeIcons or {}) or nil
+    if free then V._freeIcons = free wipe(free) end
     for _, def in ipairs(DEBUFF_DEFS) do
         local icon = V.debuffIcons[def.key]
         local shown = false
@@ -752,7 +782,11 @@ local function RefreshDebuffRow(V, cfg)
                 local sp = VS.spells[def.key]
                 local name = sp and sp.name
                 local b = name and VS.targetDebuffs[name:lower()] or nil
-                if b then
+                if b and b.hidden then
+                    icon:SetHiddenTexture(b.icon)
+                    icon:SetHiddenSwipe("target", b.hidden)
+                    shown = true
+                elseif b then
                     icon:SetIconTexture(b.icon or (sp and sp.icon))
                     if (b.duration or 0) > 0 then
                         icon:SetSwipe(b.expirationTime - b.duration, b.duration)
@@ -763,8 +797,25 @@ local function RefreshDebuffRow(V, cfg)
                 end
             end
         end
-        W.SetShownAnimated(icon, shown)
-        if shown then V.debuffActive[#V.debuffActive + 1] = icon end
+        if free and not shown then
+            free[#free + 1] = icon
+        else
+            W.SetShownAnimated(icon, shown)
+            if shown then V.debuffActive[#V.debuffActive + 1] = icon end
+        end
+    end
+    if free then
+        for i, icon in ipairs(free) do
+            local a = extra[i]
+            if a then
+                icon:SetHiddenTexture(a.icon)
+                icon:SetHiddenSwipe("target", a)
+                W.SetShownAnimated(icon, true)
+                V.debuffActive[#V.debuffActive + 1] = icon
+            else
+                W.SetShownAnimated(icon, false)
+            end
+        end
     end
     local size = d.iconSize or 26
     HUD.LayoutRow(V.memo.debuff, V.debuffActive, V.Debuffs, size, size, d.spacing or 4)

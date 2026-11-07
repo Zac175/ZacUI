@@ -136,7 +136,9 @@ Modules.tracker = function()
         if fs.GetFont and not fs._zOutlined then
             local font, size = fs:GetFont()
             if font then
-                fs:SetFont(font, size or 11, "OUTLINE")
+                -- (in ZacUI's font, kept up when it changes)
+                if ns.FollowFont then ns.FollowFont(fs, size or 11, "OUTLINE")
+                else fs:SetFont(font, size or 11, "OUTLINE") end
                 fs._zOutlined = true
             end
         end

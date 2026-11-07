@@ -582,7 +582,7 @@ local function StyleBlizzText(fs, spec, keepSize)
     end
     local s = fs._zStockFont
     local _, curSize = fs:GetFont()
-    ns.ApplyFontSpec(fs, spec, { face = s[1],
+    ns.ApplyFontSpec(fs, spec, { fallbackFace = s[1],
         size = (keepSize and curSize) or s[2] or 12,
         outline = (s[3] and s[3] ~= "") and s[3] or "none",
         shadow = (s[4] or 0) ~= 0 or (s[5] or 0) ~= 0, shadowX = s[4], shadowY = s[5] })

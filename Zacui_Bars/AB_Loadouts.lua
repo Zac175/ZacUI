@@ -315,33 +315,47 @@ end
 -- name+body first, body alone second; the icon is never compared.
 -- byName: then a macro of that name (in the pool the loadout's came from
 -- first) - its body may differ, as one character's own version of it.
-local function FindMacro(info, byName)
+--
+-- TWO MACROS WITH ONE NAME (2026-11-06, Zac: "why does my Duel wield macro
+-- keep going to deathwish on other warriors"). Zacw has two character
+-- macros both called "DW" - the dual-wield swap and Death Wish. Matched by
+-- name alone, both landed on the same macro of the other warrior, so the
+-- second one copied over the first. `claimed` (one apply's set of macro
+-- indexes already handed to an earlier entry) keeps every entry on a
+-- macro of its own: a name match skips a claimed macro, and an entry with
+-- nothing left to match is made as a new macro of that name.
+local function FindMacro(info, byName, claimed)
     local idx = MacroIndex()
+    claimed = claimed or {}
     -- charOnly: this character's own copy (a macro made for its weapons) -
-    -- never an account-wide one shared with another character
+    -- never an account-wide one shared with another character. One with
+    -- this very text first (nothing to rewrite), else the first unclaimed
+    -- of that name (rewritten).
     if info.charOnly then
         local want = Core(info.body)
+        local first
         for _, e in ipairs(idx.list) do
-            if e.char and e.name == info.name then
-                -- already that text: found as it is, nothing to rewrite
+            if e.char and e.name == info.name and not claimed[e.i] then
                 local _, _, b = GetMacroInfo(e.i)
-                return e.i, (Core(b) == want) and "both" or "name"
+                if Core(b) == want then return e.i, "both" end
+                first = first or e.i
             end
         end
+        if first then return first, "name" end
         return nil
     end
     local body = Core(info.body)
     local hit = idx.byBoth[(info.name or "") .. "\n" .. body]
     if hit then return hit, "both" end
     hit = idx.byBody[body]
-    if hit then return hit, "body" end
+    if hit and not claimed[hit] then return hit, "body" end
     if not byName then return nil end
     local wantChar = info.perchar and true or false
     local owned = info.name and Owner(info.name) ~= nil
     local wantLower = owned and string.lower(info.name) or nil
     local named, namedOther
     for _, e in ipairs(idx.list) do
-        if e.name == info.name or (owned and e.lower == wantLower) then
+        if (e.name == info.name or (owned and e.lower == wantLower)) and not claimed[e.i] then
             if e.char == wantChar then named = named or e.i else namedOther = namedOther or e.i end
         end
     end
@@ -360,10 +374,18 @@ local lastMade = {}
 -- are kept so a linked macro keeps working). Returns id, made, rewritten.
 -- overwrite "perchar": only a character macro is rewritten, never an
 -- account-wide one (the caller's source shares those with this account).
-local function FindOrCreateMacro(info, byName, overwrite)
-    local found, how = FindMacro(info, byName)
+local function FindOrCreateMacro(info, byName, overwrite, claimed)
+    local found, how = FindMacro(info, byName, claimed)
     local owner = info.name and Owner(info.name)
     if owner then overwrite = false end
+    -- a character macro wanted, and only a shared account macro of that
+    -- name with other text left to match (one it may not rewrite): make the
+    -- character's own rather than point the bar at the wrong text (the
+    -- second "DW" landing on the account's dual-wield swap)
+    if overwrite == "perchar" and found and how == "name" and info.perchar
+        and not owner and found <= (MacroLimits()) then
+        found, how = nil, nil
+    end
     if overwrite == "perchar" then overwrite = (found or 0) > (MacroLimits()) end
     if found and how == "name" and overwrite and EditMacro then
         local name, icon, body = GetMacroInfo(found)
@@ -413,11 +435,12 @@ end
 
 -- Where a macro this apply made sits now: its name in its pool, the body
 -- it was made with breaking a tie.
-local function WhereMade(made)
+local function WhereMade(made, claimed)
     local idx = MacroIndex()
+    claimed = claimed or {}
     local first
     for _, e in ipairs(idx.list) do
-        if e.name == made.name and e.char == made.char then
+        if e.name == made.name and e.char == made.char and not claimed[e.i] then
             first = first or e.i
             local _, _, body = GetMacroInfo(e.i)
             if Core(body) == made.body then return e.i end
@@ -536,10 +559,12 @@ function LO.Apply(loadout, opts)
     local macroIds = {}
     if opts.macros ~= false then
         local madeAt = {}          -- k -> { name, body, char } for macros made here
+        local claimed = {}         -- macro index -> handed to an entry already
         for k, m in ipairs(loadout.macros or {}) do
-            local id, made, rewritten = FindOrCreateMacro(m, opts.macrosByName, opts.macrosOverwrite)
+            local id, made, rewritten = FindOrCreateMacro(m, opts.macrosByName, opts.macrosOverwrite, claimed)
             if id then
                 macroIds[k] = id
+                claimed[id] = true
                 if made == true then
                     rep.macrosMade = rep.macrosMade + 1
                     madeAt[k] = { name = lastMade.name, body = lastMade.body, char = lastMade.char }
@@ -552,18 +577,26 @@ function LO.Apply(loadout, opts)
         -- every macro made moved the indexes after it: look them all up
         -- again before any slot is pointed at one
         if rep.macrosMade > 0 then
+            local again = {}
             for k, m in ipairs(loadout.macros or {}) do
-                if macroIds[k] then
-                    if madeAt[k] then
-                        macroIds[k] = WhereMade(madeAt[k]) or macroIds[k]
-                    else
-                        macroIds[k] = FindMacro(m, opts.macrosByName) or macroIds[k]
-                    end
+                if madeAt[k] then
+                    local at = WhereMade(madeAt[k], again)
+                    if at then macroIds[k] = at again[at] = true end
+                end
+            end
+            for k, m in ipairs(loadout.macros or {}) do
+                if macroIds[k] and not madeAt[k] then
+                    local at = FindMacro(m, opts.macrosByName, again)
+                    if at then macroIds[k] = at again[at] = true end
                 end
             end
         end
     else
-        for k, m in ipairs(loadout.macros or {}) do macroIds[k] = FindMacro(m, opts.macrosByName) end
+        local claimed = {}
+        for k, m in ipairs(loadout.macros or {}) do
+            macroIds[k] = FindMacro(m, opts.macrosByName, claimed)
+            if macroIds[k] then claimed[macroIds[k]] = true end
+        end
     end
     -- 2. slots
     local mentioned = {}

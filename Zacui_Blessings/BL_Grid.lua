@@ -45,13 +45,6 @@ local function BlessingName(b, greater)
 end
 Grid.BlessingIcon, Grid.BlessingName = BlessingIcon, BlessingName
 
--- SetFont that says whether the face took: pcall catches a nil path, the
--- return value a font file that would not load - which leaves the string
--- with no font, so its next SetText errors ("Font not set")
-local function TrySetFont(fs, path, size, flags)
-    local ok, set = pcall(fs.SetFont, fs, path, size, flags)
-    return (ok and set) and true or false
-end
 local function Cell(parent)
     local c = CreateFrame("Button", nil, parent)
     c:SetSize(CELL, CELL)
@@ -64,8 +57,9 @@ local function Cell(parent)
     c.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     -- an empty cell: a faint dash, not a white square
     c.empty = c:CreateFontString(nil, "OVERLAY")
-    local epath = (ns.ResolveFontPath and ns.ResolveFontPath()) or STANDARD_TEXT_FONT
-    if not TrySetFont(c.empty, epath, 14, "OUTLINE") then c.empty:SetFont(STANDARD_TEXT_FONT, 14, "OUTLINE") end
+    -- (ZacUI's font, kept up when it changes)
+    if ns.FollowFont then ns.FollowFont(c.empty, 14, "OUTLINE", STANDARD_TEXT_FONT) end
+    if not c.empty:GetFont() then c.empty:SetFont(STANDARD_TEXT_FONT, 14, "OUTLINE") end
     c.empty:SetPoint("CENTER", 0, 0)
     c.empty:SetText("-")
     c.empty:SetTextColor(0.45, 0.45, 0.45)
@@ -80,8 +74,8 @@ local function Cell(parent)
         end
     end
     c.mark = c:CreateFontString(nil, "OVERLAY")
-    local path = (ns.ResolveFontPath and ns.ResolveFontPath()) or STANDARD_TEXT_FONT
-    if not TrySetFont(c.mark, path, 10, "OUTLINE") then c.mark:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE") end
+    if ns.FollowFont then ns.FollowFont(c.mark, 10, "OUTLINE", STANDARD_TEXT_FONT) end
+    if not c.mark:GetFont() then c.mark:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE") end
     c.mark:SetPoint("BOTTOMRIGHT", -1, 1)
     local hl = c:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
@@ -181,8 +175,8 @@ function Grid.NewHeader(parent, width, preview)
         h.icon = h:CreateTexture(nil, "ARTWORK")
         h.icon:SetAllPoints()
         h.count = h:CreateFontString(nil, "OVERLAY")
-        local path = (ns.ResolveFontPath and ns.ResolveFontPath()) or STANDARD_TEXT_FONT
-        if not TrySetFont(h.count, path, 10, "OUTLINE") then h.count:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE") end
+        if ns.FollowFont then ns.FollowFont(h.count, 10, "OUTLINE", STANDARD_TEXT_FONT) end
+        if not h.count:GetFont() then h.count:SetFont(STANDARD_TEXT_FONT, 10, "OUTLINE") end
         h.count:SetPoint("BOTTOMRIGHT", 0, 0)
         if slot <= D.NUM_CLASSES then
             local cls = D.CLASSES[slot]

@@ -536,7 +536,8 @@ local function TrySetFont(fs, path, size, flags)
     return (ok and set) and true or false
 end
 function Maps.LabelFont(fs, size, fpath, delta, flags, shadow, sx, sy)
-    local path = fpath or select(1, fs:GetFont()) or STANDARD_TEXT_FONT
+    -- (no face of ZacUI's: the game's, not whatever the label wore last)
+    local path = fpath or ns.GAME_FONT or select(1, fs:GetFont()) or STANDARD_TEXT_FONT
     flags = flags or "OUTLINE"
     local sh = shadow and ((sx or 1) .. "," .. (sy or -1)) or "0"
     if fs._zSize ~= size or fs._zPath ~= path or fs._zFlags ~= flags or fs._zShadow ~= sh then

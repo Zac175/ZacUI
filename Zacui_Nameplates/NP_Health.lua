@@ -476,13 +476,46 @@ local function GlideHealth(bar, value, max, guid)
     glider:Show()
 end
 
+-- WoW Forever hides an enemy's health in combat (secret values: no
+-- compare, no arithmetic). The bar and the percent still take them as
+-- they are (ZacUI's display helpers, Core_Flavor): the bar straight from
+-- the two values (no glide: a glide is maths), the percent the game's
+-- own (UnitHealthPercent through a 0-100 curve). "Hide the percent at
+-- full health" is the game's answer too, as the text's alpha (a curve:
+-- 0 at full). A saved percent format can't be filled from hidden values,
+-- so the plain "N%" shows meanwhile. The priority count's "at zero"
+-- check is maths on the health: it waits until the health reads again.
+-- The remembered values the plain path compares against are cleared,
+-- so it picks up cleanly afterwards.
+local function FillHiddenHealth(f, hp, hpMax)
+    local bar = f.health
+    gliding[bar] = nil
+    bar._zsv, bar._zsg, bar._zsm, bar._max = nil, nil, nil, nil
+    f._pctShown = nil
+    if not ns.ShowBar(bar, hp, hpMax) then return end
+    local cfg = f.isFriend and DB().friendly or DB().enemy
+    local pct = cfg.percent and not f.nameOnly and ns.HealthPercent(f.unit) or nil
+    if pct ~= nil and ns.ShowText(f.percent, "%.0f%%", pct) then
+        local a = ns.HealthAlpha(f.unit, 0.9995)
+        if a ~= nil then
+            f.percent:SetAlpha(a)
+            f.percent._zHiddenA = true
+        end
+    else
+        f.percent:SetText("")
+    end
+end
+
 function NP.UpdateHealth(f)
     if not f.unit then return end
     local hp = UnitHealth(f.unit)
     local hpMax = UnitHealthMax(f.unit)
-    -- WoW Forever hides an enemy's health in combat (a secret value: no
-    -- compare, no arithmetic): the bar and text keep their last reading
-    if ns.IsSecret and (ns.IsSecret(hp) or ns.IsSecret(hpMax)) then return end
+    -- (WoW Forever: hidden in combat - shown as it is, FillHiddenHealth)
+    if ns.IsSecret and (ns.IsSecret(hp) or ns.IsSecret(hpMax)) then
+        if ns.ShowBar then FillHiddenHealth(f, hp, hpMax) end
+        return
+    end
+    if f.percent._zHiddenA then f.percent._zHiddenA = nil f.percent:SetAlpha(1) end
     -- a priority mob at zero drops out of the mid-screen count at once,
     -- before its plate goes (priority plates only: one compare each)
     if f._priority and (hp <= 0) ~= (f._prioDead or false) then

@@ -89,13 +89,10 @@ function ns.FontSpec(kind)
     return spec, size or FONT_DEFAULT_SIZE[kind] or 11
 end
 
--- the file for a face name: the unit frames' own font when none is set
+-- the file for a text's face: ZacUI's one font (else the frames' font). A
+-- face saved for one text (the per-text pickers of old) is ignored - kept
+-- in the settings, never drawn.
 function ns.FontPath(face)
-    if face and face ~= "" then
-        local Zr = _G.ZacUI
-        if Zr and Zr.ResolveFontFace then return Zr.ResolveFontFace(face) end
-        return ns.Media:Font(face)
-    end
     return ns.Media:Font(ns.db and ns.db.media and ns.db.media.font)
 end
 
@@ -115,6 +112,11 @@ function ns.ApplyFont(fs, kind, sizeOverride)
     if not TrySetFont(fs, path, size, flags)
        and not TrySetFont(fs, ns.Media:Font(ns.db and ns.db.media and ns.db.media.font), size, flags) then
         pcall(fs.SetFont, fs, STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", size, flags)
+    end
+    -- every text in ZacUI's font, kept up when it changes
+    local Z = ns.ZUI or _G.ZacUI
+    if Z and Z.TrackHouseFont then
+        Z.TrackHouseFont(fs, function(s) ns.ApplyFont(s, kind, sizeOverride) end)
     end
     if fs.SetShadowOffset then
         if spec and spec.shadow then
@@ -493,6 +495,18 @@ local function buildCastbar(frame)
     cb:SetScript("OnUpdate", function(self)
         if self.preview then return end          -- move-mode preview holds it static
         if self._ending then return end          -- playing its "cast over" animation
+        local hid = self._zHidden
+        if hid then
+            -- WoW Forever, a hidden cast: the game's own timer drives the
+            -- bar (ns.CastbarHidden); the time left as the game hands it
+            -- over, straight onto the text
+            if self.timerOn and hid.GetRemainingDuration then
+                local ok, left = pcall(hid.GetRemainingDuration, hid)
+                local Z = _G.ZacUI
+                if ok and left ~= nil and Z and Z.ShowText then Z.ShowText(self.timer, "%.1f", left) end
+            end
+            return
+        end
         if not self.endT then ns.CastbarEnd(self); return end
         local now = GetTime()
         if now >= self.endT then ns.CastbarEnd(self); return end
@@ -963,13 +977,62 @@ end
 -- ----------------------------------------------------------------------------
 -- Updates (per-unit; each early-outs when its element is disabled)
 -- ----------------------------------------------------------------------------
+-- WoW Forever hides health in combat (secret values: no compare, no
+-- arithmetic). The bar and its text still take them as they are: the bar
+-- straight from the two values (no glide: a glide is maths), the text
+-- from the number and the game's own percent (ZacUI's display helpers,
+-- Core_Flavor). A saved text format can't be filled from hidden values,
+-- so the frame's text mode is drawn the plain way while they are hidden;
+-- abbreviating (12.3k) is the game's AbbreviateNumbers when it takes the
+-- value, else the whole number. The remembered values the plain path
+-- compares against are cleared, so it picks up cleanly afterwards.
+local function hiddenNumber(v)
+    if AbbreviateNumbers then
+        local ok, s = pcall(AbbreviateNumbers, v)
+        if ok and s ~= nil then return "%s", s end
+    end
+    return "%d", v
+end
+local function PaintHiddenHealth(frame, unit, cur, max, online, status, r, g, b)
+    local hb = frame.Health
+    local Z = _G.ZacUI
+    if not (Z and Z.ShowBar) then return end
+    smoothing[hb] = nil
+    hb._zsv, hb._zsg, hb._pct, frame._maxhp = nil, nil, nil, nil
+    if not Z.ShowBar(hb, cur, max) then return end
+    if r ~= frame._cr or g ~= frame._cg or b ~= frame._cb then
+        hb:SetStatusBarColor(r, g, b)
+        frame._cr, frame._cg, frame._cb = r, g, b
+    end
+    local a = online and 1 or 0.55
+    if a ~= frame._alpha then frame:SetAlpha(a * (frame._visAlpha or 1)); frame._alpha = a end
+    local mode = (frame.cfg and frame.cfg.healthText) or "percent"
+    if status then
+        hb.text:SetText(status)
+    elseif mode == "none" then
+        hb.text:SetText("")
+    elseif mode == "current" then
+        local f, v = hiddenNumber(cur)
+        Z.ShowText(hb.text, f, v)
+    else
+        local pct = Z.HealthPercent(unit)
+        if mode == "both" then
+            local f, v = hiddenNumber(cur)
+            if pct ~= nil then Z.ShowText(hb.text, f .. "  %.0f%%", v, pct) else Z.ShowText(hb.text, f, v) end
+        elseif pct ~= nil then
+            Z.ShowText(hb.text, "%.0f%%", pct)
+        else
+            hb.text:SetText("")
+        end
+    end
+end
+
 function ns.UpdateHealth(frame)
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return end
     local cur, max = UnitHealth(unit), UnitHealthMax(unit)
-    -- WoW Forever hides health in combat (a secret value: no compare, no
-    -- arithmetic): the bar and its text keep their last reading
-    if issecretvalue ~= nil and (issecretvalue(cur) or issecretvalue(max)) then return end
+    -- (WoW Forever: hidden in combat - shown as it is, PaintHiddenHealth)
+    local hidden = issecretvalue ~= nil and (issecretvalue(cur) or issecretvalue(max))
     local online = UnitIsConnected(unit)
     local r, g, b
     if online then r, g, b = ns.UnitColor(unit, frame) else r, g, b = 0.45, 0.45, 0.45 end
@@ -980,6 +1043,12 @@ function ns.UpdateHealth(frame)
     if not online then status = "Offline"
     elseif UnitIsFeignDeath and UnitIsFeignDeath(unit) then status = "FD"
     elseif UnitIsDead(unit) or UnitIsGhost(unit) then status = "Dead" end
+    if hidden then
+        -- (no incoming-heal chips while the health is hidden: they are
+        -- placed by maths on it)
+        PaintHiddenHealth(frame, unit, cur, max, online, status, r, g, b)
+        return
+    end
     ns.PaintHealth(frame, cur, max, UnitGUID(unit), online, status, r, g, b)
     if frame.cfg and frame.cfg.healPrediction then ns.UpdateHealPrediction(frame) end
 end
@@ -1827,7 +1896,24 @@ function ns.UpdatePower(frame)
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return end
     local ptype, ptoken = UnitPowerType(unit)
-    ns.PaintPower(frame, UnitPower(unit), UnitPowerMax(unit), UnitGUID(unit), ptoken, ptype)
+    local cur, max = UnitPower(unit), UnitPowerMax(unit)
+    if issecretvalue ~= nil and (issecretvalue(cur) or issecretvalue(max)) then
+        -- WoW Forever may hide power too: the bar straight from the values
+        local Z, pb = _G.ZacUI, frame.Power
+        if Z and Z.ShowBar then
+            smoothing[pb] = nil
+            pb._zsv, pb._zsg, frame._maxpp = nil, nil, nil
+            Z.ShowBar(pb, cur, max)
+        end
+        local PBC = PowerBarColor
+        local c = PBC and ((ptoken and PBC[ptoken]) or (ptype and PBC[ptype])) or POWER_FALLBACK
+        if c.r ~= frame._pcr or c.g ~= frame._pcg or c.b ~= frame._pcb then
+            pb:SetStatusBarColor(c.r, c.g, c.b)
+            frame._pcr, frame._pcg, frame._pcb = c.r, c.g, c.b
+        end
+        return
+    end
+    ns.PaintPower(frame, cur, max, UnitGUID(unit), ptoken, ptype)
 end
 
 -- The power bar from plain values (live update and preview samples).
@@ -1934,14 +2020,34 @@ end
 -- reads as "no aura" here (the same answer ZacUI's Core_Forever stand-ins
 -- give), so on Forever the icons, the tint and the dispel glow go quiet in
 -- combat instead of throwing. issecretvalue does not exist on Era or TBC.
+--
+-- On the Forever client itself an aura like that is no longer dropped:
+-- scanAura answers false plus the aura's table, and the icon grid shows
+-- its icon and stacks straight from it (the game takes hidden values as
+-- they are; see showHiddenAura). A read the game refuses answers false
+-- with no table and the walk goes past it. The filters that need its
+-- name, caster or type can't see it; "only mine" asks the game's
+-- never-hidden "from you" flag.
 local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
 local isSecret = issecretvalue
+local hiddenClient = _G.ZACUI_IS_FOREVER and true or false
 local scanAura
 if GetAuraDataByIndex then
     scanAura = function(unit, index, filter)
-        local a = GetAuraDataByIndex(unit, index, filter)
+        local a
+        if hiddenClient then
+            local ok, r = pcall(GetAuraDataByIndex, unit, index, filter)
+            if not ok then return false, nil end
+            a = r
+        else
+            a = GetAuraDataByIndex(unit, index, filter)
+        end
         if not a then return nil end
-        if isSecret and (isSecret(a.name) or isSecret(a.dispelName) or isSecret(a.spellId)) then return nil end
+        if isSecret and (isSecret(a.name) or isSecret(a.dispelName) or isSecret(a.spellId)
+            or (hiddenClient and (isSecret(a.applications) or isSecret(a.sourceUnit)))) then
+            if hiddenClient then return false, a end
+            return nil
+        end
         return a.name, a.icon, a.applications, a.sourceUnit, a.spellId, a.dispelName
     end
 elseif UnitAura then
@@ -2131,6 +2237,20 @@ end
 local function buffShown(cfg, name, spellID)
     return (not cfg.filterEnabled) or auraListMatch(cfg.buffList, name, spellID)
 end
+-- WoW Forever: a debuff the game hides passes only the filters that don't
+-- need its name or type ("only mine": the never-hidden "from you" flag)
+local function hiddenDebuffShown(cfg, a)
+    if a == nil or cfg.dispellableOnly or cfg.filterEnabled then return false end
+    if not cfg.onlyMine then return true end
+    local Z = _G.ZacUI
+    return (Z and Z.AuraIsMine and Z.AuraIsMine(a)) and true or false
+end
+-- its icon and stacks straight onto the icon (hidden values as they are)
+local function showHiddenAura(b, unit, a)
+    pcall(b.icon.SetTexture, b.icon, a.icon)
+    local Z = _G.ZacUI
+    if not (Z and Z.ShowAuraCount and Z.ShowAuraCount(b.count, unit, a)) then b.count:SetText("") end
+end
 
 -- The icon grid for a frame: the step between icons, icons per row, the
 -- debuff and buff anchors, and the room a castbar below the frame takes.
@@ -2231,8 +2351,8 @@ function ns.UpdateAuras(frame, updateInfo)
         if checkDispel then
             for index = 1, 40 do
                 local name, _, _, _, _, dispelType = scanAura(unit, index, "HARMFUL")
-                if not name then break end
-                if dispelType and playerDispels[dispelType] then foundDispel = dispelType; break end
+                if name == nil then break end
+                if name and dispelType and playerDispels[dispelType] then foundDispel = dispelType; break end
             end
         end
         setDispelHighlight(frame, tintOn and foundDispel or nil)
@@ -2253,11 +2373,21 @@ function ns.UpdateAuras(frame, updateInfo)
         local oy = (fcfg.debuffY or 0) - (da.below and cbGap or 0)
         for index = 1, 40 do
             local name, icon, count, source, spellID, dispelType = scanAura(unit, index, "HARMFUL")
-            if not name then break end
-            if checkDispel and not foundDispel and dispelType and playerDispels[dispelType] then
+            if name == nil then break end
+            if name == false then
+                -- (WoW Forever: a debuff the game hides; icon = its table)
+                if not iconsDone and hiddenDebuffShown(cfg, icon) then
+                    pool = pool + 1
+                    local b = getAuraIcon(frame, pool)
+                    showHiddenAura(b, unit, icon)
+                    placeAura(frame, b, da, n, perRow, step, fcfg.debuffX or 0, oy)
+                    n = n + 1
+                    if n >= cfg.max then iconsDone = true end
+                end
+            elseif checkDispel and not foundDispel and dispelType and playerDispels[dispelType] then
                 foundDispel = dispelType
             end
-            if not iconsDone and debuffShown(cfg, name, spellID, source, dispelType, playerDispels) then
+            if name and not iconsDone and debuffShown(cfg, name, spellID, source, dispelType, playerDispels) then
                 pool = pool + 1
                 local b = getAuraIcon(frame, pool)
                 b.icon:SetTexture(icon)
@@ -2278,8 +2408,18 @@ function ns.UpdateAuras(frame, updateInfo)
         local oy = (fcfg.buffY or 0) - (ba.below and cbGap or 0)
         for index = 1, 40 do
             local name, icon, count, _, spellID = scanAura(unit, index, "HELPFUL")
-            if not name then break end
-            if buffShown(cfg, name, spellID) then
+            if name == nil then break end
+            if name == false then
+                -- (WoW Forever: a buff the game hides; icon = its table)
+                if icon and not cfg.filterEnabled then
+                    pool = pool + 1
+                    local b = getAuraIcon(frame, pool)
+                    showHiddenAura(b, unit, icon)
+                    placeAura(frame, b, ba, n, perRow, step, fcfg.buffX or 0, oy)
+                    n = n + 1
+                    if n >= cfg.max then break end
+                end
+            elseif buffShown(cfg, name, spellID) then
                 pool = pool + 1
                 local b = getAuraIcon(frame, pool)
                 b.icon:SetTexture(icon)
@@ -2367,6 +2507,7 @@ function ns.CastbarStart(frame, text, texture, startT, endT, channel, notInterru
     if not cb then return end
     local appearing = (not cb:IsShown()) or cb._ending
     cb._ending = nil
+    cb._zHidden = nil
     cb.channel = channel
     cb.startT  = startT
     cb.endT    = endT
@@ -2387,9 +2528,39 @@ end
 function ns.CastbarEnd(cb)
     if not cb or cb._ending then return end
     cb.endT = nil
+    cb._zHidden = nil
     if not cb:IsShown() then return end
     cb._ending = true
     motionHide(cb, ns.db.castbar.hideAnim, function() cb._ending = nil end)
+end
+
+-- WoW Forever hides a cast in combat (secret values: no compare, no
+-- arithmetic). The bar still shows it: the game's own duration object for
+-- the cast drives the fill (UnitCastingDuration / UnitChannelDuration ->
+-- StatusBar:SetTimerDuration), and the spell's name and icon go onto the
+-- text and the icon as they are. Whether it can be interrupted is hidden
+-- too, so it wears the normal cast colour. false when this client can't
+-- (the bar then goes, as before).
+function ns.CastbarHidden(frame, name, text, texture, channel)
+    local cb = frame.Castbar
+    local Z = _G.ZacUI
+    if not (cb and Z and Z.CastDuration and Z.ShowCastTimer) then return false end
+    local dur = Z.CastDuration(frame.unit, channel)
+    if not dur then return false end
+    if not Z.ShowCastTimer(cb, dur, channel) then return false end
+    local appearing = (not cb:IsShown()) or cb._ending
+    cb._ending = nil
+    cb.channel, cb.startT, cb.endT, cb._tenths = channel, nil, nil, nil
+    cb._zHidden = dur
+    local c = ns.db.colors.castbar
+    cb:SetStatusBarColor(c[1], c[2], c[3], c[4] or 1)
+    if cb.icon then pcall(cb.icon.SetTexture, cb.icon, texture) end
+    if cb.spell then pcall(cb.spell.SetText, cb.spell, text or name) end
+    if cb.timer then cb.timer:SetText("") end
+    if appearing then
+        motionShow(cb, ns.db.castbar.showAnim)
+    end
+    return true
 end
 
 -- fromEvent: a cast event asked (a cast that just stopped animates out);
@@ -2404,14 +2575,21 @@ function ns.CastbarUpdate(frame, fromEvent)
 
     local name, text, texture, startMS, endMS, _, _, notInterruptible = UnitCastingInfo(unit)
     -- WoW Forever hides a cast in combat (secret values: no compare, no
-    -- arithmetic): the bar goes until it reads again
+    -- arithmetic): shown as it is (ns.CastbarHidden), else the bar goes
+    -- until it reads again
     local sec = issecretvalue
-    if sec ~= nil and (sec(name) or sec(startMS) or sec(endMS)) then ns.CastbarStopMotion(cb) cb:Hide() return end
+    if sec ~= nil and (sec(name) or sec(startMS) or sec(endMS)) then
+        if ns.CastbarHidden(frame, name, text, texture, false) then return end
+        ns.CastbarStopMotion(cb) cb:Hide() return
+    end
     local channel = false
     if not name then
         name, text, texture, startMS, endMS, _, notInterruptible = UnitChannelInfo(unit)
         channel = true
-        if sec ~= nil and (sec(name) or sec(startMS) or sec(endMS)) then ns.CastbarStopMotion(cb) cb:Hide() return end
+        if sec ~= nil and (sec(name) or sec(startMS) or sec(endMS)) then
+            if ns.CastbarHidden(frame, name, text, texture, true) then return end
+            ns.CastbarStopMotion(cb) cb:Hide() return
+        end
     end
     if not name then
         if fromEvent then ns.CastbarEnd(cb) else ns.CastbarStopMotion(cb) cb:Hide() end

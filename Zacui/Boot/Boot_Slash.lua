@@ -82,6 +82,10 @@ SlashCmdList["ZACUI"] = function(msg)
         -- (General > Game versions; Core_Flavor)
         if ns.FlavorCommand then ns.FlavorCommand(rest) end
         return
+    elseif cmd == "version" or cmd == "ver" then
+        -- this client's version and the newest one heard (Core_VersionCheck)
+        if ns.VersionCommand then ns.VersionCommand() else Print("v" .. ZUI.VERSION) end
+        return
     elseif cmd == "raid" or cmd == "summary" then
         -- the raid summary: the last raid (or /zui raid n, counted back)
         if ns.FeatureOn and not ns.FeatureOn("raid_summary") then

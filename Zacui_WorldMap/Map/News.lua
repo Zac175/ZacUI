@@ -38,9 +38,15 @@ function mod.NewsUnseen()
 	return newest ~= nil and mod.db.newsSeen ~= false and mod.db.newsSeen ~= newest
 end
 
+-- ZacUI's font when one is chosen (kept up when it changes), else the
+-- book's own face: Morpheus for the titles, the game's for the text
 local function Font(fs, face, size)
-	if not fs:SetFont(face, size, "") then fs:SetFontObject(GameFontNormal) end
+	local z = _G.ZacUI
+	local house = z and z.Media and z.Media.FontPath and z.Media.FontPath()
+	local ok, set = pcall(fs.SetFont, fs, house or face, size, "")
+	if not (ok and set) and not fs:SetFont(face, size, "") then fs:SetFontObject(GameFontNormal) end
 	fs:SetShadowOffset(0, 0)
+	if z and z.TrackHouseFont then z.TrackHouseFont(fs, function(s) Font(s, face, size) end) end
 	return fs
 end
 

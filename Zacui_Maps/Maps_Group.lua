@@ -279,20 +279,35 @@ end
 -- kept and rewritten in place. cs is the canvas scale the dots sit at
 -- (1 for the preview) - sizes are divided by it so a dot is the same
 -- size on screen at every zoom.
+--
+-- THE DOT IS DRAWN AT SCREEN SIZE AND SCALED, NOT SIZED IN CANVAS UNITS
+-- (2026-11-06, Zac: the dots "can stay stuck like this for a while" - huge
+-- black discs with giant names round small dots). Dividing the size by
+-- the canvas scale worked for the fill, but the outline was left in
+-- canvas units (1 unit = cs pixels: at a deep zoom a disc tens of pixels
+-- thick), and the name's font size went below what SetFont accepts, so
+-- the name kept its last, much bigger size until the zoom came back out.
+-- Now every dot is laid out at its real size (L.px, L.namePx, the outline
+-- in pixels) and the frame itself is scaled by 1 / cs; size and
+-- nameSize below stay in canvas units for the declutter, which works on
+-- the canvas.
 local look = {}
 function G.Look(cs)
     local db = DB()
     cs = (cs and cs > 0) and cs or 1
-    look.size = (db.classIconSize or 14) / cs
+    look.cs = cs
+    look.px = db.classIconSize or 14
+    look.size = look.px / cs
     look.names = db.dotNames ~= false
-    look.nameSize = math.max(1, (tonumber(db.dotNameSize) or 9) / cs)
+    look.namePx = math.max(1, tonumber(db.dotNameSize) or 9)
+    look.nameSize = look.namePx / cs
     look.dodge = db.dotNameDeclutter ~= false
     look.round = db.dotRound ~= false
     look.border = db.dotBorder ~= false
     look.alpha = tonumber(db.dotAlpha) or 1
     -- the outline: black, 1px, unless picked otherwise
     look.br, look.bg, look.bb, look.ba = Maps.Color("dotBorderColor", { 0, 0, 0, 1 })
-    -- (in canvas units, like the dot's outline always was)
+    -- (pixels on screen, like the dot: the frame carries the zoom)
     look.bsize = math.max(0, tonumber(db.dotBorderSize) or 1)
     -- the fill and the name: class colour, or one colour for everyone
     look.oneColour = db.dotColorMode == "custom"
@@ -303,8 +318,10 @@ function G.Look(cs)
     -- outlined, no shadow - unless the Maps page says otherwise
     local spec = type(db.dotNameFont) == "table" and db.dotNameFont or {}
     local cfg = ZacUIDB and ZacUIDB.font or {}
-    look.fpath = (spec.face and ns.ResolveFontFace and ns.ResolveFontFace(spec.face))
-        or (ns.ResolveFontPath and ns.ResolveFontPath(cfg.name))
+    -- (the face is ZacUI's one font, always: a face saved on the Maps page
+    -- is ignored - 2026-11-06, "fonts should always match for literally
+    -- everything")
+    look.fpath = (ns.OneFace and ns.OneFace()) or (ns.ResolveFontPath and ns.ResolveFontPath(cfg.name))
     look.fdelta = cfg.delta or 0
     look.fflags = ns.FontOutlineFlags and ns.FontOutlineFlags(spec.outline or "outline") or "OUTLINE"
     look.fshadow = spec.shadow and true or false
@@ -317,9 +334,14 @@ end
 -- and name (class colour r, g, b unless one colour is picked). strata is
 -- the map's; the preview passes nil.
 function G.Paint(dot, L, r, g, b, name, strata)
-    if dot._zSize ~= L.size then
-        dot._zSize = L.size
-        dot:SetSize(L.size, L.size)
+    local sc = 1 / (L.cs or 1)
+    if dot._zScale ~= sc then
+        dot._zScale = sc
+        dot:SetScale(sc)
+    end
+    if dot._zSize ~= L.px then
+        dot._zSize = L.px
+        dot:SetSize(L.px, L.px)
     end
     if dot._zBSize ~= L.bsize then
         dot._zBSize = L.bsize
@@ -336,7 +358,7 @@ function G.Paint(dot, L, r, g, b, name, strata)
     Style(dot, L.round, L.border, L.alpha, strata)
     local label = dot.label
     if L.names then
-        Maps.LabelFont(label, L.nameSize, L.fpath, L.fdelta, L.fflags, L.fshadow, L.fsx, L.fsy)
+        Maps.LabelFont(label, L.namePx, L.fpath, L.fdelta, L.fflags, L.fshadow, L.fsx, L.fsy)
         label:SetText(name)
         if L.oneName then label:SetTextColor(L.nr, L.ng, L.nb) else label:SetTextColor(r, g, b) end
     end
@@ -349,7 +371,8 @@ function G.PlaceName(dot, L, x, y, declutter)
     if L.names then
         showName = true
         if L.dodge and declutter then
-            local lw = (dot.label:GetStringWidth() or 0) / 2 + 1
+            -- (the label measures in the dot's own units: back to the canvas's)
+            local lw = (dot.label:GetStringWidth() or 0) / (L.cs or 1) / 2 + 1
             showName = declutter.Place(x, y - L.size / 2 - 1 - L.lh, lw, L.lh)
         end
     end
@@ -397,15 +420,16 @@ function G.Update()
                 local unit, x, y = snapshot.unit[i], snapshot.x[i], snapshot.y[i]
                 shown = shown + 1
                 local dot = Dot(shown, canvas)
-                dot:ClearAllPoints()
-                -- As a FRACTION of the canvas, so panning and
-                -- zooming carry the dot along.
-                dot:SetPoint("CENTER", canvas, "TOPLEFT", x * w, -y * h)
                 local r, g, b = ClassColour(unit)
-                -- Size, shape, outline, opacity, colour and strata: live,
-                -- but only touched when they differ from what this dot
-                -- already has (see Style), and the name under it.
+                -- Size, scale, shape, outline, opacity, colour and strata:
+                -- live, but only touched when they differ from what this
+                -- dot already has (see Style), and the name under it.
                 G.Paint(dot, L, r, g, b, (UnitName(unit)), strata)
+                dot:ClearAllPoints()
+                -- As a FRACTION of the canvas, so panning and zooming
+                -- carry the dot along. The offset is in the dot's own
+                -- units, and the dot is scaled by 1 / cs: times cs.
+                dot:SetPoint("CENTER", canvas, "TOPLEFT", x * w * cs, -y * h * cs)
                 -- With declutter on, a name that would land on one
                 -- already placed is left off - a stacked group shows one
                 -- readable name, not a smear.

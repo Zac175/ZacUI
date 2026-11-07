@@ -4,6 +4,17 @@
 
 local ADDON_NAME, ns = ...
 
+-- The game's own font, as the client set it before ZacUI's font replaced
+-- STANDARD_TEXT_FONT at load: what "Blizzard default" means for the rest
+-- of the session.
+ns.GAME_FONT = STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+-- STANDARD_TEXT_FONT handed in as "the game's font" by a caller: once
+-- ZacUI's font has replaced it at load, that is ZacUI's font of the time
+function ns.GameFace(p)
+    if p ~= nil and p == STANDARD_TEXT_FONT then return ns.GAME_FONT end
+    return p
+end
+
 -- ============================================================
 -- FONT SYSTEM (/zacui font|fontsize|fontoutline|fontlist)
 -- ============================================================
@@ -68,6 +79,65 @@ end
 --   already applied, and the only way back was a reload. The stock path
 --   is captured on first touch alongside the stock size.
 local fontBase = {}
+
+-- THE ONE FONT, KEPT UP. Every string ZacUI dresses in its font (HouseFont,
+-- UI.Font, ns.ApplyFontSpec with no face of its own, a part's own helper
+-- through ns.TrackHouseFont) is remembered here, weakly, with how to dress
+-- it again; a change of the font, its size or its outline re-dresses them
+-- all at once - on the change, never per frame. A string something else
+-- has since given a face of its own (a part's own pick) is left alone:
+-- only one still wearing the face it was last given here is redone.
+local houseStrings = setmetatable({}, { __mode = "k" })
+local function TrackHouseFont(fs, redo)
+    if type(fs) ~= "table" or not fs.GetFont then return end
+    if redo == nil then houseStrings[fs] = nil return end
+    houseStrings[fs] = redo
+    rawset(fs, "_zHouseFace", (fs:GetFont()))
+end
+local function ReapplyHouseFonts()
+    local list = {}
+    for fs in pairs(houseStrings) do list[#list + 1] = fs end
+    local n = 0
+    for _, fs in ipairs(list) do
+        local redo = houseStrings[fs]
+        local last = rawget(fs, "_zHouseFace")
+        if redo and (last == nil or fs:GetFont() == last) then
+            if pcall(redo, fs) then n = n + 1 end
+            -- (what it wears now is what the next change looks for)
+            if houseStrings[fs] then rawset(fs, "_zHouseFace", (fs:GetFont())) end
+        end
+    end
+    return n
+end
+-- what the strings were last dressed for: a re-dress runs only when it moved
+local houseEpoch
+local function FontEpoch()
+    local cfg = ZacUIDB and ZacUIDB.font or {}
+    return tostring(ResolveFontPath(cfg.name)) .. "/" .. tostring(cfg.delta or 0) .. "/" .. tostring(cfg.outline)
+end
+
+-- The face a string had before ZacUI's font reached it, kept on the string
+-- the first time it is asked: what "Blizzard default" puts back. A string
+-- made from one of the game's font objects that ZacUI already dressed
+-- answers that object's stock face, not ZacUI's.
+local function HouseOrig(fs)
+    local o = rawget(fs, "_zHouseOrig")
+    if o ~= nil then return o or nil end
+    local cur = fs.GetFont and fs:GetFont()
+    local fo = fs.GetFontObject and fs:GetFontObject()
+    if type(fo) == "string" then fo = _G[fo] end
+    if fo then
+        for objName, base in pairs(fontBase) do
+            if _G[objName] == fo then cur = base.path or cur break end
+        end
+    end
+    local cfg = ZacUIDB and ZacUIDB.font or {}
+    local house = ResolveFontPath(cfg.name)
+    if cur and house and cur == house then cur = ns.GAME_FONT end
+    rawset(fs, "_zHouseOrig", cur or false)
+    return cur
+end
+
 local function ApplyFonts()
     local cfg = ZacUIDB and ZacUIDB.font
     if not cfg then return end
@@ -76,6 +146,7 @@ local function ApplyFonts()
     -- Deliberately NO early-out once anything has been applied: returning
     -- to defaults has to be able to walk the objects and put them back.
     if not path and delta == 0 and not cfg.outline and not next(fontBase) then
+        houseEpoch = houseEpoch or FontEpoch()
         return
     end
 
@@ -109,6 +180,10 @@ local function ApplyFonts()
             end
         end
     end
+    -- and every string ZacUI dressed itself, when the font moved
+    local epoch = FontEpoch()
+    if houseEpoch ~= nil and epoch ~= houseEpoch then ReapplyHouseFonts() end
+    houseEpoch = epoch
 end
 
 
@@ -116,11 +191,16 @@ end
 -- string already has, else `fallback`) at size + the font delta, with
 -- `flags` (default: OUTLINE unless the outline option is NONE). Several
 -- modules carried their own copy of exactly this.
-local function HouseFont(fs, size, flags, fallback)
+local HouseFont
+function HouseFont(fs, size, flags, fallback)
     if type(fs) ~= "table" or not fs.SetFont then return end
     local cfg = ZacUIDB and ZacUIDB.font or {}
+    -- the face the string had before ZacUI's font first reached it: what
+    -- "Blizzard default" puts back on a re-dress
+    local orig = HouseOrig(fs)
+    local askFlags = flags
     -- (a string made without a template has no font: the game's, then)
-    local path = ResolveFontPath(cfg.name) or (fs.GetFont and fs:GetFont()) or fallback or STANDARD_TEXT_FONT
+    local path = ResolveFontPath(cfg.name) or orig or ns.GameFace(fallback) or ns.GAME_FONT
     if not path then return end
     if flags == nil then flags = (cfg.outline == "NONE") and "" or "OUTLINE" end
     -- a face whose file will not load returns false and leaves the string
@@ -130,9 +210,53 @@ local function HouseFont(fs, size, flags, fallback)
         ok, set = pcall(fs.SetFont, fs, fallback or STANDARD_TEXT_FONT, size + (cfg.delta or 0), flags)
         if not (ok and set) then pcall(fs.SetFont, fs, STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", size + (cfg.delta or 0), flags) end
     end
+    -- (the flags as asked: nil follows the outline option on a re-dress too)
+    TrackHouseFont(fs, function(s) HouseFont(s, size, askFlags, fallback) end)
 end
 
+-- A string ZacUI restyles but did not make (a Blizzard frame's name, a
+-- message frame, a skinned label) or one a part sizes itself: ZacUI's
+-- face when one is chosen, else the face the string had before ZacUI
+-- first touched it (`fallback`, else the game's, for a string that had
+-- none), at `size` (nil: the size it has) with `flags` (nil: the flags it
+-- has). Kept up like every house string.
+local function FollowFont(fs, size, flags, fallback)
+    if type(fs) ~= "table" or not (fs.SetFont and fs.GetFont) then return end
+    local curPath, curSize, curFlags = fs:GetFont()
+    local orig = HouseOrig(fs)
+    if not orig then
+        orig = ns.GameFace(fallback) or ns.GAME_FONT
+        rawset(fs, "_zHouseOrig", orig or false)
+    end
+    local cfg = ZacUIDB and ZacUIDB.font or {}
+    local path = ResolveFontPath(cfg.name) or orig or curPath
+    if not path then return end
+    local useSize, useFlags = size or curSize or 12, flags
+    if useFlags == nil then useFlags = curFlags or "" end
+    local ok, set = pcall(fs.SetFont, fs, path, useSize, useFlags)
+    if not (ok and set) and orig and orig ~= path then pcall(fs.SetFont, fs, orig, useSize, useFlags) end
+    TrackHouseFont(fs, function(s) FollowFont(s, size, flags, fallback) end)
+end
+
+-- THE ONE FACE. ZacUI's font, when one is chosen on Fonts & Textures: the
+-- face of every text ZacUI draws, whatever a part, an element or an
+-- imported aura asks for. nil while none is chosen (each text then wears
+-- its own shipped face, the game's for most). Sizes, outlines and
+-- shadows stay each text's own; only the face is forced.
+local function OneFace()
+    local cfg = ZacUIDB and ZacUIDB.font
+    return cfg and ResolveFontPath(cfg.name) or nil
+end
+-- the one face when chosen, else `fallback`
+local function OneFaceOr(fallback) return OneFace() or fallback end
+
 -- shared with later ZacUI files
+ns.OneFace = OneFace
+ns.OneFaceOr = OneFaceOr
+ns.FollowFont = FollowFont
 ns.ApplyFonts = ApplyFonts
 ns.ResolveFontPath = ResolveFontPath
 ns.HouseFont = HouseFont
+ns.HouseOrig = HouseOrig
+ns.TrackHouseFont = TrackHouseFont
+ns.ReapplyHouseFonts = ReapplyHouseFonts

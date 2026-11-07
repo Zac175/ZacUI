@@ -121,7 +121,10 @@ local function SkinUnit(frame, spec)
     local nameFS = spec.name and _G[spec.name]
     if nameFS and nameFS.GetFont then
         local font, size = nameFS:GetFont()
-        if font then nameFS:SetFont(font, size or 10, "OUTLINE") end
+        if font then
+            if ns.FollowFont then ns.FollowFont(nameFS, size or 10, "OUTLINE")
+            else nameFS:SetFont(font, size or 10, "OUTLINE") end
+        end
         local c = Col("text")
         nameFS:SetTextColor(c.r, c.g, c.b, 1)
     end
@@ -222,7 +225,10 @@ local function SkinCastBar(bar, opts)
     local text = bar.Text or (name and _G[name .. "Text"])
     if text and text.GetFont then
         local font, size = text:GetFont()
-        if font then text:SetFont(font, size or 11, "OUTLINE") end
+        if font then
+            if ns.FollowFont then ns.FollowFont(text, size or 11, "OUTLINE")
+            else text:SetFont(font, size or 11, "OUTLINE") end
+        end
         local c = Col("text")
         text:SetTextColor(c.r, c.g, c.b, 1)
     end

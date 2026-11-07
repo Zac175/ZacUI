@@ -62,7 +62,10 @@ local NOT_OURS = rawget(_G, "__stubFieldKeys") or {}
 -- (a widget handed back is stopped first, see Release).
 local MOTION_KEYS = { _zAnim = true, _zFadeSerial = true, _zFadeTo = true, _zFadeWait = true,
     _zMotion = true, _zMotionProtected = true, _zPopBase = true }
-local function Skip(k) return k == 0 or NOT_OURS[k] or MOTION_KEYS[k] or k == "_zPoolSnap" end
+-- What the font keeper (Core_Fonts) notes on a string is about the face
+-- it wears now, which a change of ZacUI's font moves while it waits here.
+local HOUSE_KEYS = { _zHouseFace = true, _zHouseOrig = true }
+local function Skip(k) return k == 0 or NOT_OURS[k] or MOTION_KEYS[k] or HOUSE_KEYS[k] or k == "_zPoolSnap" end
 
 local SCRIPTS = { "OnClick", "OnEnter", "OnLeave", "OnShow", "OnHide", "OnValueChanged", "OnTextChanged",
     "OnEnterPressed", "OnEscapePressed", "OnEditFocusGained", "OnEditFocusLost", "OnMouseDown",
@@ -633,3 +636,5 @@ for _, name in ipairs({ "ColorPicker", "FontFaceDropdown", "TexturePicker", "Fon
     "TextElementGroup", "FrameElementGroup" }) do
     Wrap(name, P1)
 end
+-- (the note where a face picker was: its column's width again on reuse)
+Wrap("OneFontNote", { parent = 1, rebind = function(w, _, width) if w._zFit then w:_zFit(width or 200) end end })

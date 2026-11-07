@@ -1610,6 +1610,8 @@ B["SW:[BWL][Flamegor] Frenzy"] = {
 do
     local BREATH_ICON = { INCINERATE = 136130, CORROSIVE = 136007, FROST_BURN = 135836, IGNITE_FLESH = 135805, TIME_LAPSE = 135744 }
     local SPOKEN = { INCINERATE = "Incinerate", CORROSIVE = "Corrosive Acid", FROST_BURN = "Frost Burn", IGNITE_FLESH = "Ignite Flesh", TIME_LAPSE = "Time Lapse" }
+    -- seconds "BREATH RDY" may stay up past due with no cast seen
+    local GIVE_UP = 8
     B["SW:[BWL][Chromaggus] Breath PreWarn"] = {
         ["actions.start.custom"] = function(env)
             local breath = env.state and env.state.breath
@@ -1631,7 +1633,26 @@ do
                     if slot:find(name) then breath = name break end
                 end
                 K.Put(allstates, slot, Lasting(secs, { icon = breath and BREATH_ICON[breath] or 135805, count = count, breath = breath }))
+                -- a breath that never shows in the combat log (out of
+                -- range, a missed line) must not leave "BREATH RDY" up
+                -- for the rest of the fight
+                env.giveUp = env.giveUp or {}
+                if env.giveUp[slot] then env.giveUp[slot]:Cancel() end
+                env.giveUp[slot] = C_Timer.NewTimer((secs or 0) + GIVE_UP, function()
+                    env.giveUp[slot] = nil
+                    RM.Fire("WA_CHROMAGGUS_PREWARN_GIVE_UP", slot)
+                end)
                 return true
+            end
+            if event == "WA_CHROMAGGUS_PREWARN_GIVE_UP" then
+                local slot = ...
+                local st = slot and allstates[slot]
+                if st and st.show then
+                    st.show = false
+                    st.changed = true
+                    return true
+                end
+                return
             end
             if event == "WA_NUMEN_TIMER" then
                 local key, secs = ...
@@ -1640,6 +1661,16 @@ do
                         st.show = false
                         st.changed = true
                     end
+                    return true
+                end
+                -- a slot's countdown starting again means its breath was
+                -- just cast: its heads-up is done (from the third breath
+                -- on nothing else takes it down - 2026-11-06, Zac: "both
+                -- chromag breaths got stuck on screen saying ready")
+                local st = key and allstates[key]
+                if st and st.show then
+                    st.show = false
+                    st.changed = true
                     return true
                 end
             end

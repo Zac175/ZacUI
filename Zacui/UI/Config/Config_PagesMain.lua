@@ -229,6 +229,20 @@ RegisterPage("General", function(L)
     end
     L:EndCard()
 
+    -- the newer-version notice (Core_VersionCheck); account-wide
+    local VC = ns.VersionCheck
+    if VC then
+        L:Card("Updates")
+        local cb = UI.Checkbox(L.current, "Tell me when a newer ZacUI is out", VC.NoticeOn(),
+            function(on) VC.SetNotice(on) end,
+            { tooltip = "ZacUI compares versions with your guild and group in the background. When someone "
+                .. "has a newer one, one line in chat says so, once a session. Your version is still "
+                .. "shared while this is off. /zacui version shows the newest one seen." })
+        L:Row(cb, 17)
+        L:Desc("One line in chat, once a session. Update with the CurseForge app.")
+        L:EndCard()
+    end
+
     L:Card("Quick actions")
     local bar = L.current
     local b1 = UI.Button(bar, "Rescan frames", { width = 120, onClick = Rescan,
@@ -261,6 +275,7 @@ RegisterPage("General", function(L)
         { "/zacui line <Frame> <y>",      "move a panel's header hairline" },
         { "/zacui status",    "list every module and its state" },
         { "/zacui flavor",    "what runs on this game version (era, tbc, forever, auto to test)" },
+        { "/zacui version",   "your version and the newest one seen in your guild and group" },
         { "/zacui reset",     "back to shipped defaults" },
     }) do
         L:Pair(line[1], line[2], 215, { size = F.SMALL, keyColor = "gold", valueColor = "gray", gap = 6 })
@@ -658,7 +673,7 @@ RegisterPage("Tooltips", function(L)
         local T = ns.TipLook
         local function Stock(obj)
             local p, s, f = T.StockFont(obj)
-            return { face = p, size = s or 12, outline = (f and f ~= "") and f or "none", shadow = true }
+            return { fallbackFace = p, size = s or 12, outline = (f and f ~= "") and f or "none", shadow = true }
         end
         L:Card("Tooltip text")
         Kit.Font(L, "Title line", TipCfgOf, "headerFont", Stock("GameTooltipHeaderText"),
@@ -2341,6 +2356,26 @@ RegisterPage("Chat", function(L)
 
         -- ============================================================
         L:Card("In a raid")
+        -- the raid / party frames inside the chat box (chat.raidMode, also
+        -- /zacui raidchat; a character's own override is cleared like the
+        -- slash command does, so the tick box is what this character gets)
+        local RMo = C.RaidMode
+        local inBox = UI.Checkbox(L.current, "Raid frames in the chat box",
+            (RMo and RMo.Enabled and RMo.Enabled()) and true or false, function(v)
+            d.raidMode = v and true or false
+            if ZacUICharDB then ZacUICharDB.chatRaidMode = nil end
+            if RMo and RMo.Update then RMo.Update() end
+        end)
+        L:Row(inBox, 17)
+        L:Desc("In a raid the chat box holds the raid frames, fitted to its size, and the messages move "
+            .. "to a strip you can hide. Leaving the raid gives the box back. Same as /zacui raidchat.")
+        local pb = UI.Checkbox(L.current, "Party frames in the chat box too", d.raidModeParty ~= false, function(v)
+            d.raidModeParty = v and true or false
+            if RMo and RMo.Update then RMo.Update() end
+        end)
+        L:Row(pb, 17)
+        L:Desc("While the raid frames are in the chat box, a 5-man party sits there too, in one row across "
+            .. "the top. Off keeps the party frames where you put them.")
         local rt = UI.Checkbox(L.current, "Raid timer on the raid strip", d.raidTimer ~= false, function(v)
             d.raidTimer = v and true or false
             local T = C.RaidMode and C.RaidMode.Timer
@@ -2424,7 +2459,7 @@ RegisterPage("Chat", function(L)
             local o = _G[obj]
             local p, s, fl
             if o and o.GetFont then p, s, fl = o:GetFont() end
-            return { face = p, size = s or size, outline = (fl and fl ~= "") and fl or "none", shadow = true }
+            return { fallbackFace = p, size = s or size, outline = (fl and fl ~= "") and fl or "none", shadow = true }
         end
         Kit.Font(L, "Messages", DB, "messageFont", Stock("ChatFontNormal", 14),
             { sample = "[Guild] [Zaccw]: pulling in 10", defaultLabel = "Blizzard's chat font", after = Refresh,
@@ -2779,14 +2814,14 @@ RegisterPage("LootRoll", function(L)
         L:Card("Item name")
         local fg, fs, fd = FontOf("nameFont", 12)
         UI.TextElement(L, Group(L, "name", nil, { fontGet = fg, fontSet = fs, fontDefaults = fd,
-            fontDefaultLabel = "The game's font", sample = "High Councillor's Boots" }))
+            fontDefaultLabel = "ZacUI's font", sample = "High Councillor's Boots" }))
         L:EndCard()
 
         L:Card("Time left")
         local tg, ts, td = FontOf("timeFont", 10)
         local fmtGet, fmtSet = LRAccess("formats", "time")
         local g = UI.TextElement(L, Group(L, "time", nil, { fontGet = tg, fontSet = ts, fontDefaults = td,
-            fontDefaultLabel = "The game's font", sample = "32s",
+            fontDefaultLabel = "ZacUI's font", sample = "32s",
             formatGet = fmtGet, formatSet = fmtSet, formatDefaults = LR.TIME_DEFAULT,
             formatKinds = { time = true },
             formatSample = function(spec) return ns.FormatTime(32, spec, LR.TIME_DEFAULT) end }))
@@ -2797,7 +2832,7 @@ RegisterPage("LootRoll", function(L)
         L:Card("Bind tag")
         local bg, bs, bd = FontOf("bindFont", 10)
         UI.TextElement(L, Group(L, "bind", nil, { fontGet = bg, fontSet = bs, fontDefaults = bd,
-            fontDefaultLabel = "The game's font", sample = "BoP" }))
+            fontDefaultLabel = "ZacUI's font", sample = "BoP" }))
         L:EndCard()
 
         L:Card("Small numbers")

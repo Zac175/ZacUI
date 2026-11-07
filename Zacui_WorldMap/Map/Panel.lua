@@ -22,7 +22,10 @@ d.favorites = {}                -- action and row ids, in the order they were st
 d.trayOpen = true               -- the favourites' row shown (the arrow beside the OpenMap button folds it)
 d.trayStarted = false           -- the first favourites given, once (a fresh install's, or one with none yet)
 d.tabRail = true                -- the OpenMap button and the favourites as tabs at the window's edge (off: a row in its bottom-left corner)
-d.mapButtons = true             -- the OpenMap button and the favourites on the map at all (off: none; /openmap opens the menu)
+d.mapButtons = false            -- the OpenMap button and the favourites on the map at all (off: none; /zuimap opens the menu)
+-- (2026-11-06, Zac: "those buttons on the side of the minimap just need to go": off by default, and turned off
+-- once on every account that had them; turning them back on afterwards is kept)
+d.mapButtonsOff1106 = false
 local TRAY_START = { "find", "pin", "quill" }
 
 local map, sc, menu, toggle, trayArrow, checks, favBar, tiles, zoomRow, miniRow, opacityRow
@@ -735,6 +738,10 @@ function mod.RefreshRail() if mod.db.tabRail and favBar then RefreshFavorites() 
 
 RefreshFavorites = function()
 	if not favBar then return end
+	if not mod.db.mapButtonsOff1106 then
+		mod.db.mapButtonsOff1106 = true
+		mod.db.mapButtons = false
+	end
 	if not mod.db.mapButtons then
 		toggle:Hide()
 		trayArrow:Hide()

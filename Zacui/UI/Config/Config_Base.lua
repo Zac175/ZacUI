@@ -32,7 +32,8 @@ local MENU = {
         { id = "general", label = "Overview", page = "General",
           keywords = "overview status version summary slash commands "
               .. "rescan identify inset line reset reload debug xray tools diagnostics "
-              .. "voice tts text to speech speak volume rate" },
+              .. "voice tts text to speech speak volume rate "
+              .. "update updates newer outdated out of date old curseforge notice" },
         { id = "changelog", label = "Changelog", page = "Changelog",
           keywords = "changelog changes what's new whats new news version versions "
               .. "update updates release notes history patch notes added fixed" },

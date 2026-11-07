@@ -136,12 +136,12 @@ function Bar.TitleColor(bc)
     return ColorOr(bc.titleColor, t.r, t.g, t.b, 1)
 end
 
--- what a font field left out means: the game font, outlined, no shadow,
--- at the size each text always had
+-- what a font field left out means: ZacUI's font (the game's while none
+-- is chosen), outlined, no shadow, at the size each text always had
 Bar.FONT_DEFAULTS = {
-    titleFont = { face = STANDARD_TEXT_FONT, size = 11, outline = "outline", shadow = false },
-    textFont = { face = STANDARD_TEXT_FONT, size = 10, outline = "outline", shadow = false },
-    countFont = { face = STANDARD_TEXT_FONT, size = 10, outline = "outline", shadow = false },
+    titleFont = { fallbackFace = STANDARD_TEXT_FONT, size = 11, outline = "outline", shadow = false },
+    textFont = { fallbackFace = STANDARD_TEXT_FONT, size = 10, outline = "outline", shadow = false },
+    countFont = { fallbackFace = STANDARD_TEXT_FONT, size = 10, outline = "outline", shadow = false },
 }
 -- SetFont that says whether the face took: pcall catches a nil path, the
 -- return value a font file that would not load - which leaves the string
@@ -154,7 +154,7 @@ local function ApplyFont(fs, spec, dflt)
     if ns.ApplyFontSpec then
         ns.ApplyFontSpec(fs, spec, dflt)
     else
-        if not TrySetFont(fs, dflt.face or STANDARD_TEXT_FONT, dflt.size or 10, "OUTLINE") then
+        if not TrySetFont(fs, dflt.face or dflt.fallbackFace or STANDARD_TEXT_FONT, dflt.size or 10, "OUTLINE") then
             fs:SetFont(STANDARD_TEXT_FONT, dflt.size or 10, "OUTLINE")
         end
     end

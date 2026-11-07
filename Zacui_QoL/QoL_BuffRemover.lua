@@ -124,6 +124,18 @@ local NEXT_NAME = [[
 ]]
 
 local function RCB() local rc = _G.Readycheck return rc and rc.BuffCap end
+-- Off Classic Era the remover follows Readycheck's counter: it runs where
+-- Readycheck counts this game's buff slots (its own game-version table
+-- says where; it learns the limit from the first push-offs), and stands
+-- down where Readycheck's counter does. Classic Era is not asked.
+local function CounterHere()
+    if not (ns.Flavor and ns.Flavor() ~= "era") then return true end
+    local rc = _G.Readycheck
+    if not (rc and rc.FeatureOn) then return true end
+    local ok, on = pcall(rc.FeatureOn, rc, "buff_pushoff")
+    return not (ok and on == false)
+end
+BR.CounterHere = CounterHere
 local function DATA() local rc = _G.Readycheck return rc and rc.BuffCapData end
 
 -- ============================================================
@@ -1512,10 +1524,10 @@ end)
 
 -- Called on login and by QoL.Refresh after any change on the page.
 function BR.Refresh()
-    -- the 32-buff cap is Classic Era's (Readycheck's counter stands down on
-    -- TBC and Forever too): off there, and the macros are left as they are
-    -- (Core_Flavor)
-    if ns.FeatureOn and not ns.FeatureOn("buff_remover") then
+    -- where the feature is off (Core_Flavor), or Readycheck's counter does
+    -- not run on this game version, it stands down and the macros are left
+    -- as they are
+    if (ns.FeatureOn and not ns.FeatureOn("buff_remover")) or not CounterHere() then
         Stop()
         return
     end

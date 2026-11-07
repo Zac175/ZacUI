@@ -271,6 +271,9 @@ local function SpellDamage(token, evTime, sourceSerial, sourceName, sourceFlags,
     end
 
     local healthChange = amount or 0
+    -- the hit as the log gave it, for the death log: the whole hit and
+    -- how far past zero it went (the meter's own sums take overkill off)
+    local rawOverkill = overkill
     if absorbed then amount = absorbed + (amount or 0) end
     if Meter.inInstance and overkill and overkill > 0 then
         overkill = overkill + 1
@@ -304,8 +307,8 @@ local function SpellDamage(token, evTime, sourceSerial, sourceName, sourceFlags,
             hc[targetSerial] = (hc[targetSerial] or (Meter.HealthMaxCache[targetSerial] or 0)) - healthChange
             if hc[targetSerial] < 0 then hc[targetSerial] = 0 end
         end
-        Meter.DeathLogEvent(targetName, true, spellId, amount, evTime,
-            sourceName, overkill, critical, spellSchool, targetSerial)
+        Meter.DeathLogEvent(targetName, true, spellId, healthChange, evTime,
+            sourceName, rawOverkill, critical, spellSchool, targetSerial)
     end
 
     -- friendly fire?
@@ -558,6 +561,7 @@ local function Interrupt(token, evTime, ss, sourceName, sf, ts, targetName, tf, 
     if extraId then
         actor.interruptedWhat[extraId] = (actor.interruptedWhat[extraId] or 0) + 1
     end
+    Meter.MiscLogAdd("interrupt", sourceName, targetName, spellId, extraId)
     actor.lastEvent = Meter.now()
     miscTotals.interrupt = miscTotals.interrupt + 1
     current.needRefresh.misc = true
@@ -578,16 +582,21 @@ local function Dispel(token, evTime, ss, sourceName, sf, ts, targetName, tf, trf
     if extraId then
         actor.dispelledWhat[extraId] = (actor.dispelledWhat[extraId] or 0) + 1
     end
+    Meter.MiscLogAdd("dispel", sourceName, targetName, spellId, extraId)
     actor.lastEvent = Meter.now()
     miscTotals.dispell = miscTotals.dispell + 1
     current.needRefresh.misc = true
 end
 
 local function CCBreak(token, evTime, ss, sourceName, sf, ts, targetName, tf, trf,
-                       spellId)
+                       spellId, _, _, extraId)
     if not Meter.inCombat or not sourceName then return end
     local actor = GetMiscActor(sourceName, ss, sf)
     actor.cc_break = (actor.cc_break or 0) + 1
+    -- spellId: the crowd control that broke; extraId (the _SPELL form
+    -- only): what broke it
+    Meter.MiscLogAdd("cc", sourceName, targetName, spellId,
+        (token == "SPELL_AURA_BROKEN_SPELL" and type(extraId) == "number") and extraId or nil)
     actor.lastEvent = Meter.now()
     miscTotals.cc_break = miscTotals.cc_break + 1
     current.needRefresh.misc = true
@@ -598,6 +607,7 @@ local function Ress(token, evTime, ss, sourceName, sf, ts, targetName, tf, trf,
     if not Meter.inCombat or not sourceName then return end
     local actor = GetMiscActor(sourceName, ss, sf)
     actor.ress = (actor.ress or 0) + 1
+    Meter.MiscLogAdd("ress", sourceName, targetName, spellId)
     miscTotals.ress = miscTotals.ress + 1
     current.needRefresh.misc = true
 end

@@ -347,6 +347,13 @@ local function OnCombatLogEvent(_, subevent, _, sourceGUID)
     end
 end
 
+-- WoW Forever: the game's own swing event instead (ns.Swings)
+local function OnSwing(hand, now, dur)
+    if hand ~= "mh" then return end
+    S.swing.start = now
+    S.swing.duration = dur or 0
+end
+
 -- Display: anchors. Each anchor sits centred on an UNSCALED holder; the
 -- holder is what ZacUI's mover registry positions, so a scaled anchor
 -- still reports plain UIParent offsets when dragged.
@@ -1203,12 +1210,14 @@ ev:RegisterEvent("PLAYER_LOGIN")
 RegisterHotEvents = function()
     lastMana = UnitPower("player", 0) or 0
     ns.CLEU.On("PaladinHUD", SWING_SUBS, OnCombatLogEvent)
+    ns.Swings.On("PaladinHUD", OnSwing)
     ev:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     ev:RegisterEvent("BAG_UPDATE_DELAYED")
 end
 UnregisterHotEvents = function()
     ns.CLEU.Off("PaladinHUD")
+    ns.Swings.On("PaladinHUD", nil)
     ev:UnregisterEvent("UNIT_POWER_FREQUENT")
     ev:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     ev:UnregisterEvent("BAG_UPDATE_DELAYED")

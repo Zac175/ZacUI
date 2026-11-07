@@ -389,7 +389,8 @@ RegisterPage(PAGE_ID, function(L)
         local reset = UI.Button(row, "Reset the look", { width = 120,
             tooltip = "Scale, colours, title font and opening back to how ZacUI ships them.",
             onClick = function()
-                for k in pairs(db) do db[k] = nil end
+                -- (the flight times' settings have their own page and reset)
+                for k in pairs(db) do if k ~= "flight" then db[k] = nil end end
                 for k, v in pairs(Kit.DEFAULTS) do
                     db[k] = (ns.CopySetting and ns.CopySetting(v)) or v
                 end

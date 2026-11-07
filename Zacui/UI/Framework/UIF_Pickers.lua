@@ -8,7 +8,8 @@
 -- below, and every page, preview and profile string agrees on them:
 --   colour     { r =, g =, b =, a = }                     (0..1)
 --   font       { face =, size =, outline =, shadow =, shadowX =, shadowY = }
---              face: a SharedMedia name (or a file path); nil = ZacUI's font
+--              face: no longer drawn - every text wears ZacUI's font (an
+--              old save's face is kept in the setting and ignored)
 --              outline: "none" | "outline" | "thick" | "monochrome"
 --   texture    a SharedMedia statusbar name; nil = ZacUI's texture
 --   animation  { style =, duration =, delay =, easing =, dir =, distance =, loop = }
@@ -105,7 +106,7 @@ end
 -- game's own when none is.
 local function HouseFontPath()
     local p = ns.Media and ns.Media.FontPath and ns.Media.FontPath()
-    return p or STANDARD_TEXT_FONT or FALLBACK_FONT
+    return p or ns.GAME_FONT or STANDARD_TEXT_FONT or FALLBACK_FONT
 end
 
 function ns.ResolveFontFace(face)
@@ -129,13 +130,31 @@ end
 -- nil too). Size is absolute: the global size adjustment on the Fonts
 -- page shifts Blizzard's font objects and ZacUI's windows, not a size a
 -- module setting spells out.
+-- defaults.fallbackFace: a text that follows ZacUI's font (no face of its
+-- own, none in `defaults`) wears this face while ZacUI has none chosen -
+-- the part's own look until a font is picked on Fonts & Textures. Such a
+-- text is re-dressed when ZacUI's font changes; one with a face of its
+-- own is not.
 function ns.ApplyFontSpec(fs, spec, defaults)
     if not (fs and fs.SetFont) then return end
+    local rawSpec, rawDefaults = spec, defaults
     spec = type(spec) == "table" and spec or {}
     defaults = type(defaults) == "table" and defaults or {}
-    local face = spec.face
-    if face == nil then face = defaults.face end
-    local path = ns.ResolveFontFace(face)
+    -- ONE FONT: the face is ZacUI's font whenever one is chosen, whatever
+    -- the spec says. A face saved in a spec (from the per-text pickers of
+    -- old) is ignored - kept in the settings, never drawn; with no font
+    -- chosen the text wears its part's shipped face (defaults.face, else
+    -- defaults.fallbackFace, else the game's).
+    local face = defaults.face
+    local follows = face == nil or face == ""
+    local path = ns.OneFace and ns.OneFace()
+    if not path then
+        if follows and defaults.fallbackFace then
+            path = ns.ResolveFontFace(ns.GameFace and ns.GameFace(defaults.fallbackFace) or defaults.fallbackFace)
+        else
+            path = ns.ResolveFontFace(face)
+        end
+    end
     local size = tonumber(spec.size) or tonumber(defaults.size) or 12
     local outline = spec.outline
     if outline == nil then outline = defaults.outline end
@@ -145,6 +164,10 @@ function ns.ApplyFontSpec(fs, spec, defaults)
     local ok, set = pcall(fs.SetFont, fs, path, size, flags)
     if not (ok and set) then
         pcall(fs.SetFont, fs, FALLBACK_FONT, size, flags)
+    end
+    -- kept up: a change of ZacUI's font re-dresses it
+    if ns.TrackHouseFont then
+        ns.TrackHouseFont(fs, function(s) ns.ApplyFontSpec(s, rawSpec, rawDefaults) end)
     end
     local shadow = spec.shadow
     if shadow == nil then shadow = defaults.shadow end
@@ -477,6 +500,10 @@ function UI.FontFaceDropdown(parent, opts)
     local dd
     local function Dress(fs, v, size)
         if not (fs and fs.SetFont) then return end
+        -- each name in the list (and the one picked) is drawn in its own
+        -- face, not ZacUI's: on purpose, and left alone on a font change
+        rawset(fs, "_zOwnFace", "font list: each name in its own face")
+        if ns.TrackHouseFont then ns.TrackHouseFont(fs, nil) end
         local path = PathOf(v)
         local ok, set = pcall(fs.SetFont, fs, path, size, "")
         if not (ok and set) then
@@ -630,7 +657,38 @@ function UI.TexturePicker(parent, opts)
 end
 
 -- ============================================================
--- FONT (face, size, outline, shadow - one group)
+-- ONE FONT: where a face used to be picked
+-- ============================================================
+-- Every text ZacUI draws wears ZacUI's font (Appearance > Fonts &
+-- Textures), so a picker for one part or one text no longer offers a
+-- face: this note stands where its face dropdown stood, the dropdown's
+-- size, so the rows around it keep their places.
+UI.ONE_FONT_NOTE = "Uses ZacUI's font (Fonts & Textures)"
+function UI.OneFontNote(parent, width)
+    width = width or 200
+    local host = CreateFrame("Frame", nil, parent)
+    host:SetSize(width, M.DROPDOWN_H)
+    -- one line: cut short in a narrow column, the whole note on hover
+    local fs = UI.Font(host, F.SMALL, { text = UI.ONE_FONT_NOTE, cat = "text", key = "gray", width = width })
+    fs:SetJustifyH("LEFT")
+    if fs.SetWordWrap then fs:SetWordWrap(false) end
+    fs:SetPoint("LEFT", host, "LEFT", 0, 0)
+    fs._zTruncTip = true      -- (cut short on purpose: the tooltip below says it all)
+    host:EnableMouse(true)
+    UI.Tooltip(host, UI.ONE_FONT_NOTE, "Every text ZacUI draws is in the one font chosen on Appearance > "
+        .. "Fonts & Textures. Size, outline and shadow are set here.")
+    host.text = fs
+    host._zOneFontNote = true
+    host._zPaint = function() if fs._zPaint then fs:_zPaint() end end
+    function host:_zFit(w)
+        self:SetWidth(w)
+        fs:SetWidth(w)
+    end
+    return host
+end
+
+-- ============================================================
+-- FONT (size, outline, shadow - one group; the face is ZacUI's)
 -- ============================================================
 --   opts.defaults  what the module uses when a field is nil
 --                  ({ size = 12, outline = "outline", shadow = false })
@@ -673,13 +731,9 @@ function UI.FontPicker(parent, opts)
         y = -math.max(18, math.ceil(t:GetStringHeight() or 12) + 6)
     end
 
-    -- row 1: face | size
-    local face = UI.Field(host, "Font", function(h)
-        return UI.FontFaceDropdown(h, { width = colW, defaultLabel = opts.defaultLabel, defaultPath = opts.defaultPath,
-            list = opts.list,
-            get = function() return Cur().face end,
-            set = function(v) Put("face", v) end })
-    end, { width = colW })
+    -- row 1: face | size. The face is ZacUI's one font: a note, not a
+    -- choice (a face an old save holds is kept, and ignored)
+    local face = UI.Field(host, "Font", function(h) return UI.OneFontNote(h, colW) end, { width = colW })
     face:SetPoint("TOPLEFT", host, "TOPLEFT", 0, y)
     local size = UI.Slider(host, { width = colW, label = "Size",
         min = opts.minSize or 6, max = opts.maxSize or 32, step = 1,

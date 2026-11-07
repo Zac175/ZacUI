@@ -88,7 +88,7 @@ local DEFAULTS = {
     testRaid = nil,        -- the raid the preview shows
     barTexture = "ZacUI Flat",  -- every bar (SharedMedia name)
     font = nil,            -- nil = each text keeps the pack's font (Barlow); a SharedMedia name overrides them all
-    fontFromZacUI = false, -- let the Fonts & Textures page push ZacUI's font here too (the bar texture always follows)
+    fontFromZacUI = true,  -- the Fonts & Textures page pushes ZacUI's font here too (the bar texture always follows)
     voice = nil,           -- TTS voice id; nil = the same voice Readycheck speaks with
     lists = false,         -- the packs' name lists (Mortal Wound List and the like); off for every raid unless turned on
     berserkOff = { WARRIOR = true }, -- [class] = true: no berserk timers / warnings for that class, any boss
@@ -108,8 +108,19 @@ function RM.DB()
     if type(ZacUIDB) ~= "table" then return nil end
     if type(ZacUIDB.raidmods) ~= "table" then ZacUIDB.raidmods = {} end
     if dbCache ~= ZacUIDB.raidmods then
-        CopyDefaults(DEFAULTS, ZacUIDB.raidmods)
-        dbCache = ZacUIDB.raidmods
+        local d = ZacUIDB.raidmods
+        -- ONE FONT (once): the raid mods follow ZacUI's font by default now.
+        -- A save from before, still on the pack's own font with the switch
+        -- off, was never touched (ticking it once copies ZacUI's font into
+        -- d.font, so a player who turned it off again has a font there):
+        -- it follows too. A font picked here, or the switch turned off after
+        -- this, stays.
+        if not d.fontFollowV1 then
+            if d.fontFromZacUI == false and (d.font == nil or d.font == "") then d.fontFromZacUI = true end
+            d.fontFollowV1 = true
+        end
+        CopyDefaults(DEFAULTS, d)
+        dbCache = d
     end
     return ZacUIDB.raidmods
 end

@@ -7,6 +7,7 @@
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB
 ## X-Category: Interface Enhancements
+## X-Curse-Project-ID: 1788762
 ## OptionalDeps: LibSharedMedia-3.0, ButtonStash, Readycheck
 
 # ============================================================
@@ -73,6 +74,10 @@ Core\Core_SharedMedia.lua
 Core\Core_Media.lua
 Core\Core_Services.lua
 Core\Core_Encounter.lua
+# Each game version's raids: which kill ends one (clear timer, raid summary)
+Core\Core_FlavorRaids.lua
+# "A newer ZacUI is out": versions compared with the guild and group.
+Core\Core_VersionCheck.lua
 
 # ---------- UI framework ----------
 # Base before Widgets before Panels: each layer calls down, never up.

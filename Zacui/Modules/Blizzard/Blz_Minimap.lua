@@ -1288,6 +1288,9 @@ local function BuildPanel()
     -- still needs to measure.
     mm.measure = p:CreateFontString(nil, "BACKGROUND")
     mm.measure:SetFont(STANDARD_TEXT_FONT, 11, "")
+    -- (invisible: it takes the font of whatever text it measures)
+    mm.measure._zOwnFace = "hidden measuring string: wears the font of the text it measures"
+
     mm.measure:SetAlpha(0)
     mm.measure:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
     mm.divL = Rule(f, "ui", "border", nil, "OVERLAY")

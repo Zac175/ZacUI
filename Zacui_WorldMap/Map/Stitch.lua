@@ -1545,7 +1545,20 @@ local function Letter(f, label)
 	local p = Place(label.map)
 	if not p then return end
 	local ink, glow = label.ink, label.glow
-	local font = STANDARD_TEXT_FONT                -- (Friz Quadrata; the client's own in other alphabets)
+	-- ZacUI's one font; while none is chosen the game's (Friz Quadrata; the client's own in other
+	-- alphabets). Lettered again when ZacUI's font changes (the end of this function)
+	local z = _G.ZacUI
+	local font = (z and z.OneFace and z.OneFace()) or (z and z.GAME_FONT) or STANDARD_TEXT_FONT
+	-- (lettered again: the strings of the last lettering are used again first)
+	local pool = f.zLetterPool
+	local function Str(layer)
+		local fs = pool and table.remove(pool)
+		if not fs then return f:CreateFontString(nil, layer) end
+		fs:SetDrawLayer(layer)
+		fs:ClearAllPoints()
+		fs:Show()
+		return fs
+	end
 	for _, set in ipairs(SetLines(label, NameOf(label))) do
 		local line, text = set[1], set[2]
 		local u = NAME_UNITS
@@ -1561,8 +1574,9 @@ local function Letter(f, label)
 				wordStart = true
 			else
 				local size = cap / NAME_CAP * ((wordStart or line[5]) and 1 or NAME_SMALL)
-				local fs = f:CreateFontString(nil, "OVERLAY")
+				local fs = Str("OVERLAY")
 				fs:SetFont(font, size, "")
+				f.zLetterFs = f.zLetterFs or fs
 				fs:SetText(#ch == 1 and ch:upper() or ch)
 				fs:SetTextColor(ink[1] / 255, ink[2] / 255, ink[3] / 255, INK_ALPHA)
 				fs:SetShadowOffset(0, 0)
@@ -1588,7 +1602,7 @@ local function Letter(f, label)
 					for i = 1, HALO_TAPS / 2 do
 						local angle = (i - 1) / HALO_TAPS * 2 * math.pi
 						local dx, dy = r * math.cos(angle), r * math.sin(angle)
-						local copy = f:CreateFontString(nil, "ARTWORK")
+						local copy = Str("ARTWORK")
 						copy:SetFont(font, g.size, "")
 						copy:SetText(g.fs:GetText())
 						copy:SetTextColor(glow[1] / 255, glow[2] / 255, glow[3] / 255, a)
@@ -1603,6 +1617,26 @@ local function Letter(f, label)
 			end
 			x = x + g.w + track
 		end
+	end
+	-- kept up by ZacUI's font keeper through its first letter: a change of ZacUI's font letters the
+	-- name again (every letter is measured in the face, so it is set anew, not just re-dressed)
+	if f.zLetterFs and z and z.TrackHouseFont then
+		z.TrackHouseFont(f.zLetterFs, function(first)
+			z.TrackHouseFont(first, nil)
+			local now = (z.OneFace and z.OneFace()) or z.GAME_FONT or STANDARD_TEXT_FONT
+			local list = {}
+			for _, r in ipairs({ f:GetRegions() }) do
+				if r.GetObjectType and r:GetObjectType() == "FontString" then
+					-- (one left over stays hidden, in the face of the day all the same)
+					local _, sz = r:GetFont()
+					pcall(r.SetFont, r, now, sz or 12, "")
+					r:Hide()
+					list[#list + 1] = r
+				end
+			end
+			f.halos, f.zLetterFs, f.zLetterPool = nil, nil, list
+			Letter(f, label)
+		end)
 	end
 end
 

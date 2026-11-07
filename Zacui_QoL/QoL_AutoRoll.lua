@@ -65,6 +65,15 @@ AR.GROUPS = {
         22373, 22374, 22375, 22376 } },
     { key = "wordThaw", label = "Word of Thawing", ids = { 23055 } },
 }
+-- TBC Anniversary adds its own shared crafting drops (item ids from
+-- Wowhead TBC): Primal Nether (heroic dungeons) and Nether Vortex (the
+-- raids). The old raids' coins, bijous and scraps stay listed: those raids
+-- are still there. A new group starts on Ask (nothing saved for it yet).
+-- Classic Era and Forever keep the list above as it is.
+if ns.Flavor and ns.Flavor() == "tbc" then
+    AR.GROUPS[#AR.GROUPS + 1] = { key = "primalNether", label = "Primal Nether", ids = { 23572 } }
+    AR.GROUPS[#AR.GROUPS + 1] = { key = "netherVortex", label = "Nether Vortex", ids = { 30183 } }
+end
 local GROUP_OF = {}
 for _, g in ipairs(AR.GROUPS) do
     for _, id in ipairs(g.ids) do GROUP_OF[id] = g.key end

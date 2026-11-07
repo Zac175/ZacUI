@@ -1069,9 +1069,12 @@ local function UpdateExecuteHelper()
         S.targetHPpct = 100
     end
 
+    -- (WoW Forever hides the target's health in combat: the game answers
+    -- "under 20%?" itself, as the icon's alpha - see the end)
+    local hiddenAlpha = S.targetAttackable and HUD.TargetExecuteAlpha(0.2) or nil
     local bt, ex = S.spells.bloodthirst, S.spells.execute
     local execShown = bt and bt.known and ex and ex.known
-        and S.targetAttackable and S.targetHPpct <= 20
+        and S.targetAttackable and (hiddenAlpha ~= nil or S.targetHPpct <= 20)
     if execShown then
         local btCd = S.cds.bloodthirst
         local btRemaining = CdRemaining(btCd)
@@ -1098,6 +1101,13 @@ local function UpdateExecuteHelper()
             execIcon:ClearSwipe()
         end
         execIcon:Show()
+        if hiddenAlpha ~= nil then
+            execIcon:SetAlpha(hiddenAlpha)
+            execIcon._zHiddenA = true
+        elseif execIcon._zHiddenA then
+            execIcon._zHiddenA = nil
+            execIcon:SetAlpha(1)
+        end
     else
         execIcon:Hide()
     end
@@ -1119,6 +1129,7 @@ local function RefreshResources(cfg)
             execIcon:SetIconTexture(EXEC_ICON)
             execIcon:SetDesat(false)
             execIcon:ClearSwipe()
+            if execIcon._zHiddenA then execIcon._zHiddenA = nil execIcon:SetAlpha(1) end
             execIcon:Show()
         else
             execIcon:Hide()
@@ -1528,7 +1539,9 @@ local function UpdateAuraIcon(icon, def)
         local h = S.hamstring
         if not h then return false end
         icon:SetIconTexture(hamstringIcon)
-        if (h.duration or 0) > 0 then
+        if h.hidden then
+            icon:SetHiddenSwipe("target", h.hidden)   -- (WoW Forever: a hidden timer, as it is)
+        elseif (h.duration or 0) > 0 then
             icon:SetSwipe(h.expirationTime - h.duration, h.duration)
         else
             icon:ClearSwipe()
@@ -1633,7 +1646,12 @@ local function UpdateAuraIconText(icon, def)
         return
     end
     local b = icon.buffRef
-    if b and (b.expirationTime or 0) > 0 then
+    if b and b.hidden then
+        -- (WoW Forever: the time left as the game hands it over)
+        local left = ns.AuraTimeLeft("target", b.hidden)
+        if left ~= nil then icon:SetHiddenText("p", "%.0f", left) else icon:SetText("p", "") end
+        return
+    elseif b and (b.expirationTime or 0) > 0 then
         icon:SetText("p", W.FormatTime(math.max(0, b.expirationTime - now), 0))
     else
         icon:SetText("p", "")

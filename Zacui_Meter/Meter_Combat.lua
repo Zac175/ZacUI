@@ -443,7 +443,7 @@ Roster.On("Meter", PetScanSoon)
 
 -- ============================================================
 -- DEATH LOG - recycling ring buffer per player, linearized on death.
--- Event record: {isDamage, spellId, amount, time, hpPct, source,
+-- Event record: {isDamage, spellId, amount (the whole hit), time, hpPct, source,
 --                overkill, crit, school}
 -- The buffers themselves are kept from fight to fight (the first hits of
 -- a 40-player pull used to build 1300 small tables inside the combat
@@ -518,10 +518,48 @@ function Meter.BuildDeathTable(playerName, playerClass, deathTime, targetSerial)
         maxHealth = Meter.HealthMaxCache[targetSerial] or UnitHealthMax(playerName) or 0,
         timeString = floor(elapsed / 60) .. "m " .. floor(elapsed % 60) .. "s",
         deadAt = elapsed,
+        clock = time(),             -- the time of day, for "died at 21:42"
     }
     combat.deaths[#combat.deaths + 1] = deathTable
     return deathTable
 end
+
+-- ============================================================
+-- WHAT THE MISC COUNTERS COUNTED - a short list per fight of each
+-- interrupt, dispel, broken crowd control and battle res: who, on whom,
+-- the ability, what it stopped / removed / broke, and when in the pull.
+-- These are rare lines (a handful a fight), so one small table each is
+-- cheap; the tooltip reads them on hover. Capped so a long open-world
+-- "fight" cannot grow it without end.
+--   kind: "interrupt" | "dispel" | "cc" | "ress"
+-- ============================================================
+local MISC_LOG_MAX = 300
+function Meter.MiscLogAdd(kind, who, on, spell, what)
+    local c = Meter.current
+    if not c then return end
+    local log = c.miscLog
+    if not log then log = {} c.miscLog = log end
+    if #log >= MISC_LOG_MAX then c.miscLogCut = (c.miscLogCut or 0) + 1 return end
+    log[#log + 1] = { k = kind, who = who, on = on, spell = spell, what = what,
+        at = GetTime() - (c.startTime or GetTime()) }
+end
+
+-- The deaths and misc lines a window's combat holds. A live overall is
+-- a view over the closed overall and the fight in progress, so it reads
+-- both; everything else holds its own.
+local function Joined(combat, key)
+    if not combat then return {} end
+    if combat.live and combat.base then
+        local out = {}
+        for _, src in ipairs({ combat.base, combat.cur }) do
+            for _, x in ipairs(src and src[key] or {}) do out[#out + 1] = x end
+        end
+        return out
+    end
+    return combat[key] or {}
+end
+function Meter.DeathsFor(combat) return Joined(combat, "deaths") end
+function Meter.MiscLogFor(combat) return Joined(combat, "miscLog") end
 
 -- Final 10-second trim, run when the segment closes.
 local function CutDeathEvents(combat)
@@ -607,6 +645,7 @@ end
 -- merge can be merged again, which is what makes "overall including the
 -- fight in progress" a snapshot rather than a second bookkeeping path.
 local MISC_COUNTERS = { "interrupt", "dispell", "cc_break", "ress", "dead" }
+local OVERALL_DEATHS_MAX, OVERALL_MISC_MAX = 200, 600
 
 local function MergeCombat(overall, combat)
     overall.fixedTime = (overall.fixedTime or 0) + combat:GetCombatTime()
@@ -670,6 +709,30 @@ local function MergeCombat(overall, combat)
     for k, v in pairs(combat.miscTotals) do
         overall.miscTotals[k] = (overall.miscTotals[k] or 0) + v
     end
+    -- the night's deaths and misc lines ride along by reference, each
+    -- marked with the fight it came from once that fight has closed
+    -- (a fight still running has no settled name yet)
+    local fight = (not combat.overall and combat.endTime) and combat:Name() or nil
+    for _, pair in ipairs({ { "deaths", OVERALL_DEATHS_MAX }, { "miscLog", OVERALL_MISC_MAX } }) do
+        local key, cap = pair[1], pair[2]
+        local from = combat[key]
+        if from and #from > 0 then
+            local into = overall[key]
+            if not into then into = {} overall[key] = into end
+            for _, x in ipairs(from) do
+                if fight and not x.fight then x.fight = fight end
+                into[#into + 1] = x
+            end
+            if #into > cap then
+                local keep = {}
+                for i = #into - cap + 1, #into do keep[#keep + 1] = into[i] end
+                overall[key] = keep
+                overall.dropped = true
+            end
+        end
+    end
+    if combat.dropped then overall.dropped = true end
+    if combat.fromGameMeter then overall.fromGameMeter = true end
     overall.totals.damage = overall.totals.damage + combat.totals.damage
     overall.totals.heal = overall.totals.heal + combat.totals.heal
     overall.groupTotals.damage = overall.groupTotals.damage + combat.groupTotals.damage

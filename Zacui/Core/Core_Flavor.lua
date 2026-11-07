@@ -17,6 +17,10 @@
 --   ns.AddonMessagesBlocked()  Forever, inside an instance
 --   ns.IsSecret / ns.SafeHealth / ns.AuraHidden
 --                           Forever's secret values, read safely
+--   ns.Hidden / ns.HealthPercent / ns.ShowText / ns.ShowBar / ns.ReadAura
+--   / ns.ShowAuraTimer / ns.ShowCastTimer ...
+--                           ...and shown anyway: a hidden value handed
+--                           straight to the widget that displays it
 --
 -- WHERE THE ANSWER COMES FROM. WOW_PROJECT_ID (2 Classic Era, 5 TBC
 -- Anniversary, 18 WoW Forever), then the interface number for a client
@@ -135,6 +139,9 @@ local ERA_RAIDS = "Classic Era raids"
 local CLOG      = "needs the combat log, which Forever does not give addons"
 local MSG       = "Forever blocks addon messages inside instances; sync waits until you leave"
 local SECRET    = "Forever hides enemy health, casts and auras from addons in combat"
+-- what still shows there: ZacUI hands the hidden values straight to the
+-- bars, texts, icons and timers that show them (the display helpers below)
+local SHOWN     = "Forever hides them from addons in combat; ZacUI hands them straight to the display"
 local ERA_ONLY  = { tbc = ERA, forever = ERA }
 
 ns.FEATURE_FLAVORS = {
@@ -143,20 +150,26 @@ ns.FEATURE_FLAVORS = {
     { id = "minimap", part = "Zacui", name = "Minimap: zone, clock, coordinates, icons and the button tray" },
     { id = "chat", part = "Zacui", name = "Chat, the chat bar and the raid chat strip" },
     { id = "raid_clear_timer", part = "Zacui", name = "Raid clear timer and splits on the raid chat strip",
-      changed = { tbc = "only Classic Era raids have a last boss that ends a run; other raids end after four hours without a kill",
-                  forever = "only Classic Era raids have a last boss that ends a run; other raids end after four hours without a kill" } },
+      changed = { forever = "Forever's raids have no known last boss yet: a run ends when the game's lockout shows every boss down "
+                  .. "(where the client reports it), else after four hours without a kill" } },
     { id = "tooltips", part = "Zacui", name = "Tooltips",
-      changed = { forever = "enemy health numbers stay blank in combat (" .. SECRET .. ")" } },
+      changed = { forever = "enemy health in combat shows as whole numbers and the game's own percent (" .. SHOWN
+                  .. "); a saved health-line format waits until the health reads again" } },
     { id = "buffs", part = "Zacui", name = "Your buffs and debuffs" },
     { id = "lootroll", part = "Zacui", name = "Loot rolls" },
     { id = "settings", part = "Zacui", name = "Settings window, appearance, profiles, import, movers and Edit Mode" },
     { id = "voice", part = "Zacui", name = "ZacUI's voice (the game's text to speech)" },
     { id = "tutorial", part = "Zacui", name = "First-run welcome, quick setup and the tour" },
+    { id = "version_check", part = "Zacui", name = "Newer version notice (versions compared with your guild and group)",
+      changed = { forever = MSG } },
 
     -- the parts
     { id = "bars", part = "Zacui_Bars", name = "Action bars and bar loadouts" },
     { id = "unitframes", part = "Zacui_UnitFrames", name = "Unit frames (player, target, party, raid)",
-      changed = { forever = "enemy health and auras stay blank in combat (" .. SECRET .. ")" } },
+      changed = { forever = "enemy health, power, auras and casts show in combat as the game hands them over (" .. SHOWN
+                  .. "): bars jump instead of gliding, health text is the whole number and the game's own percent "
+                  .. "(a saved text format waits), no incoming-heal chips on a hidden health, a hidden cast wears the "
+                  .. "normal cast colour, and aura filters that need a name or type let hidden auras by (\"only mine\" still works)" } },
     { id = "uf_heals", part = "Zacui_UnitFrames", name = "Incoming heals on the unit frames",
       changed = { forever = "other healers' heals are read from the combat log and addon messages, which Forever does not give addons; your own still show" } },
     { id = "uf_dispel", part = "Zacui_UnitFrames", name = "Dispel glow on the unit frames", note = "dispelGlow",
@@ -164,14 +177,22 @@ ns.FEATURE_FLAVORS = {
     { id = "uf_taunt", part = "Zacui_UnitFrames", name = "AoE taunt glow, countdown and voice", note = "tauntGlow",
       changed = { forever = "seen from the cast event instead of the combat log; when the game hides the spell nothing shows" } },
     { id = "nameplates", part = "Zacui_Nameplates", name = "Nameplates (health, casts, threat, target arrows, soft target)",
-      changed = { forever = "health numbers, cast bars and debuffs on enemies go blank in combat (" .. SECRET .. ")" } },
+      changed = { forever = "enemy health bars, the percent, cast bars and the debuff row show in combat as the game hands them over ("
+                  .. SHOWN .. "): bars jump instead of gliding, and a hidden cast wears the plain cast colour with no "
+                  .. "cast alert, script or cast target (they need the spell's id or the caster's target)" } },
     { id = "np_debuffs", part = "Zacui_Nameplates", name = "Nameplate debuffs, Sunder count and execute cue",
-      changed = { forever = "blank in combat (" .. SECRET .. ")" } },
+      changed = { forever = "go quiet in combat: each is found by the debuff's name, which Forever hides from addons then "
+                  .. "(the plain debuff row above the plate still shows them)" } },
     { id = "dodge_window", part = "Zacui_Nameplates", name = "Overpower window after a dodge, and the crosshair's miss marks",
-      off = { forever = CLOG }, notes = { "warrior" } },
+      changed = { forever = "the Overpower window comes from the game's own Overpower button (Battle Stance, your target, "
+                  .. "5 seconds from when it lights); the crosshair's miss marks need the combat log, which Forever does not give addons" },
+      notes = { "warrior" } },
     { id = "raidmods", part = "Zacui_RaidMods", whole = true,
-      name = "Raid mods: Molten Core, Blackwing Lair, Zul'Gurub, AQ40 and Naxxramas",
-      off = { tbc = ERA_RAIDS, forever = ERA_RAIDS }, pages = { "raidmods" } },
+      name = "Raid mods: boss timers, warnings and marks for each game's raids",
+      changed = { tbc = "TBC's raids instead of Classic Era's: Karazhan, Gruul, Magtheridon, Serpentshrine, Tempest Keep, "
+                  .. "Mount Hyjal, Black Temple, Zul'Aman and the Sunwell" },
+      off = { forever = "Forever's raids are not known yet, and it gives addons no combat log for the boss timers" },
+      pages = { "raidmods" } },
     { id = "raidtools", part = "Zacui_RaidTools", name = "/pull, /break, /range, raid sync and speech settings",
       changed = { forever = MSG } },
     { id = "auras", part = "Zacui_Auras", name = "Aura engine",
@@ -179,15 +200,19 @@ ns.FEATURE_FLAVORS = {
     { id = "sbt", part = "Zacui_SBT", name = "Scrolling combat text",
       changed = { forever = "only hits and heals you take show (the game's own combat text); the combat log Forever does not give addons carries the rest" } },
     { id = "sbt_plates", part = "Zacui_SBT", name = "Your damage on enemy nameplates (scrolling text)",
-      off = { forever = CLOG }, notes = { "sbt" } },
+      off = { forever = "your hits on each enemy are only in the combat log, which Forever does not give addons" }, notes = { "sbt" } },
     { id = "meter_parser", part = "Zacui_Meter", name = "Damage meter: damage, healing, deaths, interrupts",
-      off = { forever = CLOG }, notes = { "meter" } },
+      changed = { forever = "filled from the game's own damage meter when each fight ends (Forever gives addons no combat log, "
+                  .. "and hides the game meter's numbers in combat): numbers show after the fight; no hit counts, crits, "
+                  .. "overhealing or death logs" },
+      notes = { "meter" } },
     { id = "meter_threat", part = "Zacui_Meter", name = "Threat meter, threat glow and pull warning" },
     { id = "raid_summary", part = "Zacui_Meter", name = "Raid summary after the last boss",
-      off = { forever = CLOG },
-      changed = { tbc = "only Classic Era raids have a last boss that opens it; /zacui raid opens it any time" } },
+      changed = { forever = "built from the game's own damage meter: damage, healing and each ability's total; no hits a minute, "
+                  .. "no what hit you, no death causes. Forever's raids end by the lockout (every boss down); /zacui raid opens it any time" } },
     { id = "meter_dmf", part = "Zacui_Meter", name = "Darkmoon Faire mark after names on the meter",
-      off = ERA_ONLY, notes = { "meter" } },
+      changed = { tbc = "marks Sayge's fortune in any raid: TBC is not raided on world buffs, so \"only while my world buffs are on\" is not asked" },
+      off = { forever = "Forever's Darkmoon Faire and its fortunes are not known yet" }, notes = { "meter" } },
     { id = "clicks", part = "Zacui_Clicks", name = "Click casting" },
     { id = "blessings", part = "Zacui_Blessings", name = "Blessings: casting bar and assignments",
       changed = { forever = "assignments shared with other paladins: " .. MSG } },
@@ -198,11 +223,18 @@ ns.FEATURE_FLAVORS = {
     { id = "chronoboon", part = "Zacui_Consumables", name = "Chronoboon displacers on the consumables bar",
       off = ERA_ONLY, notes = { "consbars" } },
     { id = "hud_warrior", part = "Zacui_HUD", name = "Warrior HUD",
-      changed = { forever = "no swing timers or Overpower window (combat log); the execute cue goes quiet in combat (" .. SECRET .. ")" } },
+      changed = { forever = "swing timers come from the game's own swing event; the Overpower window comes from the game's "
+                  .. "Overpower button; in combat the execute cue asks the game's own health curve (" .. SECRET
+                  .. "), and Hamstring's timer shows as the game hands it over while its name reads" } },
     { id = "hud_classes", part = "Zacui_HUD", name = "Class HUDs (Paladin, Priest, Hunter, Rogue, Shaman, Mage, Warlock, Druid)",
-      changed = { forever = "no swing timers (combat log); target debuffs go blank in combat (" .. SECRET .. ")" } },
+      changed = { forever = "swing and Auto Shot bars come from the game's own swing event; your target debuffs show in combat "
+                  .. "with their timers and stacks as the game hands them over (" .. SHOWN .. "); ones whose names are "
+                  .. "hidden too fill the row in the game's order, past the per-debuff ticks" } },
     { id = "hud_swing", part = "Zacui_HUD", name = "Swing timers on the HUDs",
-      off = { forever = CLOG }, notes = { "warrior", "paladin" } },
+      changed = { forever = "from the game's own swing event (PLAYER_SWING) instead of the combat log: each swing restarts its "
+                  .. "bar at the game's swing time and a parry of yours speeds the next (Warrior HUD); a speed change "
+                  .. "mid-swing is not stretched while the game hides your attack speed" },
+      notes = { "warrior", "paladin" } },
     { id = "drinkticker", part = "Zacui_HUD", name = "Drink Ticker",
       changed = { forever = "mana from a potion can nudge the tick: the combat log that tells them apart is not there" } },
     { id = "hesitation", part = "Zacui_HUD", name = "Hesitation alerts",
@@ -212,21 +244,32 @@ ns.FEATURE_FLAVORS = {
       changed = { forever = MSG } },
     { id = "auction", part = "Zacui_Bags", name = "Auction house" },
     { id = "maps", part = "Zacui_Maps", name = "Maps: world map window, pins, group dots, minimap pins",
-      changed = { tbc = "Outland has no unexplored-area, pin or HD map data yet" } },
+      changed = { tbc = "on Outland and the new zones the flight masters come from the game; unexplored areas, dungeon "
+                  .. "entrances, spirit healers and the HD map are Azeroth's only (they need the game's TBC map tables, which ZacUI does not ship yet)",
+                  forever = "on Forever's own zones the flight masters come from the game; the rest of the pin data is Classic Era's Azeroth" } },
     { id = "worldmap", part = "Zacui_WorldMap", whole = true, name = "Seamless world map",
-      off = { tbc = "the stitched map holds Classic Era's Azeroth only" } },
+      off = { tbc = "the stitched map holds Classic Era's Azeroth only: Outland needs its own minimap tiles and offsets, which ZacUI does not ship" } },
     { id = "map_pins_share", part = "Zacui_WorldMap", name = "Sharing map pins with your group",
       changed = { forever = MSG } },
     { id = "qol", part = "Zacui_QoL", name = "Quality of life: automation, sound mutes, dialog keys, macro cleanup, smart mount, Snowball, GCD tracker" },
     { id = "raid_perf", part = "Zacui_QoL", name = "Raid performance mode" },
-    { id = "boss_fx", part = "Zacui_QoL", name = "Boss particle levels", off = { tbc = ERA_RAIDS, forever = ERA_RAIDS }, notes = { "qol" } },
+    { id = "boss_fx", part = "Zacui_QoL", name = "Boss particle levels",
+      changed = { tbc = "TBC's raids (Karazhan to the Sunwell); Zul'Aman is not listed, its boss ids are not confirmed",
+                  forever = "no bosses listed yet (Forever's raids are not out); the raid and world particle levels work" },
+      notes = { "qol" } },
     { id = "autoroll", part = "Zacui_QoL", name = "Auto roll",
-      changed = { tbc = "the Zul'Gurub coin and bijou and Naxxramas scrap choices are Classic Era items",
-                  forever = "the Zul'Gurub coin and bijou and Naxxramas scrap choices are Classic Era items" } },
+      changed = { tbc = "adds TBC's Primal Nether and Nether Vortex; the old raids' coin, bijou and scrap choices stay",
+                  forever = "Forever's own shared roll items are not known yet: the quality rule and your own items cover it" } },
     { id = "raid_timers", part = "Zacui_QoL", name = "Pull and break bars",
       changed = { forever = "other raiders' timers (addon messages): " .. MSG } },
-    { id = "buff_remover", part = "Zacui_QoL", name = "Buff remover (the 32-buff cap)", off = ERA_ONLY, notes = { "qol" } },
+    { id = "buff_remover", part = "Zacui_QoL", name = "Buff remover (the buff cap)",
+      changed = { tbc = "follows Readycheck's buff counter, which learns TBC's buff limit from the first push-offs" },
+      off = { forever = "Readycheck's buff counter stands down on Forever: Forever hides your buffs from addons in combat, where push-offs happen" },
+      notes = { "qol" } },
     { id = "windows", part = "Zacui_Windows", name = "The rebuilt game windows" },
+    { id = "flight_times", part = "Zacui_Windows", name = "Flight times at the flight master and the countdown while flying",
+      changed = { tbc = "no measured times carried over from the world map (it does not run on TBC): Outland's and "
+                  .. "Azeroth's flights are learned from your own, and estimated until then" } },
 }
 
 local BY_ID, BY_PAGE, BY_NOTE, BY_PART = {}, {}, {}, {}
@@ -363,6 +406,208 @@ function ns.AuraHidden(a)
     if issecret == nil or type(a) ~= "table" then return false end
     return (issecret(a.name) or issecret(a.spellId) or issecret(a.expirationTime)
         or issecret(a.duration) or issecret(a.applications)) and true or false
+end
+
+-- ============================================================
+-- SHOWING WHAT FOREVER HIDES (2026-11-07). A secret value cannot be
+-- compared or counted with, but the game's own widgets take it as it
+-- is: a text (SetText / SetFormattedText), a bar (SetMinMaxValues /
+-- SetValue), an icon (SetTexture), an alpha (SetAlpha), a timer (a
+-- Cooldown or a StatusBar fed the game's duration object). These hand a
+-- hidden value straight to the widget with no maths on it. Each answers
+-- true when it drew; false sends the caller back to what it did before.
+-- On Era and TBC nothing is ever secret, so no caller ever gets here and
+-- every part runs exactly as it always did. The newer calls are looked
+-- up by name when used and run under pcall: one this client lacks, or
+-- one that refuses a value, draws nothing instead of throwing.
+-- (warcraft.wiki.gg, Forever 1.60.1: UnitHealthPercent, C_CurveUtil,
+-- C_UnitAuras.GetAuraDuration / GetAuraApplicationDisplayCount,
+-- Cooldown:SetCooldownFromDurationObject, UnitCastingDuration,
+-- UnitChannelDuration, StatusBar:SetTimerDuration.)
+--   ns.Hidden(...)                 any of the values secret
+--   ns.HealthHidden(unit)          hidden, health, max
+--   ns.HealthPercent(unit)         0-100 for display (may be secret), or nil
+--   ns.HealthAlpha(unit, below)    1 at or under `below` (0-1) of health,
+--                                  else 0: for SetAlpha, never compared
+--   ns.ShowText(fs, fmt, ...)      SetFormattedText with hidden values
+--   ns.ShowBar(bar, value, max)    a bar straight from the values
+--   ns.ReadAura(unit, i, filter)   C_UnitAuras' aura table (fields may be
+--                                  secret); false = this one was refused,
+--                                  nil = no more
+--   ns.AuraFieldsHidden(a)         its name / id / icon / times / stacks hidden
+--   ns.AuraIsMine(a)               cast by you (the never-hidden flag when
+--                                  the caster is hidden)
+--   ns.AuraDuration(unit, a)       the game's duration object for it, or nil
+--   ns.ShowAuraTimer(cd, unit, a)  its timer onto a Cooldown
+--   ns.AuraTimeLeft(unit, a)       seconds left (may be secret), or nil
+--   ns.ShowAuraCount(fs, unit, a)  its stacks onto a text ("" under 2)
+--   ns.CastDuration(unit, channel) the cast's duration object, or nil
+--   ns.ShowCastTimer(bar, dur, channel)  the cast onto a StatusBar
+-- ============================================================
+function ns.Hidden(...)
+    if issecret == nil then return false end
+    for i = 1, select("#", ...) do
+        if issecret((select(i, ...))) then return true end
+    end
+    return false
+end
+
+function ns.HealthHidden(unit)
+    local hp, mx = UnitHealth(unit), UnitHealthMax(unit)
+    if issecret ~= nil and (issecret(hp) or issecret(mx)) then return true, hp, mx end
+    return false, hp, mx
+end
+
+-- a curve the game evaluates for us (CurveObject, warcraft.wiki.gg):
+-- points as { x, y } pairs, Linear between them
+local function Curve(points)
+    local CU = C_CurveUtil
+    if not (CU and CU.CreateCurve) then return nil end
+    local ok, c = pcall(CU.CreateCurve)
+    if not ok or not c then return nil end
+    local built = pcall(function()
+        local lct = Enum and Enum.LuaCurveType
+        if lct and lct.Linear ~= nil then c:SetType(lct.Linear) end
+        for _, p in ipairs(points) do c:AddPoint(p[1], p[2]) end
+    end)
+    return built and c or nil
+end
+
+local scale100
+local function Scale100()
+    if scale100 == nil then
+        local cc = rawget(_G, "CurveConstants")
+        scale100 = (type(cc) == "table" and cc.ScaleTo100) or Curve({ { 0, 0 }, { 1, 100 } }) or false
+    end
+    return scale100 or nil
+end
+
+function ns.HealthPercent(unit)
+    local f, curve = UnitHealthPercent, nil
+    if f == nil then return nil end
+    curve = Scale100()
+    if not curve then return nil end
+    local ok, v = pcall(f, unit, true, curve)
+    if ok then return v end
+    return nil
+end
+
+local alphaCurves = {}
+function ns.HealthAlpha(unit, below)
+    local f = UnitHealthPercent
+    if f == nil or type(below) ~= "number" then return nil end
+    local c = alphaCurves[below]
+    if c == nil then
+        local pts = { { 0, 1 }, { below, 1 }, { below + 0.0005, 0 } }
+        if below + 0.0005 < 1 then pts[4] = { 1, 0 } end
+        c = Curve(pts) or false
+        alphaCurves[below] = c
+    end
+    if not c then return nil end
+    local ok, v = pcall(f, unit, true, c)
+    if ok then return v end
+    return nil
+end
+
+function ns.ShowText(fs, fmt, ...)
+    if not (fs and fs.SetFormattedText) then return false end
+    return pcall(fs.SetFormattedText, fs, fmt, ...) and true or false
+end
+
+function ns.ShowBar(bar, value, max)
+    if not bar then return false end
+    if not pcall(bar.SetMinMaxValues, bar, 0, max) then return false end
+    return pcall(bar.SetValue, bar, value) and true or false
+end
+
+function ns.ReadAura(unit, index, filter)
+    local UA = C_UnitAuras
+    local get = UA and UA.GetAuraDataByIndex
+    if not get then return nil end
+    local ok, a = pcall(get, unit, index, filter)
+    if not ok then return false end
+    return a
+end
+
+function ns.AuraFieldsHidden(a)
+    if issecret == nil or type(a) ~= "table" then return false end
+    return (issecret(a.name) or issecret(a.spellId) or issecret(a.icon) or issecret(a.duration)
+        or issecret(a.expirationTime) or issecret(a.applications)) and true or false
+end
+
+function ns.AuraIsMine(a)
+    if type(a) ~= "table" then return false end
+    local s = a.sourceUnit
+    if issecret ~= nil and issecret(s) then return a.isFromPlayerOrPlayerPet == true end
+    return s == "player"
+end
+
+function ns.AuraDuration(unit, a)
+    local UA = C_UnitAuras
+    local id = type(a) == "table" and a.auraInstanceID
+    if not (id and UA and UA.GetAuraDuration) then return nil end
+    local ok, dur = pcall(UA.GetAuraDuration, unit, id)
+    if ok then return dur end
+    return nil
+end
+
+function ns.ShowAuraTimer(cd, unit, a)
+    if not (cd and a) then return false end
+    local dur = ns.AuraDuration(unit, a)
+    if dur and cd.SetCooldownFromDurationObject and pcall(cd.SetCooldownFromDurationObject, cd, dur) then
+        return true
+    end
+    if cd.SetCooldownFromExpirationTime
+        and pcall(cd.SetCooldownFromExpirationTime, cd, a.expirationTime, a.duration) then
+        return true
+    end
+    return false
+end
+
+function ns.AuraTimeLeft(unit, a)
+    local dur = ns.AuraDuration(unit, a)
+    if not (dur and dur.GetRemainingDuration) then return nil end
+    -- an aura with no end has a zero duration: no number for it
+    if dur.IsZero then
+        local ok, z = pcall(dur.IsZero, dur)
+        if ok and not ns.IsSecret(z) and z then return nil end
+    end
+    local ok, left = pcall(dur.GetRemainingDuration, dur)
+    if ok then return left end
+    return nil
+end
+
+function ns.ShowAuraCount(fs, unit, a)
+    if not (fs and a) then return false end
+    local UA = C_UnitAuras
+    local id = a.auraInstanceID
+    if id and UA and UA.GetAuraApplicationDisplayCount then
+        local ok, s = pcall(UA.GetAuraApplicationDisplayCount, unit, id, 2)
+        if ok and s ~= nil and pcall(fs.SetText, fs, s) then return true end
+    end
+    local n = a.applications
+    if not ns.IsSecret(n) then
+        fs:SetText((n and n > 1) and n or "")
+        return true
+    end
+    return false
+end
+
+function ns.CastDuration(unit, channel)
+    local f = channel and UnitChannelDuration or UnitCastingDuration
+    if f == nil then return nil end
+    local ok, dur = pcall(f, unit)
+    if ok then return dur end
+    return nil
+end
+
+function ns.ShowCastTimer(bar, dur, channel)
+    if not (bar and dur and bar.SetTimerDuration) then return false end
+    local E = Enum
+    local interp = E and E.StatusBarInterpolation and E.StatusBarInterpolation.Immediate or 0
+    local dirs = E and E.StatusBarTimerDirection
+    local dir = channel and (dirs and dirs.RemainingTime or 1) or (dirs and dirs.ElapsedTime or 0)
+    return pcall(bar.SetTimerDuration, bar, dur, interp, dir) and true or false
 end
 
 -- ============================================================

@@ -373,9 +373,10 @@ function G.StyleAlert(line, text)
     local src = _G.RaidWarningFrameSlot1 or _G.GameFontNormalHuge
     local face, _, flags
     if src and src.GetFont then face, _, flags = src:GetFont() end
-    local spec = { face = face or STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", size = G.ALERT_MIN,
+    local spec = { size = G.ALERT_MIN,
         outline = OUTLINE_OF[flags or ""] or "none", shadow = true, shadowX = 1, shadowY = -1 }
-    if ns.ApplyFontSpec then ns.ApplyFontSpec(line.text, spec) end
+    -- ZacUI's font; the raid warning's face only while none is chosen
+    if ns.ApplyFontSpec then ns.ApplyFontSpec(line.text, spec, { face = face or STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF" }) end
     local T2 = Meter and Meter.Threat
     local c = (T2 and T2.CENTER_COLOR) or { r = 1, g = 0.15, b = 0.1 }
     line.text:SetTextColor(c.r, c.g, c.b, 1)

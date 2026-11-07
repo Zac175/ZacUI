@@ -214,6 +214,10 @@ local function BuffsTab(L, QoL)
         L:EndCard()
         return
     end
+    if BR.CounterHere and not BR.CounterHere() then
+        L:Desc("Waits for Readycheck: its buff counter does not run on "
+            .. (ns.FlavorName and ns.FlavorName() or "this game") .. " yet.")
+    end
     local b = BR.Cfg()
     local c = BR.ClassCfg()
     local cls = select(2, UnitClass("player"))

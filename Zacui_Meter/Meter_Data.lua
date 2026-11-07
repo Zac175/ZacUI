@@ -27,6 +27,10 @@ Meter.FONT        = "Interface\\AddOns\\ZacUI\\Media\\Fonts\\RedHatDisplay-SemiB
 -- Unset, the profile's files above are used - the look he imported.
 local function LSM() return LibStub and LibStub("LibSharedMedia-3.0", true) end
 function Meter.FontPath()
+    -- one font: ZacUI's, whenever one is chosen (the meter's own counts
+    -- only while ZacUI has none)
+    local one = ns.OneFace and ns.OneFace()
+    if one then return one end
     local d = ZacUIDB and ZacUIDB.meter
     local n = d and d.font
     n = ns.NewMediaName and ns.NewMediaName(n) or n
@@ -239,6 +243,156 @@ Meter.ENVIRONMENT_NAMES = {
     [3] = "Falling", [4] = "Drowning", [5] = "Fatigue",
     [6] = "Fire", [7] = "Lava", [8] = "Slime",
 }
+
+-- ============================================================
+-- DEATHS IN PLAIN WORDS - what a death log says, as the numbers and the
+-- sentence a raider reads. The meter's tooltip, its death recap, the
+-- recap's report to chat and the raid summary all word a death through
+-- these, so the four never disagree. Pure, and only ever run on a hover,
+-- a click or a closed fight - never inside the combat log.
+--
+-- A death table (Meter_Combat's BuildDeathTable) keeps events oldest
+-- first as { isDamage, spellId, amount, time, health after (0-1),
+-- source, overkill, crit, school }; its time is the death's.
+-- ============================================================
+Meter.DEATH_WINDOW = 10         -- seconds before a death the recap shows
+
+-- 4210 -> "4,210": a single hit reads better whole than as "4.2K"
+function Meter.Comma(n)
+    n = floor((tonumber(n) or 0) + 0.5)
+    local neg = n < 0
+    local s = tostring(neg and -n or n)
+    local out = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+    if out:sub(1, 1) == "," then out = out:sub(2) end
+    return (neg and "-" or "") .. out
+end
+
+-- 133 -> "2:13"
+function Meter.Clock(sec)
+    sec = floor((tonumber(sec) or 0) + 0.5)
+    if sec < 0 then sec = 0 end
+    return floor(sec / 60) .. ":" .. format("%02d", sec % 60)
+end
+
+-- a spell id as the meter names it (melee, auto shot and the
+-- environment have ids of their own)
+function Meter.SpellLabel(id, fallback)
+    if id == 1 then return _G.MELEE or "Melee" end
+    if id == 2 then return "Auto Shot" end
+    if Meter.ENVIRONMENT_NAMES[id] then return Meter.ENVIRONMENT_NAMES[id] end
+    local name = type(id) == "number" and GetSpellInfo and GetSpellInfo(id)
+    return name or fallback or ("Spell " .. tostring(id))
+end
+
+-- a death log's source: nil for a sourceless hit (falling, lava, the
+-- parser files those under "[*] <name>")
+local function CleanSource(name)
+    if type(name) ~= "string" or name == "" or name:sub(1, 4) == "[*] " then return nil end
+    return name
+end
+Meter.CleanSource = CleanSource
+
+-- The events of the last `window` seconds before a death, NEWEST FIRST,
+-- each as { dmg, spell, amt, ago (seconds before the death), hp (0-1),
+-- src, over, crit, school }.
+function Meter.DeathEvents(dt, window)
+    local out = {}
+    local evs = type(dt) == "table" and dt.events
+    if type(evs) ~= "table" then return out end
+    window = window or Meter.DEATH_WINDOW
+    local t0 = tonumber(dt.time) or 0
+    for i = #evs, 1, -1 do
+        local ev = evs[i]
+        if type(ev) == "table" and ev[4] then
+            local ago = t0 - ev[4]
+            if ago < 0 then ago = 0 end
+            if ago <= window + 0.05 then
+                out[#out + 1] = { dmg = ev[1] and true or false, spell = ev[2], amt = tonumber(ev[3]) or 0,
+                    ago = ago, hp = ev[5], src = CleanSource(ev[6]),
+                    over = (type(ev[7]) == "number" and ev[7] > 0) and ev[7] or 0,
+                    crit = ev[8] and true or false, school = ev[9] }
+            end
+        end
+    end
+    return out
+end
+
+-- One death boiled down to plain numbers (also what the raid summary
+-- keeps): the killing blow (spell, src, amt, over, crit; sure = it took
+-- them to 0, else it is only the last hit the meter saw), up to nBefore
+-- earlier hits and heals (newest first), the damage taken and healing
+-- received in the last 5 seconds, and whether anything was seen at all.
+function Meter.DeathSummary(dt, nBefore)
+    local evs = Meter.DeathEvents(dt)
+    local s = { seen = #evs > 0, took5 = 0, healed5 = 0, before = {},
+        hpKnown = type(dt) == "table" and (tonumber(dt.maxHealth) or 0) > 0 or false }
+    local kb
+    for i = 1, #evs do
+        if evs[i].dmg then kb = i break end
+    end
+    if kb then
+        local k = evs[kb]
+        s.spell, s.src, s.amt, s.over, s.crit = k.spell, k.src, k.amt, k.over, k.crit
+        s.sure = k.over > 0 or (s.hpKnown and type(k.hp) == "number" and k.hp <= 0.01) or false
+    end
+    for i, e in ipairs(evs) do
+        if e.ago <= 5 then
+            if e.dmg then s.took5 = s.took5 + e.amt else s.healed5 = s.healed5 + e.amt end
+        end
+        if i ~= kb and #s.before < (nBefore or 3) then
+            s.before[#s.before + 1] = { dmg = e.dmg, spell = e.spell, src = e.src, amt = e.amt,
+                ago = e.ago, crit = e.crit }
+        end
+    end
+    return s
+end
+
+-- "Shadow Flame from Ebonroc"
+local function Named(spell, src, nameOf)
+    local t = nameOf(spell)
+    if src then t = t .. " from " .. src end
+    return t
+end
+-- the killing blow alone: "Shadow Flame from Ebonroc (4,210, 1,350 overkill)"
+function Meter.KillingBlowText(s, nameOf)
+    nameOf = nameOf or Meter.SpellLabel
+    if not (s and s.spell) then return nil end
+    local t = Named(s.spell, s.src, nameOf)
+    if s.amt then
+        local nums = Meter.Comma(s.amt)
+        if (s.over or 0) > 0 then nums = nums .. ", " .. Meter.Comma(s.over) .. " overkill" end
+        t = t .. " (" .. nums .. ")"
+    end
+    return t
+end
+
+-- The sentence: "Zac died to Shadow Flame from Ebonroc (4,210, 1,350
+-- overkill); before that: Melee from Ebonroc 1,200, Flash Heal from Pria
+-- +1,800." withBefore adds the earlier hits while the line stays under
+-- maxLen (chat takes 255). Plain text: no colours, no icons.
+function Meter.DeathSentence(s, who, nameOf, withBefore, maxLen)
+    nameOf = nameOf or Meter.SpellLabel
+    who = who or "They"
+    if type(s) ~= "table" or s.seen == false then
+        return who .. " died, but the meter saw none of the hits before it (out of range, or joined late)."
+    end
+    local kb = Meter.KillingBlowText(s, nameOf)
+    if not kb then return who .. " died; the meter saw no hit that did it." end
+    local out = (s.sure == false) and (who .. " died; the last hit the meter saw was " .. kb)
+        or (who .. " died to " .. kb)
+    if withBefore and type(s.before) == "table" and #s.before > 0 then
+        maxLen = maxLen or 250
+        local parts = {}
+        for _, e in ipairs(s.before) do
+            local item = Named(e.spell, e.src, nameOf) .. " " .. (e.dmg and "" or "+") .. Meter.Comma(e.amt)
+            local try = out .. "; before that: " .. table.concat(parts, ", ") .. (#parts > 0 and ", " or "") .. item .. "."
+            if #try > maxLen then break end
+            parts[#parts + 1] = item
+        end
+        if #parts > 0 then out = out .. "; before that: " .. table.concat(parts, ", ") end
+    end
+    return out .. "."
+end
 
 -- shared with later ZacUI files
 ns.Meter = Meter

@@ -443,11 +443,12 @@ local function StyleButton(b, cfg)
         if Empty(cfg.countFont) then
             if count._zCustom and count._zStock and count._zStock[1] then
                 count._zCustom = nil
-                pcall(count.SetFont, count, count._zStock[1], count._zStock[2], count._zStock[3])
+                if ns.FollowFont then ns.FollowFont(count, count._zStock[2], count._zStock[3])
+                else pcall(count.SetFont, count, count._zStock[1], count._zStock[2], count._zStock[3]) end
             end
         elseif ns.ApplyFontSpec and count._zStock then
             count._zCustom = true
-            ns.ApplyFontSpec(count, cfg.countFont, { face = count._zStock[1],
+            ns.ApplyFontSpec(count, cfg.countFont, { fallbackFace = count._zStock[1],
                 size = count._zStock[2] or 12, outline = count._zStock[3] or "OUTLINE", shadow = false })
         end
         if type(cfg.countColor) == "table" then

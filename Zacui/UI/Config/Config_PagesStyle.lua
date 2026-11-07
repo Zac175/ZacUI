@@ -95,8 +95,8 @@ end
 -- ============================================================
 RegisterPage("Font", function(L)
     L:Header("Fonts & Textures",
-        "One font and one bar texture for the whole UI. 'Where it goes' "
-        .. "picks which parts and addons follow them.")
+        "One font and one bar texture for the whole UI. The font is every "
+        .. "text's, everywhere; 'Where it goes' picks which parts take the texture.")
 
     L:Preview({
         key = "appearance.font",
@@ -207,11 +207,11 @@ RegisterPage("Font", function(L)
         -- ------------------------------------------------------------
         if Media then
             L:Card("Where it goes")
-            L:Desc("ZacUI's own windows, the HUD, the action bars and every bar it "
-                .. "skins follow the two choices above by themselves. These keep a "
-                .. "font and texture of their own and are written to whenever you "
-                .. "change a choice here, while ticked. Un-tick one to set it by "
-                .. "hand on its own page.")
+            L:Desc("Every text ZacUI draws - every part, every aura, every skinned "
+                .. "Blizzard frame - and Readycheck's too, is in the font above, always. "
+                .. "These keep a bar texture of their own and are handed the one above "
+                .. "whenever you change it, while ticked. Un-tick one to set its texture "
+                .. "by hand on its own page.")
             L:Gap(2)
             local manual = {}
             for _, t in ipairs(Media.Targets()) do
@@ -241,15 +241,15 @@ RegisterPage("Font", function(L)
             L:Row(applyBtn, M.BUTTON_H + 6)
             for _, t in ipairs(manual) do
                 local here = (not t.available) or t.available()
-                local btn = UI.Button(L.current, "Push into auras...", {
+                local btn = UI.Button(L.current, "Texture into auras...", {
                     width = 170,
                     tooltip = t.desc,
                     onClick = function()
                         UI.Confirm({
-                            title = "Push into auras",
-                            text = "Set the font of every text and the texture of every bar in "
-                                .. "ALL your auras to the choices above? Each aura's saved data is "
-                                .. "edited; there is no undo short of re-importing.",
+                            title = "Texture into auras",
+                            text = "Set the texture of every bar in ALL your auras to the choice "
+                                .. "above? Each aura's saved data is edited; there is no undo short "
+                                .. "of re-importing. (Their texts already use ZacUI's font.)",
                             acceptText = "Push",
                             onAccept = function()
                                 local ok, err = Media.PushAuras(function(c, n)

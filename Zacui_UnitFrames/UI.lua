@@ -44,6 +44,16 @@ local function uiFont()
     return ns.Media:Font(ns.db and ns.db.media.font or "Friz Quadrata TT")
 end
 
+-- the frames' font on a text or edit box of this window, kept up when it
+-- changes (ZacUI's font, handed over from Fonts & Textures, unless picked)
+local function UIFont(obj, size, flags)
+    obj:SetFont(uiFont(), size, flags)
+    local Z = ns.ZUI or _G.ZacUI
+    if Z and Z.TrackHouseFont then
+        Z.TrackHouseFont(obj, function(s) pcall(s.SetFont, s, uiFont(), size, flags) end)
+    end
+end
+
 -- FontString with the configured font + outline
 function UI:FS(parent, size, layer)
     local fs = parent:CreateFontString(nil, layer or "OVERLAY")
@@ -52,6 +62,11 @@ function UI:FS(parent, size, layer)
     local ok, set = pcall(fs.SetFont, fs, uiFont(), size or 12, "OUTLINE")
     if not (ok and set) then fs:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", size or 12, "OUTLINE") end
     fs:SetTextColor(unpackc(C.txt))
+    -- the frames' font (ZacUI's unless picked here), kept up when it changes
+    local Z = ns.ZUI or _G.ZacUI
+    if Z and Z.TrackHouseFont then
+        Z.TrackHouseFont(fs, function(s) pcall(s.SetFont, s, uiFont(), size or 12, "OUTLINE") end)
+    end
     return fs
 end
 
@@ -254,7 +269,7 @@ function UI:Slider(parent, label, min, max, value, step, w, onChange)
     val:SetSize(44, 16)
     val:SetPoint("TOPRIGHT", 2, 2)
     val:SetAutoFocus(false)
-    val:SetFont(uiFont(), 11, "OUTLINE")
+    UIFont(val, 11, "OUTLINE")
     val:SetJustifyH("RIGHT")
     val:SetTextColor(unpackc(C.txtSel))
 
@@ -317,7 +332,7 @@ function UI:MiniSlider(parent, w, min, max, step, getf, setf)
 
     local val = CreateFrame("EditBox", nil, f)
     val:SetSize(38, 16); val:SetPoint("RIGHT", 0, 0); val:SetAutoFocus(false)
-    val:SetFont(uiFont(), 11, "OUTLINE"); val:SetJustifyH("RIGHT"); val:SetTextColor(unpackc(C.txtSel))
+    UIFont(val, 11, "OUTLINE"); val:SetJustifyH("RIGHT"); val:SetTextColor(unpackc(C.txtSel))
 
     local s = CreateFrame("Slider", nil, f, "BackdropTemplate")
     s:SetPoint("LEFT", 0, 0); s:SetPoint("RIGHT", val, "LEFT", -6, 0); s:SetHeight(12)
@@ -398,7 +413,7 @@ function UI:Dropdown(parent, w, items, current, onSelect)
     local sb = CreateFrame("EditBox", nil, sc)
     sb:SetPoint("TOPLEFT", 5, 0); sb:SetPoint("BOTTOMRIGHT", -5, 0)
     sb:SetAutoFocus(false)
-    sb:SetFont(uiFont(), 12, "OUTLINE")
+    UIFont(sb, 12, "OUTLINE")
     sb:SetTextColor(unpackc(C.txt))
     sb:SetJustifyH("LEFT")
     local sbHint = UI:FS(sc, 11)
@@ -640,7 +655,7 @@ function UI:EditBox(parent, w, getf, setf)
     local eb = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
     eb:SetSize(w or 56, 20)
     eb:SetAutoFocus(false)
-    eb:SetFont(uiFont(), 12, "OUTLINE")
+    UIFont(eb, 12, "OUTLINE")
     eb:SetTextColor(unpackc(C.txt))
     eb:SetTextInsets(6, 6, 0, 0)
     eb:SetJustifyH("LEFT")
@@ -665,7 +680,7 @@ function UI:TextBox(parent, w)
     local eb = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
     eb:SetSize(w or 160, 20)
     eb:SetAutoFocus(false)
-    eb:SetFont(uiFont(), 12, "OUTLINE")
+    UIFont(eb, 12, "OUTLINE")
     eb:SetTextColor(unpackc(C.txt))
     eb:SetTextInsets(6, 6, 0, 0)
     eb:SetJustifyH("LEFT")
@@ -691,7 +706,7 @@ function UI:MultiLineBox(parent, w, h)
     local eb = CreateFrame("EditBox", nil, scroll)
     eb:SetMultiLine(true)
     eb:SetAutoFocus(false)
-    eb:SetFont(uiFont(), 11, "")
+    UIFont(eb, 11, "")
     eb:SetTextColor(unpackc(C.txt))
     eb:SetWidth(w - 12)
     eb:SetScript("OnEscapePressed", function(s) s:ClearFocus() end)

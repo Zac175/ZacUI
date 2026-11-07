@@ -304,7 +304,10 @@ Modules.misc = function()
         local f = _G[n]
         if f and f.GetFont and f.SetFont then
             local font, size = f:GetFont()
-            if font then f:SetFont(font, size or 20, "OUTLINE") end
+            if font then
+                if ns.FollowFont then ns.FollowFont(f, size or 20, "OUTLINE")
+                else f:SetFont(font, size or 20, "OUTLINE") end
+            end
         end
     end
 

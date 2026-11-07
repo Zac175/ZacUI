@@ -233,13 +233,17 @@ function Look:Font(fs, size, flags)
 	local z = Z()
 	local cfg = _G.ZacUIDB and _G.ZacUIDB.font or {}
 	local path = z and z.ResolveFontPath and z.ResolveFontPath(cfg.name)
+	local asked = flags
 	if flags == nil then flags = (cfg.outline == "NONE") and "" or "OUTLINE" end
 	local sz = (size or 12) + (cfg.delta or 0)
 	if not (path and TrySetFont(fs, path, sz, flags)) then
-		if not fs:SetFont(STANDARD_TEXT_FONT, sz, flags or "") then fs:SetFontObject(GameFontHighlight) end
+		local game = (z and z.GAME_FONT) or STANDARD_TEXT_FONT
+		if not fs:SetFont(game, sz, flags or "") then fs:SetFontObject(GameFontHighlight) end
 	end
 	fs:SetShadowColor(0, 0, 0, 1)
 	fs:SetShadowOffset(1, -1)
+	-- kept up when ZacUI's font changes
+	if z and z.TrackHouseFont then z.TrackHouseFont(fs, function(s) Look:Font(s, size, asked) end) end
 	return fs
 end
 

@@ -129,6 +129,7 @@ end
 
 local function Header(name) return { type = "header", name = name, order = N() } end
 local function Desc(text) return { type = "description", name = text, order = N() } end
+local ONE_FONT_NOTE = (ns.UI and ns.UI.ONE_FONT_NOTE) or "Uses ZacUI's font (Fonts & Textures)"
 local function Button(name, func, extra) return Extra({ type = "execute", name = name, order = N(), func = func }, extra) end
 local function Group(args, hidden) return { type = "group", inline = true, order = N(), args = args, hidden = hidden } end
 
@@ -449,7 +450,9 @@ function DISPLAY.text(d, args)
     args.customTextUpdate = Select(d, d, "customTextUpdate", "Custom text (%c) updates", { event = "When the trigger changes", update = "Every frame" })
     args.customText = Code(d, d, "customText", "Custom text code", 6)
     args.customText.hidden = function() return not (type(d.displayText) == "string" and d.displayText:find("%%c")) end
-    args.font = Select(d, d, "font", "Font", Media("font"))
+    -- one font: every aura text is in ZacUI's font; the aura's own face
+    -- stays in its data (an export still carries it), not offered here
+    args.font = Desc("Font: " .. ONE_FONT_NOTE)
     args.fontSize = Range(d, d, "fontSize", "Size", 6, 72, 1)
     args.outline = Select(d, d, "outline", "Outline", OUTLINES)
     args.color = ColorOpt(d, d, "color", "Colour")
@@ -733,7 +736,7 @@ function SUBEDIT.subtext(d, s, args, k)
         local t = { AUTO = "Automatic" } for p, l in pairs(POINTS) do t[p] = l end return t end)())
     args[k .. "x"] = Range(d, s, "anchorXOffset", "  across", -200, 200, 1)
     args[k .. "y"] = Range(d, s, "anchorYOffset", "  up", -200, 200, 1)
-    args[k .. "f"] = Select(d, s, "text_font", "Font", Media("font"))
+    args[k .. "f"] = Desc("Font: " .. ONE_FONT_NOTE)
     args[k .. "s"] = Range(d, s, "text_fontSize", "Size", 6, 72, 1)
     args[k .. "o"] = Select(d, s, "text_fontType", "Outline", OUTLINES)
     args[k .. "c"] = ColorOpt(d, s, "text_color", "Colour")

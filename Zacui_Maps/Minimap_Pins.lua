@@ -234,7 +234,7 @@ function MP.Update()
         and C_Map.GetBestMapForUnit("player")
     if not mapID then return stop("the client will not say what zone you are in") end
 
-    local records = MapData.pins[mapID]
+    local records = (Maps.PinsFor and Maps.PinsFor(mapID)) or MapData.pins[mapID]
     if not records then return stop("no data for this zone") end
 
     local ppos = C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")

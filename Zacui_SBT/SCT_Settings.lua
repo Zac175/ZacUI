@@ -310,8 +310,12 @@ function S.Ease(id)
     return (E and id and E[id]) or Linear
 end
 
--- name (or a file path, or false for ZacUI's own) -> a file SetFont takes
+-- name (or a file path, or false for ZacUI's own) -> a file SetFont takes.
+-- One font: ZacUI's whenever one is chosen - a face saved for the text or
+-- one area counts only while ZacUI has none.
 function S.FontPath(name)
+    local one = ns.OneFace and ns.OneFace()
+    if one then return one end
     local resolve = ns.ResolveFontPath
     local path
     if type(name) == "string" and name ~= "" and resolve then path = resolve(name) end

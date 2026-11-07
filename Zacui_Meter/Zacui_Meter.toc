@@ -18,6 +18,7 @@
 Meter_Data.lua
 Meter_Combat.lua
 Meter_Parser.lua
+Meter_GameMeter.lua
 Meter_Windows.lua
 Meter_Threat.lua
 Meter_ThreatGlow.lua

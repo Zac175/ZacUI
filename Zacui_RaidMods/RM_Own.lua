@@ -24,7 +24,15 @@ RM.Own = O
 -- every raid has its module here (keyed by the raid key its pieces carry;
 -- the pull timers' file is PullTimers, its pieces' raid is PT)
 O.on = true
-O.READY = { MC = true, BWL = true, ZG = true, AQ40 = true, NX = true, PullTimers = true, PT = true }
+-- Which game's raids load (ns.Flavor, the developer override included):
+-- Classic Era's five on Era, TBC Anniversary's nine on TBC (Own\TBC_Kit
+-- and the TBC raid files). The pull and break timers run on both.
+O.flavor = ns.Flavor and ns.Flavor() or "era"
+if O.flavor == "era" then
+    O.READY = { MC = true, BWL = true, ZG = true, AQ40 = true, NX = true, PullTimers = true, PT = true }
+else
+    O.READY = { PullTimers = true, PT = true }
+end
 
 -- ============================================================
 -- DATA AND BEHAVIOUR

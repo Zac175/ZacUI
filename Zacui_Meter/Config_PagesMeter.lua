@@ -44,7 +44,8 @@ if ns.AddMenuKeywords then
     ns.AddMenuKeywords("meter", "skada recount look style colour color colours colors "
         .. "class colors font fonts texture textures row height spacing gap border background "
         .. "title bar toolbar icon icons spec number format abbreviation percent rank "
-        .. "animation animations fade preview test mode example size width position move lock")
+        .. "animation animations fade preview test mode example size width position move lock "
+        .. "death deaths recap killing blow overkill interrupt dispel")
 end
 
 -- the state the Look tab's state editor was on, across rebuilds
@@ -224,6 +225,9 @@ local function FakeThreat()
 end
 
 local CANVAS_W, CANVAS_H = 400, 300
+-- the death recap sample: the recap window's panel at its real size
+local RECAP_W, RECAP_H = 460, 340
+local DEATH_MODES = { deathTip = true, deathRecap = true }
 -- the preview strip: a meter window at its real size (its saved width and
 -- height, its row look), and the summary's night card at its width, a
 -- page long (the strip shows its top part); update sizes the canvas to
@@ -337,6 +341,21 @@ local function BuildPreview(canvas, P)
         st.glowOpts = { instant = true }
         st.openerOpts = { instant = true, opener = true }
     end
+    -- a death row's tooltip and its recap, drawn by the meter's own code
+    -- from its sample death (Meter.SampleDeath)
+    if Meter.NewTipSample then
+        st.tip = Meter.NewTipSample(canvas)
+        st.tip:SetPoint("CENTER", canvas, "CENTER", 0, 0)
+        st.tip:Hide()
+    end
+    if Meter.NewRecapPanel then
+        st.recapHost = UI.Box(canvas, "ui", "windowBg")
+        st.recapHost:SetSize(RECAP_W, RECAP_H)
+        st.recapHost:SetPoint("CENTER", canvas, "CENTER", 0, 0)
+        st.recap = Meter.NewRecapPanel(st.recapHost, RECAP_W, RECAP_H)
+        st.recap:SetPoint("TOPLEFT", st.recapHost, "TOPLEFT", 0, 0)
+        st.recapHost:Hide()
+    end
 end
 
 -- the threat the Threat glow sample is drawn at (the "Preview at" slider
@@ -378,6 +397,11 @@ local function UpdatePreview(canvas, P)
     local st, Meter = P.store, ns.Meter
     local RS = Meter.RaidSummary
     local G = ns.ThreatGlow
+    -- the death samples step aside for every other mode
+    if not DEATH_MODES[P.mode] then
+        if st.tip then st.tip:Hide() end
+        if st.recapHost then st.recapHost:Hide() end
+    end
     if st.glow then
         if GLOW_MODES[P.mode] and G then
             -- the screen at its real size, the canvas a band of its left
@@ -421,6 +445,24 @@ local function UpdatePreview(canvas, P)
         end
         st.line:Hide()
         st.lineNote:Hide()
+    end
+    if DEATH_MODES[P.mode] then
+        -- what hovering a death shows, or what clicking one opens
+        st.win.frame:Hide()
+        st.sumHost:Hide()
+        local who = Me() or "Zac"
+        if P.mode == "deathTip" and st.tip then
+            if st.recapHost then st.recapHost:Hide() end
+            st.tip:Show()
+            local w, h = st.tip:SetLines(who, Meter.SampleDeathTip(who))
+            if P.Resize then P.Resize(w + 10, h + 10) end
+        elseif st.recap then
+            if st.tip then st.tip:Hide() end
+            st.recapHost:Show()
+            st.recap:SetDeath(Meter.SampleDeath(who), who)
+            if P.Resize then P.Resize(RECAP_W + 10, RECAP_H + 10) end
+        end
+        return
     end
     if P.mode == "summary" then
         st.win.frame:Hide()
@@ -476,7 +518,7 @@ local function ReplayPreview(canvas, P)
         G.PlayAlert(st.line)
         return
     end
-    if P.mode == "summary" then return end
+    if P.mode == "summary" or DEATH_MODES[P.mode] then return end
     local st, Meter = P.store, ns.Meter
     local Motion = ns.Motion
     local d = Look()
@@ -810,6 +852,13 @@ local function Tab_look(L)
         "Rallying Cry, Warchief's Blessing, Zandalar, Songflower or a Dire Maul buff.",
         function() if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end MeterRefresh() end)
     UI.SetEnabled(ob, d.dmfIcon ~= false)
+    -- not asked on TBC (no world-buff raiding there): dimmed, and the
+    -- tooltip says so
+    if Meter.DMF_WORLD_BUFFS == false then
+        UI.SetEnabled(ob, false)
+        if UI.Tooltip then UI.Tooltip(ob, "Only while I have my world buffs on", "Not used on "
+            .. (ns.FlavorName and ns.FlavorName() or "this game") .. ": the mark shows in any raid.") end
+    end
     -- Classic Era's world buffs: dimmed where the mark is off (Core_Flavor;
     -- the note at the top of the page says why)
     if Meter.DMF_ON == false then
@@ -1086,6 +1135,10 @@ local function PreviewModes()
         m[#m + 1] = { id = "pullWarn", label = "Pulling in 3s" }
         m[#m + 1] = { id = "stop", label = "Threat stop" }
         m[#m + 1] = { id = "aggro", label = "Aggro" }
+    end
+    if ns.Meter and ns.Meter.NewRecapPanel then
+        m[#m + 1] = { id = "deathTip", label = "Death tooltip" }
+        m[#m + 1] = { id = "deathRecap", label = "Death recap" }
     end
     m[#m + 1] = { id = "summary", label = "Raid summary" }
     return m

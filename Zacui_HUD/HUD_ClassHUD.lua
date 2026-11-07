@@ -254,7 +254,7 @@ end
 -- Entries not seen this pass are dropped afterwards, so a reader finds
 -- exactly what a rebuilt table would hold.
 local scanPass = 0
-local function PutAura(out, lname, pass, name, icon, count, duration, expirationTime)
+local function PutAura(out, lname, pass, name, icon, count, duration, expirationTime, hidden)
     local e = out[lname]
     if e and e.pass == pass then return end
     if not e then
@@ -263,6 +263,9 @@ local function PutAura(out, lname, pass, name, icon, count, duration, expiration
     end
     e.pass = pass
     e.name, e.icon, e.count, e.duration, e.expirationTime = name, icon, count, duration, expirationTime
+    -- (WoW Forever: the game's aura table when its icon, timer or stacks
+    -- are hidden - the row shows those straight from it)
+    e.hidden = hidden
 end
 local function DropUnseen(out, pass)
     for lname, e in pairs(out) do
@@ -289,6 +292,26 @@ function Engine:ScanTargetDebuffs()
     local S = self.S
     scanPass = scanPass + 1
     local pass = scanPass
+    if HUD.HIDDEN_AURAS then
+        -- WoW Forever: details the game hides in combat are shown as they
+        -- are; debuffs whose very names are hidden go to S.targetHidden
+        local extra = S.targetHidden
+        if not extra then extra = {} S.targetHidden = extra end
+        wipe(extra)
+        if UnitExists("target") then
+            HUD.EachMyTargetDebuff(function(name, a)
+                if not name then
+                    extra[#extra + 1] = a
+                elseif ns.AuraFieldsHidden(a) then
+                    PutAura(S.targetDebuffs, name:lower(), pass, name, a.icon, nil, nil, nil, a)
+                else
+                    PutAura(S.targetDebuffs, name:lower(), pass, name, a.icon, a.applications, a.duration, a.expirationTime)
+                end
+            end)
+        end
+        DropUnseen(S.targetDebuffs, pass)
+        return
+    end
     if UnitExists("target") then
         for i = 1, 40 do
             local name, icon, count, _, duration, expirationTime, source =
@@ -438,6 +461,16 @@ function Engine:OnCombatLogEvent(_, subevent, _, sourceGUID)
     elseif self.wantsRanged and (subevent == "RANGE_DAMAGE" or subevent == "RANGE_MISSED") then
         local speed = UnitRangedDamage and UnitRangedDamage("player") or 0
         S.ranged.start, S.ranged.duration = GetTime(), speed or 0
+    end
+end
+
+-- WoW Forever: the game's own swing event instead (ns.Swings)
+function Engine:OnSwing(hand, now, dur)
+    local S = self.S
+    if hand == "mh" then
+        S.swing.start, S.swing.duration = now, dur or 0
+    elseif hand == "ranged" and self.wantsRanged then
+        S.ranged.start, S.ranged.duration = now, dur or 0
     end
 end
 
@@ -849,6 +882,14 @@ end
 function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source, memo)
     local S, W = self.S, self.W
     wipe(active)
+    -- WoW Forever: your debuffs on the target whose names the game hides.
+    -- Nothing tells them apart but their own icons, so they take the
+    -- row's free icons in the game's order (the per-debuff ticks can't
+    -- reach them). nil on every other client.
+    local extra = source == S.targetDebuffs and S.targetHidden or nil
+    if extra and (#extra == 0 or self.preview or not self:On(cfg) or rowCfg.enabled == false) then extra = nil end
+    local free = extra and (self._freeIcons or {}) or nil
+    if free then self._freeIcons = free wipe(free) end
     for _, def in ipairs(list) do
         local icon = icons[def.key]
         local shown = false
@@ -861,7 +902,12 @@ function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source
             else
                 local name = S.auraNames[def.key]
                 local b = name and source[name:lower()] or nil
-                if b then
+                if b and b.hidden then
+                    icon:SetHiddenTexture(b.icon)
+                    icon:SetHiddenSwipe("target", b.hidden)
+                    icon.auraRef = b
+                    shown = true
+                elseif b then
                     icon:SetIconTexture(b.icon or S.auraIcons[def.key])
                     if (b.duration or 0) > 0 then
                         icon:SetSwipe(b.expirationTime - b.duration, b.duration)
@@ -873,8 +919,29 @@ function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source
                 end
             end
         end
-        W.SetShownAnimated(icon, shown)
-        if shown then active[#active + 1] = icon end
+        if free and not shown then
+            free[#free + 1] = icon
+        else
+            W.SetShownAnimated(icon, shown)
+            if shown then active[#active + 1] = icon end
+        end
+    end
+    if free then
+        for i, icon in ipairs(free) do
+            local a = extra[i]
+            if a then
+                local ref = icon._hiddenRef
+                if not ref then ref = {} icon._hiddenRef = ref end
+                ref.hidden = a
+                icon:SetHiddenTexture(a.icon)
+                icon:SetHiddenSwipe("target", a)
+                icon.auraRef = ref
+                W.SetShownAnimated(icon, true)
+                active[#active + 1] = icon
+            else
+                W.SetShownAnimated(icon, false)
+            end
+        end
     end
     local size = rowCfg.iconSize or 25
     HUD.LayoutRow(memo, active, anchor, size, size, rowCfg.spacing or 4)
@@ -1141,12 +1208,20 @@ function Engine:TextTick()
         local list = (li == 1) and self.auraActive or self.debuffActive
         for _, icon in ipairs(list) do
             local b = icon.auraRef
-            if b and (b.expirationTime or 0) > 0 then
+            if b and b.hidden then
+                -- (WoW Forever: the time left and the stacks as the game
+                -- hands them over, hidden or not)
+                local left = ns.AuraTimeLeft("target", b.hidden)
+                if left ~= nil then icon:SetHiddenText("p", "%.0f", left) else icon:SetText("p", "") end
+                icon:SetHiddenCount("s", "target", b.hidden)
+            elseif b and (b.expirationTime or 0) > 0 then
                 icon:SetText("p", W.FormatTime(math.max(0, b.expirationTime - GetTime()), 0))
             else
                 icon:SetText("p", "")
             end
-            icon:SetText("s", (b and (b.count or 0) > 1) and tostring(b.count) or "")
+            if not (b and b.hidden) then
+                icon:SetText("s", (b and (b.count or 0) > 1) and tostring(b.count) or "")
+            end
         end
     end
     for _, icon in pairs(self.auxIcons) do
@@ -1222,6 +1297,10 @@ function Engine:RegisterHotEvents()
         self.onCLEU = function(...) self:OnCombatLogEvent(...) end
     end
     ns.CLEU.On("ClassHUD." .. self.def.store, self.wantsRanged and MELEE_RANGED_SUBS or MELEE_SUBS, self.onCLEU)
+    if not self.onSwing then
+        self.onSwing = function(...) self:OnSwing(...) end
+    end
+    ns.Swings.On("ClassHUD." .. self.def.store, self.onSwing)
     ev:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     ev:RegisterEvent("BAG_UPDATE_DELAYED")
@@ -1235,6 +1314,7 @@ end
 function Engine:UnregisterHotEvents()
     local ev = self.ev
     ns.CLEU.Off("ClassHUD." .. self.def.store)
+    ns.Swings.On("ClassHUD." .. self.def.store, nil)
     ev:UnregisterEvent("UNIT_POWER_FREQUENT")
     ev:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     ev:UnregisterEvent("BAG_UPDATE_DELAYED")

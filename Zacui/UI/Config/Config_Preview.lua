@@ -502,9 +502,35 @@ end
 -- even that does not fit, one small button with the chosen mode that
 -- opens a menu. The page's own controls go after them on the line when
 -- they fit, else behind a "More" button that opens them in a popover.
+-- The mode buttons' natural widths, measured again after a change of
+-- ZacUI's font (their text is re-dressed in the new face; the row stays).
+local function FontEpochNow()
+    local f = ZacUIDB and ZacUIDB.font or {}
+    return tostring(f.name) .. "/" .. tostring(f.delta) .. "/" .. tostring(f.outline)
+end
+local function MeasureRow(row)
+    local epoch = FontEpochNow()
+    if row._zMeasured == epoch then return end
+    row._zMeasured = epoch
+    local widest = 0
+    for _, it in ipairs(row.items or {}) do
+        local fs = it.frame._zText
+        local tw = math.ceil((fs and fs:GetStringWidth()) or 0)
+        it.nat, it.min = tw + 14, tw + 8
+        widest = math.max(widest, tw)
+    end
+    if row.pick then row.pickNat = widest + 26 end
+    if row.menu and row.menuButtons then
+        local n = 0
+        for _, mb in pairs(row.menuButtons) do mb:SetWidth(widest + 20) n = n + 1 end
+        row.menu:SetWidth(widest + 28)
+    end
+end
+
 local function LayoutRow(e, avail)
     local row = e.row
     if not row then return end
+    MeasureRow(row)
     local items, n = row.items, #row.items
     local function Need(list)
         local s = 0
@@ -543,6 +569,22 @@ local function LayoutRow(e, avail)
     elseif row.pick then
         local w = Clamp(avail - (row.holder and ctrlMore or 0), 40, row.pickNat)
         row.pick:SetWidth(w)
+        -- a face wider than the room left (a font picked on Fonts &
+        -- Textures): the label steps down a size or two rather than spill
+        local fs = row.pick._zText
+        if fs and fs.GetFont then
+            local path, size, flags = fs:GetFont()
+            if path and size then
+                -- (from the size the button's text is made at, each time)
+                local fd = ZacUIDB and ZacUIDB.font
+                local base = F.SMALL + ((fd and fd.delta) or 0)
+                if size ~= base then size = base pcall(fs.SetFont, fs, path, size, flags) end
+                while size > 8 and (fs:GetStringWidth() or 0) + 6 > w do
+                    size = size - 1
+                    pcall(fs.SetFont, fs, path, size, flags)
+                end
+            end
+        end
         row.pick:ClearAllPoints()
         row.pick:SetPoint("LEFT", row, "LEFT", 0, 0)
         x = w
@@ -1000,6 +1042,7 @@ local function BuildRow(e)
         pa:SetPoint("RIGHT", -4, 0)
         PaintArrows({ pa })
         row.pickNat = widest + 26
+        row._zMeasured = FontEpochNow()
         row.pick:Hide()
         row.menu = Popup(e)
         row.menuButtons = {}

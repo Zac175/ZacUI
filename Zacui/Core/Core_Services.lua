@@ -11,6 +11,7 @@
 -- services answer each question once, for everyone.
 --
 --   ns.CLEU      one combat-log reader; listeners by sub-event
+--   ns.Swings    your own swings on WoW Forever (no combat log there)
 --   ns.Roster    the group: units, GUID/name -> unit, class
 --   ns.PlayerAuras   the player's own buffs/debuffs, one read per change
 --                (Readycheck's RC.Auras is used when it is loaded, so
@@ -230,6 +231,90 @@ function CLEU.Off(key)
 end
 
 function CLEU.Has(key) return cleuReg[key] ~= nil end
+
+------------------------------------------------------------------------
+-- ns.Swings - your own melee swings without the combat log (WoW
+-- Forever). The game sends PLAYER_SWING(swingDuration, swingType) on
+-- each of your swings (swingType 0 main hand, 1 off hand, 2 ranged;
+-- warcraft.wiki.gg Event:PLAYER_SWING, a Forever-only event of the
+-- SwingTimer system). It is only listened for on the real Forever
+-- client, and only while someone wants it; on Era and TBC the combat
+-- log's SWING_* lines keep doing this, so nothing here runs there.
+--   ns.Swings.On(key, fn)   fn(hand, now, duration): hand "mh" | "oh" |
+--                           "ranged" | "parry" (you parried a hit:
+--                           UNIT_COMBAT on the player); duration is the
+--                           game's swing time, else your attack speed,
+--                           else nil when both are hidden. nil fn removes.
+--   ns.Swings.Available()   true while this client sends the event
+-- One event per swing (a second or so apart): the listeners only write
+-- timestamps.
+------------------------------------------------------------------------
+local Swings = {}
+ns.Swings = Swings
+local swingReg, swingFrame, swingLive = {}, nil, false
+local HANDS = { [0] = "mh", [1] = "oh", [2] = "ranged" }
+local function Plain(v)
+    if v ~= nil and issecretvalue ~= nil and issecretvalue(v) then return nil end
+    return v
+end
+
+local function SwingDispatch(hand, dur)
+    local now = GetTime()
+    for _, fn in pairs(swingReg) do
+        local ok, err = pcall(fn, hand, now, dur)
+        if not ok then Report(err) end
+    end
+end
+
+local function OnSwingEvent(_, event, a1, a2)
+    if event == "PLAYER_SWING" then
+        local kind = Plain(a2)
+        local hand = HANDS[kind] or "mh"
+        local dur = Plain(a1)
+        if type(dur) ~= "number" or dur <= 0 then
+            dur = nil
+            if hand == "ranged" then
+                dur = UnitRangedDamage and Plain((UnitRangedDamage("player")))
+            elseif UnitAttackSpeed then
+                local mh, oh = UnitAttackSpeed("player")
+                dur = Plain(hand == "oh" and oh or mh)
+            end
+        end
+        SwingDispatch(hand, dur)
+    elseif event == "UNIT_COMBAT" then
+        -- (unit, action, ...): a hit on you that you parried
+        if a1 == "player" and Plain(a2) == "PARRY" then SwingDispatch("parry", nil) end
+    end
+end
+
+local function SwingRebuild()
+    local want = next(swingReg) ~= nil and _G.ZACUI_IS_FOREVER and true or false
+    if want == swingLive then return end
+    if want then
+        if not swingFrame then
+            swingFrame = CreateFrame("Frame")
+            swingFrame:SetScript("OnEvent", OnSwingEvent)
+        end
+        -- registering an event this client lacks throws: ask first
+        local valid = C_EventUtils and C_EventUtils.IsEventValid
+        if valid and not valid("PLAYER_SWING") then return end
+        if not pcall(swingFrame.RegisterEvent, swingFrame, "PLAYER_SWING") then return end
+        if swingFrame.RegisterUnitEvent then
+            pcall(swingFrame.RegisterUnitEvent, swingFrame, "UNIT_COMBAT", "player")
+        end
+        swingLive = true
+    elseif swingFrame then
+        swingFrame:UnregisterAllEvents()
+        swingLive = false
+    end
+end
+
+function Swings.On(key, fn)
+    swingReg[key] = fn
+    SwingRebuild()
+end
+
+function Swings.Available() return swingLive end
 
 ------------------------------------------------------------------------
 -- ns.Roster - the group, rebuilt once per burst of roster news.
@@ -599,8 +684,56 @@ local OP_WINDOW = 5
 local opName, opIds              -- Overpower's (localised) name; its rank ids
 local opSpent = {}               -- guid -> GetTime() you last Overpowered it
 
+-- WoW Forever gives addons no combat log, so no dodge is seen there (nor
+-- under the game-version override's Forever). There the window is the
+-- game's own Overpower button: in Battle Stance it lights only after a
+-- dodge, so it opens when the button lights (read 5 times a second in
+-- combat, warriors only) and runs 5s from then, on the target you had;
+-- it shuts the moment the button goes dark. Other stances cannot tell.
+local opNoLog                    -- set at login: true where there is no combat log
+local opLit = { at = nil, guid = nil, lit = false }
+local opPoll
+local function OPButton()
+    local lit = false
+    if opName and GetShapeshiftForm() == 1 then
+        local usable, noPower = IsUsableSpell(opName)
+        lit = (usable or noPower) and true or false
+    end
+    if lit and not opLit.lit then
+        opLit.at = GetTime()
+        opLit.guid = UnitExists("target") and UnitGUID("target") or nil
+    elseif not lit then
+        opLit.at, opLit.guid = nil, nil
+    end
+    opLit.lit = lit
+end
+local function OPPoll(on)
+    if on and not opPoll then
+        opPoll = C_Timer.NewTicker(0.2, OPButton)
+        if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(opPoll, "core.overpower") end
+        OPButton()
+    elseif not on and opPoll then
+        opPoll:Cancel()
+        opPoll = nil
+        opLit.at, opLit.guid, opLit.lit = nil, nil, false
+    end
+end
+Overpower._Button = OPButton     -- (tests)
+
+local function LeftFromButton(guid)
+    if not opLit.at then return 0 end
+    if not guid then
+        if not (UnitExists("target") and UnitCanAttack("player", "target")) then return 0 end
+        guid = UnitGUID("target")
+    end
+    if opLit.guid and guid ~= opLit.guid then return 0 end
+    local left = opLit.at + OP_WINDOW - GetTime()
+    return left > 0 and left or 0
+end
+
 function Overpower.Left(guid)
     if not opName then return 0 end
+    if opNoLog then return LeftFromButton(guid) end
     if not guid then
         if not (UnitExists("target") and UnitCanAttack("player", "target")) then return 0 end
         guid = UnitGUID("target")
@@ -640,8 +773,10 @@ opFrame:SetScript("OnEvent", function(_, event, unit, _, spellId)
             if g then opSpent[g] = GetTime() end
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
+        if opNoLog then OPPoll(true) return end
         Misses.Want("ZacUI.Overpower", true)
     elseif event == "PLAYER_REGEN_ENABLED" then
+        if opNoLog then OPPoll(false) return end
         Misses.Want("ZacUI.Overpower", false)
         wipe(opSpent)
     elseif event == "SPELLS_CHANGED" then
@@ -649,12 +784,15 @@ opFrame:SetScript("OnEvent", function(_, event, unit, _, spellId)
     elseif event == "PLAYER_LOGIN" then
         opFrame:UnregisterEvent("PLAYER_LOGIN")
         if select(2, UnitClass("player")) ~= "WARRIOR" then return end   -- warriors only
+        opNoLog = (_G.ZACUI_IS_FOREVER or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
         OPResolve()
         opFrame:RegisterEvent("SPELLS_CHANGED")
         opFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
         opFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
         opFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
-        if UnitAffectingCombat("player") then Misses.Want("ZacUI.Overpower", true) end
+        if UnitAffectingCombat("player") then
+            if opNoLog then OPPoll(true) else Misses.Want("ZacUI.Overpower", true) end
+        end
     end
 end)
 opFrame:RegisterEvent("PLAYER_LOGIN")

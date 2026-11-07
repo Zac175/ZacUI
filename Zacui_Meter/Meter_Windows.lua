@@ -316,10 +316,16 @@ Meter.meBuffed = false
 -- nothing is read and no mark is drawn
 local dmfOn = not (ns.FeatureOn and not ns.FeatureOn("meter_dmf"))
 Meter.DMF_ON = dmfOn
+-- TBC: Sayge's fortune is the same spell there (23768, Wowhead TBC), but
+-- TBC is not raided on Classic Era's world buffs, so "only while my world
+-- buffs are on" is not asked there: the mark shows in any raid
+local worldBuffNights = not (ns.Flavor and ns.Flavor() ~= "era")
+Meter.DMF_WORLD_BUFFS = worldBuffNights
 function Meter.DMFShowNow(d)
     if not dmfOn then return false end
     d = d or Look()
     if d.dmfIcon == false or not IsInRaid() then return false end
+    if not worldBuffNights then return true end
     return d.dmfOnlyBuffed == false or Meter.meBuffed
 end
 local dmfTicker, dmfSoon
@@ -403,28 +409,33 @@ end
 
 local DISPLAYS = {
     damage_done = {
-        label = "Damage Done", container = "damage",
+        label = "Damage Done", desc = "All the damage each player did, their pets included.",
+        container = "damage",
         value = function(a) return a.total end, ps = ActivityDps,
         icon = true,
     },
     dps = {
-        label = "DPS", container = "damage",
+        label = "DPS", desc = "Damage per second over the time each player was fighting.",
+        container = "damage",
         value = function(a, c, ct) return a.lastDps or 0 end,
         prepare = function(a, c, ct) a.lastDps = ActivityDps(a, c, ct) end,
         single = true, icon = true,
     },
     damage_taken = {
-        label = "Damage Taken", container = "damage",
+        label = "Damage Taken", desc = "Damage each player took, from everything that hit them.",
+        container = "damage",
         value = function(a) return a.damageTaken end,
         ps = function(a, c, ct) return a.damageTaken / ct end, icon = true,
     },
     friendly_fire = {
-        label = "Friendly Fire", container = "damage",
+        label = "Friendly Fire", desc = "Damage players did to their own group.",
+        container = "damage",
         value = function(a) return a.friendlyFireTotal end, single = true,
         icon = true,
     },
     heal_done = {
-        label = "Healing Done", container = "heal",
+        label = "Healing Done", desc = "Healing that landed, not counting overheal.",
+        container = "heal",
         value = function(a) return a.total end,
         ps = function(a, c, ct)
             local d = DB()
@@ -434,7 +445,8 @@ local DISPLAYS = {
         icon = true,
     },
     hps = {
-        label = "HPS", container = "heal",
+        label = "HPS", desc = "Healing per second over the time each healer was healing.",
+        container = "heal",
         value = function(a, c, ct) return a.lastDps or 0 end,
         prepare = function(a, c, ct)
             local d = DB()
@@ -444,36 +456,44 @@ local DISPLAYS = {
         single = true, icon = true,
     },
     overheal = {
-        label = "Overhealing", container = "heal",
+        label = "Overhealing", desc = "Overheal: healing past full health, so wasted.",
+        container = "heal",
         value = function(a) return a.totalOver end, single = true, icon = true,
     },
     absorbs = {
-        label = "Damage Prevented", container = "heal",
+        label = "Damage Prevented", desc = "Shields that absorbed damage, credited to the caster.",
+        container = "heal",
         value = function(a) return a.totalAbsorb end, single = true, icon = true,
     },
     heal_taken = {
-        label = "Healing Taken", container = "heal",
+        label = "Healing Taken", desc = "Healing each player received, from every healer.",
+        container = "heal",
         value = function(a) return a.healingTaken end,
         ps = function(a, c, ct) return a.healingTaken / ct end, icon = true,
     },
     deaths = {
-        label = "Deaths", container = "misc",
+        label = "Deaths", desc = "Who died, what killed them and the hits before it. Click one for the full recap.",
+        container = "misc",
         value = function(a) return a.dead or 0 end, count = true, icon = true,
     },
     interrupts = {
-        label = "Interrupts", container = "misc",
+        label = "Interrupts", desc = "Spells each player stopped mid-cast.",
+        container = "misc",
         value = function(a) return a.interrupt or 0 end, count = true, icon = true,
     },
     dispels = {
-        label = "Dispels", container = "misc",
+        label = "Dispels", desc = "Buffs and debuffs each player removed.",
+        container = "misc",
         value = function(a) return a.dispell or 0 end, count = true, icon = true,
     },
     cc_breaks = {
-        label = "CC Breaks", container = "misc",
+        label = "CC Breaks", desc = "Crowd control each player broke early (sheep, shackle, trap...).",
+        container = "misc",
         value = function(a) return a.cc_break or 0 end, count = true, icon = true,
     },
     ress = {
-        label = "Battle Ress", container = "misc",
+        label = "Battle Ress", desc = "Players brought back up during a fight.",
+        container = "misc",
         value = function(a) return a.ress or 0 end, count = true, icon = true,
     },
 }
@@ -485,6 +505,8 @@ local DISPLAY_ORDER = {
     "threat",
 }
 Meter.DISPLAYS = DISPLAYS
+-- what the threat window shows, for the mode menu (it is not a DISPLAYS row)
+Meter.THREAT_DESC = "Your target's threat list: how close each player is to pulling it."
 
 -- ============================================================
 -- SMALL SHARED BITS
@@ -1209,6 +1231,10 @@ local function ShowMenu(anchor, items)
             hl:SetColorTexture(1, 1, 1, 0.08)
             b.text = b:CreateFontString(nil, "OVERLAY")
             b.text:SetFont(Meter.FontPath(), 11)
+            -- (the meter's font, kept up when it changes)
+            if ns.TrackHouseFont then
+                ns.TrackHouseFont(b.text, function(s) pcall(s.SetFont, s, Meter.FontPath(), 11) end)
+            end
             b.text:SetPoint("LEFT", 4, 0)
             b.text:SetShadowColor(0, 0, 0, 1)
             b.text:SetShadowOffset(1, -1)
@@ -1217,8 +1243,18 @@ local function ShowMenu(anchor, items)
         b.text:SetText(item.text)
         b:SetScript("OnClick", function()
             m:Hide()
+            GameTooltip:Hide()
             item.func()
         end)
+        -- what the entry means, while the mouse is on it
+        b:SetScript("OnEnter", item.tip and function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            local t, c = ns.GetColor("tooltip", "title"), ns.GetColor("tooltip", "body")
+            GameTooltip:AddLine(item.text, t.r, t.g, t.b)
+            GameTooltip:AddLine(item.tip, c.r, c.g, c.b, true)
+            GameTooltip:Show()
+        end or nil)
+        b:SetScript("OnLeave", item.tip and function() GameTooltip:Hide() end or nil)
         b:Show()
     end
     for i = #items + 1, #m.buttons do m.buttons[i]:Hide() end
@@ -1334,10 +1370,11 @@ function winMeta:ToolbarClick(key, button)
     if self.preview then return end
     if key == "mode" then
         local items = {}
-        items[1] = { text = "Group meter", func = function()
+        items[1] = { text = "Group meter", tip = "Damage, healing, deaths and the rest; pick which from the display menu.",
+            func = function()
             self:SetDisplay(self.settings.lastMeterDisplay or "damage_done")
         end }
-        items[2] = { text = "Threat (TinyThreat)", func = function()
+        items[2] = { text = "Threat (TinyThreat)", tip = Meter.THREAT_DESC, func = function()
             self:SetDisplay("threat")
         end }
         -- Position lock only. It has nothing to say about which statistic
@@ -1382,7 +1419,7 @@ function winMeta:OpenDisplayMenu()
         -- least afford the easiest one to hit by accident. It lives in
         -- the mode menu, which is the two-entry choice it actually is.
         if key ~= "threat" then
-            items[#items + 1] = { text = DISPLAYS[key].label,
+            items[#items + 1] = { text = DISPLAYS[key].label, tip = DISPLAYS[key].desc,
                 func = function() self:SetDisplay(key) end }
         end
     end
@@ -1669,9 +1706,12 @@ if ns.Media and ns.Media.RegisterTarget then
         label = "Meter",
         desc = "Row font and bar texture in the damage and threat windows.",
         order = 40,
-        apply = function(font, bar)
+        -- still on its shipped font
+        untouched = function() local d = DB() return d.font == nil or d.font == "" end,
+        apply = function(font, bar, cleared)
             local d = DB()
-            if font then d.font = font end
+            if font then d.font = font
+            elseif cleared then d.font = nil end
             if bar then d.bar = bar end
             Meter.RestyleMedia()
         end,

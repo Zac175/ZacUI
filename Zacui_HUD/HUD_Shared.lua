@@ -62,6 +62,28 @@ HUD.GetItemIcon     = GetItemIcon or (C_Item and C_Item.GetItemIconByID)
 HUD.GetItemInfo     = GetItemInfo or (C_Item and C_Item.GetItemInfo)
 
 -- Shared game reads ---------------------------------------------------
+-- WoW Forever: your debuffs on the target, read from the game's aura
+-- tables (ns.ReadAura) instead of the old UnitAura stand-in, which drops
+-- every aura with a hidden detail and stops the walk at the first. An
+-- aura the game refuses is walked past. fn(name, aura) for each of yours
+-- (the never-hidden "from you" flag when the caster is hidden); name is
+-- nil when the game hides it as well, and the aura's own fields may be
+-- hidden - show them through Core_Flavor's display helpers, never maths.
+-- HUD.HIDDEN_AURAS is false on every other client: the HUDs keep their
+-- own UnitAura walk there, exactly as before.
+HUD.HIDDEN_AURAS = _G.ZACUI_IS_FOREVER and true or false
+function HUD.EachMyTargetDebuff(fn)
+    for i = 1, 40 do
+        local a = ns.ReadAura("target", i, "HARMFUL")
+        if a == nil then break end
+        if a and ns.AuraIsMine(a) then
+            local name = a.name
+            if ns.IsSecret(name) then name = nil end
+            fn(name, a)
+        end
+    end
+end
+
 -- An ability's rage cost as the client reports it (talents included), or
 -- nil when it does not say. One copy for the Warrior HUD and Hesitation.
 function HUD.RageCost(id)
@@ -89,6 +111,16 @@ function HUD.TargetHealthFrac()
     if ns.IsSecret and (ns.IsSecret(hpMax) or ns.IsSecret(hp)) then return 1 end
     if not hpMax or hpMax <= 0 then return 1 end
     return (hp or 0) / hpMax
+end
+
+-- WoW Forever, the target's health hidden: the game itself answers
+-- "at or under `below` (0-1, default 20%)?" through a curve, as 1 or 0
+-- for an icon's alpha (ns.HealthAlpha) - nothing here compares it. nil
+-- while the health reads (the fraction above answers then) or when the
+-- client has no such curve.
+function HUD.TargetExecuteAlpha(below)
+    if not (ns.HealthHidden and ns.HealthHidden("target")) then return nil end
+    return ns.HealthAlpha("target", below or 0.2)
 end
 
 -- Settings storage ----------------------------------------------------
@@ -306,26 +338,30 @@ function HUD.ApplyFont(fs, size, flags, role)
     local look = HUD.Look()
     local spec = (role == "alert" and look.alertFont) or (role == "text" and look.font) or nil
     if type(spec) ~= "table" then spec = {} end
-    local path
-    if spec.face and ns.ResolveFontFace then
-        path = ns.ResolveFontFace(spec.face)
-    else
-        local cfg = ZacUIDB and ZacUIDB.font or {}
-        path = ResolveFontPath(cfg.name)
-    end
+    -- one font: ZacUI's (a face saved in the HUD's text font specs is
+    -- kept there, and ignored)
+    local cfg = ZacUIDB and ZacUIDB.font or {}
+    local path = ResolveFontPath(cfg.name)
     local sz = fs._hudSize
     if role ~= "alert" and tonumber(spec.size) then
         sz = math.max(4, math.floor(sz * tonumber(spec.size) / TEXT_REF + 0.5))
     end
     local fl = fs._hudFlags
     if spec.outline ~= nil and ns.FontOutlineFlags then fl = ns.FontOutlineFlags(spec.outline) end
-    local cur = select(1, fs:GetFont())
+    -- the face the string was made with: what "Blizzard default" puts back
+    local cur = ns.HouseOrig and ns.HouseOrig(fs) or select(1, fs:GetFont())
     -- A registered font whose file is missing still throws; fall back so
     -- one bad font cannot stop the HUD from building.
     -- SetFont can also fail quietly (returns false), leaving no font at all
     local ok, set = pcall(fs.SetFont, fs, path or cur or "Fonts\\FRIZQT__.TTF", sz, fl)
     if not (ok and set) then
         pcall(fs.SetFont, fs, "Fonts\\FRIZQT__.TTF", sz, fl)
+    end
+    -- a text in ZacUI's font is dressed again when that font changes
+    if ns.TrackHouseFont then
+        ns.TrackHouseFont(fs, function(s)
+            HUD.ApplyFont(s, s._hudSize, s._hudFlags, s._hudRole)
+        end)
     end
     if fs.SetShadowOffset then
         if spec.shadow == true then

@@ -518,11 +518,13 @@ local function StyleSlot(btn, cfg)
     if Empty(cfg.countFont) then
         if count._zCustom and stock[1] then
             count._zCustom = nil
-            pcall(count.SetFont, count, stock[1], stock[2], stock[3])
+            -- (back in ZacUI's font, which its template wore)
+            if ns.FollowFont then ns.FollowFont(count, stock[2], stock[3])
+            else pcall(count.SetFont, count, stock[1], stock[2], stock[3]) end
         end
     elseif ns.ApplyFontSpec and stock[1] then
         count._zCustom = true
-        ns.ApplyFontSpec(count, cfg.countFont, { face = stock[1], size = stock[2] or 14,
+        ns.ApplyFontSpec(count, cfg.countFont, { fallbackFace = stock[1], size = stock[2] or 14,
             outline = (stock[3] and stock[3] ~= "") and stock[3] or "outline", shadow = false })
     end
     if type(cfg.countColor) == "table" then

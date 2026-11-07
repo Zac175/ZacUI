@@ -159,6 +159,115 @@ local RAIDS = {
     },
 }
 
+-- ANOTHER GAME VERSION'S RAIDS (Core_Flavor's game, chosen once at load;
+-- Classic Era keeps the table above as it is).
+-- TBC Anniversary: its own nine raids. Encounter ids from warcraft.wiki.gg's
+-- DungeonEncounterID list (the ids Readycheck's TBC raid configs carry,
+-- zui_tests/raids/TBC_RAIDS.md). Zul'Aman is left out: its TBC encounter
+-- ids are not confirmed, and this table is keyed by them. The ticked
+-- starting set is the fights whose mechanics are drawn as particles (fire
+-- and void on the floor, beams, clouds).
+-- Forever: its raids are not out yet, so there are no bosses to list; the
+-- raid and world levels still work, and the Stockades test raid stays.
+local RAIDS_TBC = {
+    {
+        key = "kara", label = "Karazhan",
+        bosses = {
+            { name = "Attumen the Huntsman", id = 652 },
+            { name = "Moroes",               id = 653 },
+            { name = "Maiden of Virtue",     id = 654 },
+            { name = "Opera Hall",           id = 655 },
+            { name = "The Curator",          id = 656 },
+            { name = "Terestian Illhoof",    id = 657 },
+            { name = "Shade of Aran",        id = 658, default = true },
+            { name = "Netherspite",          id = 659, default = true },
+            { name = "Chess Event",          id = 660 },
+            { name = "Prince Malchezaar",    id = 661, default = true },
+            { name = "Nightbane",            id = 662, default = true },
+        },
+    },
+    {
+        key = "gruul", label = "Gruul's Lair",
+        bosses = {
+            { name = "High King Maulgar",      id = 649 },
+            { name = "Gruul the Dragonkiller", id = 650 },
+        },
+    },
+    {
+        key = "mag", label = "Magtheridon's Lair",
+        bosses = {
+            { name = "Magtheridon", id = 651, default = true },
+        },
+    },
+    {
+        key = "ssc", label = "Serpentshrine Cavern",
+        bosses = {
+            { name = "Hydross the Unstable",     id = 623 },
+            { name = "The Lurker Below",         id = 624 },
+            { name = "Leotheras the Blind",      id = 625 },
+            { name = "Fathom-Lord Karathress",   id = 626 },
+            { name = "Morogrim Tidewalker",      id = 627 },
+            { name = "Lady Vashj",               id = 628, default = true },
+        },
+    },
+    {
+        key = "tk", label = "Tempest Keep",
+        bosses = {
+            { name = "Al'ar",                      id = 730, default = true },
+            { name = "Void Reaver",                id = 731, default = true },
+            { name = "High Astromancer Solarian",  id = 732 },
+            { name = "Kael'thas Sunstrider",       id = 733, default = true },
+        },
+    },
+    {
+        key = "hyjal", label = "Hyjal Summit",
+        bosses = {
+            { name = "Rage Winterchill", id = 618, default = true },
+            { name = "Anetheron",        id = 619 },
+            { name = "Kaz'rogal",        id = 620 },
+            { name = "Azgalor",          id = 621, default = true },
+            { name = "Archimonde",       id = 622, default = true },
+        },
+    },
+    {
+        key = "bt", label = "Black Temple",
+        bosses = {
+            { name = "High Warlord Naj'entus", id = 601 },
+            { name = "Supremus",               id = 602, default = true },
+            { name = "Shade of Akama",         id = 603 },
+            { name = "Teron Gorefiend",        id = 604 },
+            { name = "Gurtogg Bloodboil",      id = 605 },
+            { name = "Reliquary of Souls",     id = 606 },
+            { name = "Mother Shahraz",         id = 607 },
+            { name = "The Illidari Council",   id = 608 },
+            { name = "Illidan Stormrage",      id = 609, default = true },
+        },
+    },
+    {
+        key = "swp", label = "Sunwell Plateau",
+        bosses = {
+            { name = "Kalecgos",     id = 724 },
+            { name = "Brutallus",    id = 725 },
+            { name = "Felmyst",      id = 726, default = true },
+            { name = "Eredar Twins", id = 727, default = true },
+            { name = "M'uru",        id = 728, default = true },
+            { name = "Kil'jaeden",   id = 729, default = true },
+        },
+    },
+}
+do
+    local flavor = ns.Flavor and ns.Flavor() or "era"
+    if flavor ~= "era" then
+        local test
+        for _, raid in ipairs(RAIDS) do if raid.test then test = raid end end
+        RAIDS = {}
+        if flavor == "tbc" then
+            for _, raid in ipairs(RAIDS_TBC) do RAIDS[#RAIDS + 1] = raid end
+        end
+        if test then RAIDS[#RAIDS + 1] = test end
+    end
+end
+
 -- encounterID -> { raidKey, name }. Built once at load: the table above
 -- is small and static, and every ENCOUNTER_START does one lookup.
 local INDEX = {}
@@ -468,8 +577,8 @@ QoL.BossFXRefresh = Refresh
 -- ENCOUNTER_END) is not used here: a raid-wide combat drop can happen
 -- mid-fight (Kel'Thuzad's phase gap), and dropping the particles there
 -- would hide the mechanics they are raised for for the rest of the fight.
--- (the bosses are Classic Era's: on TBC and Forever, or the game-version
--- override's, none of this listens - Core_Flavor)
+-- (each game version's own bosses, chosen above; a game where the whole
+-- feature is off - Core_Flavor - listens to nothing)
 if not (ns.FeatureOn and not ns.FeatureOn("boss_fx")) then
     ns.Encounter.On("QoL.BossFX", function(event, encounterID, encounterName)
         if event == "start" then

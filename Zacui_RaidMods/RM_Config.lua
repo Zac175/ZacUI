@@ -307,6 +307,8 @@ local LIST_FALLBACK = "L:[AQ40][Fankriss] Mortal Wound"
 MODE_SET = {}
 for _, m in ipairs(PREVIEW_MODES) do MODE_SET[m.id] = true end
 RM.PREVIEW_MODES, RM.MODE_PIECES, RM.LIST_FALLBACK = PREVIEW_MODES, MODE_PIECES, LIST_FALLBACK
+-- the strip's own samples, so the TBC raids can name theirs (Own\TBC_Kit)
+RM.SAMPLE_BARS, RM.SAMPLE_ALERT = SAMPLE_BARS, SAMPLE_ALERT
 
 -- the icon a piece's trigger would hand it in game (its spell's)
 local function PieceIcon(def)
@@ -792,7 +794,9 @@ local function General(L)
     })
     PreviewCard(L)
     L:Card("Raid mods")
-    L:Desc("Boss mods for Molten Core, Blackwing Lair, Zul'Gurub, Temple of Ahn'Qiraj and Naxxramas, as part of ZacUI: "
+    L:Desc(((RM.Own and RM.Own.flavor == "tbc")
+            and "Boss mods for Karazhan, Gruul's Lair, Magtheridon's Lair, Serpentshrine Cavern, Tempest Keep, Mount Hyjal, Black Temple, Zul'Aman and the Sunwell, as part of ZacUI: "
+            or "Boss mods for Molten Core, Blackwing Lair, Zul'Gurub, Temple of Ahn'Qiraj and Naxxramas, as part of ZacUI: ")
         .. "timers, warnings, icons, lists, marks on raid frames and nameplates, driven by the combat log. "
         .. "All of it is ZacUI's own addon code - nothing here is an aura, and the aura engine can stay off.")
     Check(L, "Enable raid mods", db.enabled, function(v) db.enabled = v ReloadAll() end)
@@ -831,20 +835,11 @@ local function General(L)
         onSelect = function(v) db.barTexture = v if RM.Widgets and RM.Widgets.RefreshAll then RM.Widgets.RefreshAll() end end })
     L:Row(bt, 26)
     L:Desc("Bar texture.")
-    local PACK_FONT = "__pack__"
-    local ft = UI.Dropdown(L.current, { width = 220,
-        items = function() return Names("font", { text = "The pack's own (Barlow)", value = PACK_FONT }) end,
-        selected = function() return (db.font and db.font ~= "") and db.font or "The pack's own (Barlow)" end,
-        onSelect = function(v)
-            if v == PACK_FONT then db.font = nil else db.font = v end
-            if RM.Widgets and RM.Widgets.RefreshAll then RM.Widgets.RefreshAll() end
-        end })
-    L:Row(ft, 26)
-    L:Desc("Font for every text.")
-    Check(L, "Let the Fonts & Textures page set the font too", db.fontFromZacUI, function(v)
-        db.fontFromZacUI = v
-        if v and ns.Media and ns.Media.FontName then db.font = ns.Media.FontName() if RM.Widgets and RM.Widgets.RefreshAll then RM.Widgets.RefreshAll() end end
-    end, "The bar texture always follows that page when 'Raid mods' is ticked there; the font only with this on.")
+    -- one font: every pack text wears ZacUI's font (Fonts & Textures); a
+    -- face picked here before is kept in db.font, and ignored
+    local ft = UI.Field(L.current, "Font for every text", function(h) return UI.OneFontNote(h, 220) end, { width = 220 })
+    L:Row(ft, ft:GetHeight() + 2)
+    L:Desc("The bar texture follows Fonts & Textures when 'Raid mods' is ticked there.")
     L:EndCard()
 
     BarTextsCard(L)
@@ -1020,7 +1015,7 @@ RegisterPage("RaidMods", function(L)
     local SHORT = { AQ40 = "AQ40", PT = "Pull timers" }
     for _, key in ipairs(RM.raidOrder) do
         local raid = RM.raids[key]
-        tabs[#tabs + 1] = { id = key, label = SHORT[key] or raid.name, build = function(LL) RaidTab(LL, key) end }
+        tabs[#tabs + 1] = { id = key, label = SHORT[key] or raid.short or raid.name, build = function(LL) RaidTab(LL, key) end }
     end
     L:Tabs(tabs)
 end)

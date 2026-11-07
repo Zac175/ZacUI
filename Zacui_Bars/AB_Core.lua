@@ -1378,24 +1378,17 @@ function AB.ApplyAll()
     end)
 end
 
--- The global font (Fonts & Textures): bar text already follows it when
--- a bar has no font of its own, so the push clears the per-bar overrides
--- and re-applies. The texture does not apply to buttons.
+-- The global font (Fonts & Textures): bar text follows it whenever a bar
+-- has no font of its own (and is re-dressed when it changes); a font
+-- picked for one bar's text stays. The push re-applies the bars. The
+-- texture does not apply to buttons.
 if ns.Media and ns.Media.RegisterTarget then
     ns.Media.RegisterTarget("bars", {
         label = "Action bar text",
-        desc = "Key, count and macro text on every bar - clears any per-bar font override so they follow the global font.",
+        desc = "Key, count and macro text on every bar that has no font of its own.",
         order = 30,
         apply = function(font)
             if not font then return end
-            local p = AB.Profile()
-            for _, cfg in pairs(p.bars or {}) do
-                if type(cfg) == "table" and type(cfg.fonts) == "table" then
-                    for _, el in pairs(cfg.fonts) do
-                        if type(el) == "table" then el.font = nil end
-                    end
-                end
-            end
             AB.ApplyAll()
         end,
     })

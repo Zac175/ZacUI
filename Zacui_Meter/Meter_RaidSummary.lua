@@ -45,6 +45,8 @@ local KEEP = 12              -- raids kept per character
 local SESSION_GAP = 6 * 3600 -- a raid left this long ago is a new raid
 
 -- the last boss of each raid (ENCOUNTER_END ids), with names as a fallback
+-- (Classic Era's; another game version's are asked of Core_FlavorRaids,
+-- and a game whose raids are not listed ends a raid by the lockout)
 local FINAL_ID = { [672] = true, [1084] = true, [617] = true, [793] = true,
     [723] = true, [717] = true, [1114] = true }
 local FINAL_NAME = { ["Ragnaros"] = true, ["Onyxia"] = true, ["Nefarian"] = true,
@@ -137,6 +139,39 @@ local function Ranks(list, me, myClass)
     return rank, of, crank, cof, top, ctop
 end
 
+-- Deaths into the session: everyone's count, and for each of yours the
+-- killing blow and the hits before it as plain numbers (the meter's own
+-- DeathSummary, so the summary words a death exactly as the meter does).
+-- The spell names are kept with them: the summary reads after a reload.
+function RS.FoldDeaths(s, combat, me)
+    for _, dt in ipairs(combat.deaths or {}) do
+        if dt.name then
+            s.deaths[dt.name] = (s.deaths[dt.name] or 0) + 1
+            if dt.name == me then
+                local d = { where = combat:Name(), at = floor(dt.deadAt or 0) }
+                if Meter.DeathSummary then
+                    local sum = Meter.DeathSummary(dt, 3)
+                    d.spell, d.src, d.amt, d.over = sum.spell, sum.src, sum.amt, sum.over
+                    d.sure, d.seen = sum.sure, sum.seen
+                    d.before = {}
+                    for _, e in ipairs(sum.before) do
+                        d.before[#d.before + 1] = { dmg = e.dmg, spell = e.spell, src = e.src, amt = floor(e.amt or 0) }
+                    end
+                end
+                s.myDeaths[#s.myDeaths + 1] = d
+                local ids = { d.spell }
+                for _, e in ipairs(d.before or {}) do ids[#ids + 1] = e.spell end
+                for _, id in ipairs(ids) do
+                    if id and GetSpellInfo and not s.names[id] then
+                        local n = GetSpellInfo(id)
+                        if n then s.names[id] = n end
+                    end
+                end
+            end
+        end
+    end
+end
+
 function RS.OnSegment(combat, instName, instId)
     local d = Cfg()
     if not (d and d.raidSummary) or not combat or combat.overall then return end
@@ -195,24 +230,8 @@ function RS.OnSegment(combat, instName, instId)
         end
     end
 
-    -- deaths, and what killed you (the last hit before it)
-    for _, dt in ipairs(combat.deaths or {}) do
-        if dt.name then
-            s.deaths[dt.name] = (s.deaths[dt.name] or 0) + 1
-            if dt.name == me then
-                local killer
-                for i = #(dt.events or {}), 1, -1 do
-                    local ev = dt.events[i]
-                    if ev and ev[1] == true and ev[2] then killer = ev[2] break end
-                end
-                s.myDeaths[#s.myDeaths + 1] = { where = combat:Name(), spell = killer }
-                if killer and GetSpellInfo then
-                    local n = GetSpellInfo(killer)
-                    if n then s.names[killer] = s.names[killer] or n end
-                end
-            end
-        end
-    end
+    -- deaths, and what killed you
+    RS.FoldDeaths(s, combat, me)
 
     -- a boss row: your DPS and where it ranked
     if boss then
@@ -223,9 +242,17 @@ function RS.OnSegment(combat, instName, instId)
             dur = floor(dur), dps = floor(myDps), rank = rank, of = of, crank = crank, cof = cof,
             top = top and { top.name, floor(top.dps), top.class } or nil,
             ctop = ctop and { ctop.name, floor(ctop.dps) } or nil }
-        if boss.killed and (FINAL_ID[boss.id or 0] or FINAL_NAME[boss.name or ""]) then
+        if boss.killed and (FINAL_ID[boss.id or 0] or FINAL_NAME[boss.name or ""]
+            or (ns.RaidLastBoss and ns.RaidLastBoss(boss.id, boss.name))) then
             s.done, s.doneAt = true, time()
             RS.ShowSoon(s)
+        elseif boss.killed and ns.RaidEndsByLockout and ns.RaidEndsByLockout() then
+            ns.WhenRaidCleared("RaidSummary", function()
+                if not s.done then
+                    s.done, s.doneAt = true, time()
+                    RS.ShowSoon(s)
+                end
+            end)
         end
     end
 end
@@ -287,6 +314,25 @@ local function SpellName(s, id)
     if id == 1 then return "Melee" end
     local n = s.names[id] or (GetSpellInfo and GetSpellInfo(id))
     return n or ("Spell " .. tostring(id))
+end
+
+-- one of your deaths in the meter's words: "You died to Shadow Flame from
+-- Ebonroc (4,210, 1,350 overkill); before that: ..." (a death saved before
+-- the summary kept the numbers has the spell alone)
+function RS.DeathText(s, d, short)
+    local nameOf = function(id) return SpellName(s, id) end
+    if Meter.DeathSentence and (d.seen ~= nil or d.amt) then
+        return Meter.DeathSentence(d, "You", nameOf, not short, short and 160 or 400)
+    end
+    if d.spell then return "You died to " .. SpellName(s, d.spell) .. "." end
+    return "You died."
+end
+-- the killing blow alone, for the short lines
+local function KillText(s, d)
+    if Meter.KillingBlowText and d.spell then
+        return Meter.KillingBlowText(d, function(id) return SpellName(s, id) end)
+    end
+    return d.spell and SpellName(s, d.spell) or nil
 end
 
 -- damage that is not a button you press (procs, auto attacks): never on
@@ -411,8 +457,9 @@ function RS.Build(s)
     end
     if #s.myDeaths > 0 then
         local d1 = s.myDeaths[1]
-        table.insert(work, math.min(#work + 1, 2), format("You died %d time%s%s.", #s.myDeaths, #s.myDeaths == 1 and "" or "s",
-            d1.spell and format(" (first: %s, to %s)", d1.where or "?", SpellName(s, d1.spell)) or ""))
+        local kb = KillText(s, d1)
+        table.insert(work, math.min(#work + 1, 2), format("You died %d time%s.%s", #s.myDeaths, #s.myDeaths == 1 and "" or "s",
+            kb and format(" First on %s, to %s.", d1.where or "?", kb) or ""))
         while #work > 3 do table.remove(work) end
     end
     -- went well: bosses you led your class on, quick buttons, more of an
@@ -521,9 +568,10 @@ function RS.Build(s)
         if bossDeath then break end
     end
     if bossDeath then
-        table.insert(top, 1, { text = format("Stay alive - you died %d time%s (on %s%s).", #s.myDeaths,
+        local kb = KillText(s, bossDeath)
+        table.insert(top, 1, { text = format("Stay alive - you died %d time%s. On %s%s.", #s.myDeaths,
             #s.myDeaths == 1 and "" or "s", bossDeath.where,
-            bossDeath.spell and (", to " .. SpellName(s, bossDeath.spell)) or "") })
+            kb and (", to " .. kb) or "") })
         while #top > 3 do table.remove(top) end
     end
     r.fixes = top
@@ -1060,6 +1108,21 @@ local function Fill(s, target, topOnly)
         end)
     end
 
+    -- YOUR DEATHS: each one as the meter's death recap words it
+    if #s.myDeaths > 0 then
+        local d1 = s.myDeaths[#s.myDeaths]
+        local kb = KillText(s, d1)
+        local sum = format("%d - last: %s%s", #s.myDeaths, d1.where or "?", kb and (", to " .. kb) or "")
+        Section(L, "deaths", "Your deaths", sum, false, function()
+            for _, d in ipairs(s.myDeaths) do
+                local where = d.where or "?"
+                if d.at then where = where .. format(", %d:%02d in", floor(d.at / 60), d.at % 60) end
+                Line(L, Paint(BAD, where) .. ":  " .. RS.DeathText(s, d), BAD)
+            end
+            Line(L, "The killing blow, then the hits and heals before it, newest first. The meter's Deaths display shows the full log.", nil, true)
+        end)
+    end
+
     -- HESITATION (a warrior's night): how long the big buttons sat ready
     if #r.hes > 0 then
         local parts = {}
@@ -1256,7 +1319,10 @@ local function DemoSession()
     Hit("Holgrim", { [1] = 190000, [27808] = 31200, [29371] = 0, [28796] = 6600, [28522] = 8800, [29213] = 4400 })
     Hit("Sefa", { [1] = 168000, [27808] = 30100, [29371] = 3900, [28796] = 5200, [28522] = 9600, [29213] = 4000 })
     for _, t in pairs(s.taken) do for id, v in pairs(t) do if v == 0 then t[id] = nil end end end
-    s.myDeaths = { { where = "Heigan the Unclean", spell = 29371 } }
+    s.myDeaths = { { where = "Heigan the Unclean", at = 104, spell = 29371, src = "Heigan the Unclean", amt = 4210,
+        over = 1350, sure = true, seen = true, before = { { dmg = true, spell = 1, src = "Heigan the Unclean", amt = 1920 },
+        { dmg = false, spell = 25315, src = "Pria", amt = 310 }, { dmg = true, spell = 1, src = "Heigan the Unclean", amt = 3050 } } } }
+    s.names[25315] = "Renew"
     s.deaths[me] = 1
     local function Boss(name, dur, dps, rank, crank, top, ctop, wipe)
         s.bosses[#s.bosses + 1] = { name = name, killed = not wipe, dur = dur, dps = dps,

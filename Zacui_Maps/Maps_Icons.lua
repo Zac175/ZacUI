@@ -109,6 +109,52 @@ local function Wanted(kind, playerFaction)
 end
 
 -- ============================================================
+-- A ZONE WITH NO DATA HERE, OFF CLASSIC ERA
+-- ============================================================
+-- The pin data above is Classic Era's Azeroth. On TBC (Outland, the new
+-- elf zones) and on Forever (its own lands) a zone it does not cover gets
+-- its flight masters from the game itself: C_TaxiMap.GetTaxiNodesForMap
+-- (warcraft.wiki.gg lists it for TBC 2.5.6 and Forever 1.60.1), every
+-- node on the zone with its side. Zones only (a continent keeps what it
+-- shows). Built once per zone and kept; an empty answer is asked again.
+-- Classic Era reads the data and nothing else, as before.
+local runtimeOn = ns.Flavor and ns.Flavor() ~= "era"
+local FLIGHT_KIND = { [0] = "FlightN", [1] = "FlightH", [2] = "FlightA" }
+local runtimePins = {}
+local function GamePins(mapID)
+    local got = runtimePins[mapID]
+    if got then return got end
+    if not (C_TaxiMap and C_TaxiMap.GetTaxiNodesForMap and C_Map and C_Map.GetMapInfo) then return nil end
+    local info = C_Map.GetMapInfo(mapID)
+    local ZONE = (Enum and Enum.UIMapType and Enum.UIMapType.Zone) or 3
+    if not (info and info.mapType == ZONE) then return nil end
+    local ok, nodes = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
+    if not ok or type(nodes) ~= "table" or #nodes == 0 then return nil end
+    local out = {}
+    for _, n in ipairs(nodes) do
+        local pos = n.position
+        local x, y
+        if type(pos) == "table" then
+            if pos.GetXY then x, y = pos:GetXY() else x, y = pos.x, pos.y end
+        end
+        local kind = FLIGHT_KIND[n.faction or 0] or "FlightN"
+        if type(x) == "number" and type(y) == "number" and type(n.name) == "string" then
+            out[#out + 1] = { kind, x * 100, y * 100, n.name }
+        end
+    end
+    if #out == 0 then return nil end
+    runtimePins[mapID] = out
+    return out
+end
+-- the pins of a zone: the data, or (off Classic Era, where there is none)
+-- the game's own flight masters
+function Maps.PinsFor(mapID)
+    local p = MapData.pins[mapID]
+    if p or not runtimeOn or not mapID then return p end
+    return GamePins(mapID)
+end
+
+-- ============================================================
 -- HOW BIG, AND THE HALO (shared with the settings preview)
 -- ============================================================
 -- The setting that scales each group on its own (2026-11-01): 100% for
@@ -277,7 +323,7 @@ local function BuildProvider()
         local mapID = map and map:GetMapID()
         if not mapID then return end
 
-        local pins = MapData.pins[mapID]
+        local pins = Maps.PinsFor(mapID)
         local faction = UnitFactionGroup and UnitFactionGroup("player")
         local levels = DB().zoneLevels
 

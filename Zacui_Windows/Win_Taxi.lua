@@ -13,10 +13,13 @@
 -- game's own. Turning the window off puts both back where they came from.
 --
 --   Destination list   every flight point you can reach from here, with
---                      its zone, the cost and how many stops. Hover to
---                      see the route on the map, click to fly.
+--                      its zone, the cost, how many stops and how long
+--                      it takes (Win_FlightTimes: "1:42" flown before,
+--                      "~2:10" estimated). Hover to see the route on the
+--                      map, click to fly.
 --   Search             by place or zone
 --   Cheapest first     sort by cost instead of by name
+--   Quickest first     sort by flight time
 --   Map                hovering a point lights its row in the list
 
 local ADDON_NAME = ...
@@ -44,13 +47,20 @@ local ROW_H  = 36
 -- for its art; this puts the window where the character window would be.
 local OFF_X, OFF_Y = 27, -24
 
-local win, mapBox, list, search, cheapChip, fromText, moneyText, emptyNote
+local win, mapBox, list, search, cheapChip, quickChip, fromText, moneyText, emptyNote
 local ring
 local items, query, hovered = {}, "", nil
 local moved = false
 
 local function Enabled()
     return ZacUIDB and ZacUIDB.modules and ZacUIDB.modules.taxiwin ~= false
+end
+
+-- the flight times (Win_FlightTimes), when that file is there and they are on
+local function Times()
+    local FT = ns.FlightTimes
+    if FT and FT.DB().listTimes ~= false then return FT end
+    return nil
 end
 
 local function Str(name, fallback)
@@ -193,6 +203,7 @@ end
 local function Collect()
     local out, current = {}, nil
     local n = NumTaxiNodes and NumTaxiNodes() or 0
+    local FT = Times()
     for i = 1, n do
         local kind = TaxiNodeGetType(i)
         if kind == "REACHABLE" or kind == "CURRENT" then
@@ -208,6 +219,10 @@ local function Collect()
                     hops = hops or 1,
                     direct = TaxiIsDirectFlight and TaxiIsDirectFlight(i) or (hops or 1) <= 1,
                 }
+                if FT then
+                    local ok, secs, est = pcall(FT.TripTime, i)
+                    if ok and secs then out[#out].secs, out[#out].est = secs, est end
+                end
             end
         end
     end
@@ -217,11 +232,15 @@ end
 local function Sorted()
     local q = query
     local cheap = cheapChip and cheapChip:IsOn()
+    local quick = quickChip and quickChip:IsOn()
     local t = {}
     for _, it in ipairs(items) do
         if Kit.Matches(q, it.name, it.zone) then t[#t + 1] = it end
     end
     table.sort(t, function(a, b)
+        if quick and (a.secs or math.huge) ~= (b.secs or math.huge) then
+            return (a.secs or math.huge) < (b.secs or math.huge)
+        end
         if cheap and a.cost ~= b.cost then return a.cost < b.cost end
         if a.name ~= b.name then return a.name < b.name end
         return a.index < b.index
@@ -231,6 +250,14 @@ end
 
 local function Refresh()
     if not win or not TaxiFrame:IsShown() then return end
+    -- the times on or off, the list's sort as it was saved
+    if quickChip then
+        local FT = Times()
+        quickChip:SetShown(FT ~= nil)
+        local want = FT and FT.DB().sortTime == true or false
+        if quickChip:IsOn() ~= want then quickChip:SetOn(want) end
+        if want and cheapChip:IsOn() then cheapChip:SetOn(false) end
+    end
     local current
     items, current = Collect()
     local shown = Sorted()
@@ -279,6 +306,10 @@ local function BuildRow(row)
     row.cost:SetPoint("TOPRIGHT", -8, -5)
     row.stops = UI.Font(row, F.SMALL, { cat = "text", key = "gray", justify = "RIGHT" })
     row.stops:SetPoint("BOTTOMRIGHT", -8, 5)
+    -- the flight time, under the cost; the stops move to its left
+    row.time = UI.Font(row, F.SMALL, { justify = "RIGHT" })
+    row.time:SetPoint("BOTTOMRIGHT", -8, 5)
+    row.time:Hide()
     row:RegisterForClicks("LeftButtonUp")
     row:SetScript("OnClick", function(self)
         if self.item and TakeTaxiNode then TakeTaxiNode(self.item.index) end
@@ -295,6 +326,7 @@ local function BuildRow(row)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(it.full or it.name)
             if GameTooltip_AddMoneyLine then GameTooltip_AddMoneyLine(GameTooltip, it.cost) end
+            if Times() then pcall(ns.FlightTimes.AddTooltipLine, GameTooltip, it.index) end
             GameTooltip:Show()
         end
         Ring(it.index)
@@ -320,6 +352,21 @@ local function UpdateRow(row, it)
         row.cost:SetTextColor(r.r, r.g, r.b, 1)
     end
     local stops = math.max(0, (it.hops or 1) - 1)
+    row.stops:ClearAllPoints()
+    if it.secs then
+        row.time:SetText(ns.FlightTimes.Format(it.secs, it.est))
+        if it.est then
+            local g = GetColor("text", "gray")
+            row.time:SetTextColor(g.r, g.g, g.b, 1)
+        else
+            row.time:_zPaint()
+        end
+        row.time:Show()
+        row.stops:SetPoint("BOTTOMRIGHT", row.time, "BOTTOMLEFT", -6, 0)
+    else
+        row.time:Hide()
+        row.stops:SetPoint("BOTTOMRIGHT", -8, 5)
+    end
     if it.direct or stops == 0 then
         row.stops:SetText("Direct")
     elseif stops == 1 then
@@ -372,10 +419,27 @@ local function Build()
     right:SetPoint("TOPLEFT", mapBox, "TOPRIGHT", Kit.PAD, 0)
     right:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -Kit.PAD, Kit.FOOTER_H + Kit.PAD)
 
-    cheapChip = Kit.Chip(right, "Cheapest", false, function() Queue() end,
-        "Sort by cost instead of by name.")
+    -- the two sorts take turns: cost, or flight time (remembered)
+    local FT = ns.FlightTimes
+    cheapChip = Kit.Chip(right, "Cheapest", false, function(on)
+        if on and quickChip then
+            quickChip:SetOn(false)
+            if FT then FT.DB().sortTime = false end
+        end
+        Queue()
+    end, "Sort by cost instead of by name.")
     cheapChip:SetPoint("TOPRIGHT", right, "TOPRIGHT", 0, 0)
-    search = Kit.Search(right, LIST_W - cheapChip:GetWidth() - Kit.GAP, function(text)
+    local chipsW = cheapChip:GetWidth()
+    if FT then
+        quickChip = Kit.Chip(right, "Quickest", FT.DB().sortTime == true, function(on)
+            if on then cheapChip:SetOn(false) end
+            FT.DB().sortTime = on and true or false
+            Queue()
+        end, "Sort by flight time: the shortest flights first.")
+        quickChip:SetPoint("RIGHT", cheapChip, "LEFT", -4, 0)
+        chipsW = chipsW + 4 + quickChip:GetWidth()
+    end
+    search = Kit.Search(right, LIST_W - chipsW - Kit.GAP, function(text)
         query = Kit.NormalizeQuery(text)
         Queue()
     end, "Search destinations")
