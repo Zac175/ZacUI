@@ -2177,18 +2177,23 @@ function Chat.CopyChat(cf)
 
     local win = dock.copy
     if not win then
-        win = UI.Window("ZacUIChatCopy", 620, 400, "Copy chat")
-        local box = UI.TextBox(win, { width = 596, height = 330 })
+        -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup)
+        win = (UI.Popup or UI.Window)("ZacUIChatCopy", 620, 400, "Copy chat")
+        local pad = win.pad or 12
+        local box = UI.TextBox(win, { width = 620 - 2 * pad, height = 330 })
+        if UI.PopupField then UI.PopupField(box) end
         box:ClearAllPoints()
-        box:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -((win.headerHeight or 30) + 10))
-        box:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -12, 30)
+        box:SetPoint("TOPLEFT", win, "TOPLEFT", pad, -(win.headerHeight or 30))
+        box:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -pad, pad + 16)
         -- the text wraps to the box, at whatever size the window is
         box:SetScript("OnSizeChanged", function(self, width)
             if width and width > 40 then self.editBox:SetWidth(width - 14) end
         end)
-        local hint = UI.Font(win, UI.F.SMALL, { cat = "text", key = "gray",
+        local hint = UI.PopupText and UI.PopupText(win, "hint",
+            { text = "Click in the text, Ctrl+A to select it all, Ctrl+C to copy." })
+            or UI.Font(win, UI.F.SMALL, { cat = "text", key = "gray",
             text = "Click in the text, Ctrl+A to select it all, Ctrl+C to copy." })
-        hint:SetPoint("BOTTOMLEFT", win, "BOTTOMLEFT", 12, 10)
+        hint:SetPoint("BOTTOMLEFT", win, "BOTTOMLEFT", pad, pad - 4)
         UI.AttachResizeGrip(win, { minW = 360, minH = 220, maxW = 1400, maxH = 1000 })
         win.box = box
         dock.copy = win
@@ -2203,9 +2208,8 @@ function Chat.CopyChat(cf)
     win.box:SetText(table.concat(lines, "\n"))
     local tab = cf.GetName and cf:GetName() and _G[cf:GetName() .. "Tab"]
     local tabName = tab and tab.GetText and tab:GetText()
-    if win.titleText then
-        win.titleText:SetText("Copy chat" .. ((tabName and tabName ~= "") and (" - " .. tabName) or ""))
-    end
+    local copyTitle = "Copy chat" .. ((tabName and tabName ~= "") and (" - " .. tabName) or "")
+    if win.SetTitle then win:SetTitle(copyTitle) elseif win.titleText then win.titleText:SetText(copyTitle) end
     UI.OpenWindow(win)
     -- newest at the bottom, so open there
     C_Timer.After(0.05, function()

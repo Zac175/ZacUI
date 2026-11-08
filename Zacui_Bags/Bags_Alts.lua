@@ -313,6 +313,13 @@ end
 -- ============================================================
 local attached = {}       -- view -> true
 
+-- the bag window's look (Bags_Frame's kit): nil under ZacUI's own look,
+-- else the game look's stock widget art on these pieces too
+local function KitOn()
+    local BL = ns.BagLook
+    return BL and BL.Kit and BL.Kit() or nil
+end
+
 local function Hide(f) if f then f:Hide() end end
 
 -- the gold list: one row per character, most gold first (Bags_Core's
@@ -333,6 +340,11 @@ local function BuildGoldPanel(view)
     panel.total:SetPoint("TOPRIGHT", -8, -6)
     panel.note = UI.Font(panel, F.DESC, { cat = "text", key = "gray" })
     panel.note:SetPoint("BOTTOMLEFT", 8, 5)
+    if KitOn() then
+        ns.BagLook.KitBox(panel)
+        ns.BagLook.KitFont(panel.title, 11)
+        panel.title:SetTextColor(1, 0.82, 0, 1)
+    end
     view.altGoldPanel = panel
     return panel
 end
@@ -362,6 +374,8 @@ local function FillGoldPanel(view)
                     if rec then Alts.Forget(rec.name, rec.realm) end
                 end)
                 row.x:SetPoint("RIGHT", 0, 0)
+                local kit = KitOn()
+                if kit then ns.BagLook.KitClose(row.x, kit, 16) end
                 UI.Tooltip(row.x, "Forget this character", "Takes them out of the gold total and the remembered bags. "
                     .. "They come back the next time you log in on them.")
                 panel.rows[n] = row
@@ -405,6 +419,7 @@ local function BuildGoldButton(view)
     else
         b:SetPoint("BOTTOMLEFT", view.frame, "BOTTOMLEFT", 120, 5)
     end
+    if KitOn() then ns.BagLook.KitButton(b) end
     view.altGoldBtn = b
     return b
 end
@@ -595,6 +610,7 @@ local function BuildViewDrop(view)
         dd:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -(M.TITLEBAR + 30))
     end
     if dd.SetText then dd:SetText(Alts.ViewLabel(view)) end
+    if KitOn() then ns.BagLook.KitDropdown(dd) end
     UI.Tooltip(dd, "Another character's bags", "Their bags and bank as last seen, read-only. "
         .. "Pick yourself to get your own back.")
     view.altDrop = dd

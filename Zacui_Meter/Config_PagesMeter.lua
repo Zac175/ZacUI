@@ -755,7 +755,8 @@ local function Tab_general(L)
         L:Desc((uses and "In use now: the game's own damage meter, with its own look and options (set up in the game's "
             .. "Edit Mode). ZacUI keeps its threat window." or "In use now: ZacUI's damage windows. They read the game's "
             .. "own meter for their numbers, as this client gives addons no combat log.")
-            .. " As the look decides: the game's meter under WoW Forever and Blizzard style, ZacUI's under ZacUI and Classic.")
+            .. " As the look decides: the game's meter under WoW Forever and Blizzard style, ZacUI's under ZacUI and Classic"
+            .. " (under ZacUI's look, and on ZacUI's meter, the game's meter window is switched off).")
         if uses and GW.OpenGameMeterOptions then
             local open = UI.Button(L.current, "Open the game's meter options", { width = 220,
                 onClick = function() GW.OpenGameMeterOptions() end })
@@ -768,7 +769,8 @@ local function Tab_general(L)
     L:Desc("Window 1 is your threat window (bottom center), window 2 the "
         .. "current-fight damage window (bottom right, locked), window 3 "
         .. "the overall stacked above it - every boss and every trash pull "
-        .. "of the night, updating live during a fight. Unlock to drag "
+        .. "of the night, updating live during a fight. A fresh install "
+        .. "shows window 2 only; the others are a tick away below. Unlock to drag "
         .. "anywhere on the rows and resize from the bottom-right corner; "
         .. "the hover toolbar's first icon also locks and unlocks. Mouse "
         .. "wheel over any window scrolls the list.")

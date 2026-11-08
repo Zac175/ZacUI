@@ -166,81 +166,77 @@ local function Fill()
     local f = popup
     local child = f.child
     Clear(child)
-    local width = (f:GetWidth() or 460) - M.SCROLL_W - 26
-    child:SetWidth(width + 16)
+    local S, pad = UI.S, f.pad
+    local width = (f:GetWidth() or 460) - 2 * pad - 10
+    child:SetWidth(width + pad)
     local showAll = DB().showAll and true or false
-    local y = -10
-    for _, v in ipairs(Changelog.Visible(showAll)) do
-        local title = UI.Font(child, F.CARD, { text = v.title or ("Version " .. tostring(v.version)),
-            cat = "text", key = "gold" })
-        title:SetPoint("TOPLEFT", child, "TOPLEFT", 10, y)
-        local meta = UI.Font(child, F.SMALL, { text = MetaText(v), cat = "text", key = "gray", justify = "RIGHT" })
-        meta:SetPoint("TOPRIGHT", child, "TOPLEFT", 10 + width, y - 2)
-        if IsNew(v) then
-            local tag = UI.Font(child, F.SMALL, { text = "New", cat = "ui", key = "accent" })
-            tag:SetPoint("RIGHT", meta, "LEFT", -8, 0)
+    -- (the settings window's type: 14 px lines, the section heads at 12,
+    -- white 0.41, over a white 0.02 rule)
+    local x, y = pad - 1, -12
+    UI.SettingsBuild(function()
+        for _, v in ipairs(Changelog.Visible(showAll)) do
+            local meta = UI.PopupText(child, "head", { text = MetaText(v), justify = "RIGHT" })
+            meta:SetPoint("TOPRIGHT", child, "TOPLEFT", x + width, y)
+            -- the title wraps short of the version and date (and the tag)
+            local room = width - math.ceil(meta:GetStringWidth() or 0) - (IsNew(v) and 52 or 16)
+            local title = UI.PopupText(child, "head", { text = v.title or ("Version " .. tostring(v.version)),
+                width = math.max(80, room), justify = "LEFT" })
+            title:SetPoint("TOPLEFT", child, "TOPLEFT", x, y)
+            local extra = math.max(0, math.ceil(title:GetStringHeight() or 0) - (UI.POP.HEAD + 4))
+            y = y - extra
+            if IsNew(v) then
+                local tag = UI.SFont(child, S.F_HINT, { text = "New" })
+                tag._zPaint = function(self) local a = GetColor("ui", "accent") self:SetTextColor(a.r, a.g, a.b, 1) end
+                tag:_zPaint()
+                tag:SetPoint("RIGHT", meta, "LEFT", -8, 0)
+            end
+            local rule = child:CreateTexture(nil, "ARTWORK")
+            rule._zui_own = true
+            rule:SetTexture(FLAT)
+            rule:SetHeight(1)
+            rule:SetPoint("TOPLEFT", child, "TOPLEFT", x, y - 20)
+            rule:SetWidth(width)
+            rule:SetVertexColor(1, 1, 1, S.SECTION_RULE_A)
+            y = DrawSections(child, v, x, y - 30, width)
+            y = y - 10
         end
-        local rule = child:CreateTexture(nil, "ARTWORK")
-        rule._zui_own = true
-        rule:SetTexture(FLAT)
-        rule:SetHeight(1)
-        rule:SetPoint("TOPLEFT", child, "TOPLEFT", 10, y - 18)
-        rule:SetWidth(width)
-        local b = GetColor("ui", "border")
-        rule:SetVertexColor(b.r, b.g, b.b, 1)
-        y = DrawSections(child, v, 10, y - 26, width)
-        y = y - 8
-    end
+    end)
     local h = -y + 6
     child:SetHeight(h)
     f.scroll:Recalculate(h)
     f.scroll.bar:SetValue(0)
     f.scroll:SetVerticalScroll(0)
-    f.titleText:SetText(showAll and "Changelog" or "What's new")
-    f.version:SetText("v" .. tostring(Changelog.Current()))
+    f:SetTitle(showAll and "Changelog" or "What's new", "ZacUI v" .. tostring(Changelog.Current()))
     f.showAll:SetChecked(showAll)
 end
 
+-- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup): the settings
+-- window's look - the title and the version under it, the close box, the
+-- list, and a foot with "Show all versions" and Got it.
 local function BuildPopup()
-    local f = UI.Window("ZacUIChangelogFrame", 460, 420, "What's new")
+    local f = UI.Popup("ZacUIChangelogFrame", 460, 420, "What's new", { desc = " ", rule = true })
     f:SetPoint("CENTER", 0, 40)
+    f.version = f.descText
 
-    local version = UI.Font(f.titleBar, F.SMALL, { cat = "text", key = "gray", justify = "RIGHT" })
-    version:SetPoint("RIGHT", f.closeButton, "LEFT", -10, 0)
-    f.version = version
+    local got = f:SetButtons({ { text = "Got it", kind = "primary", onClick = function() UI.CloseWindow(f) end } })[1]
+    got:SetActive(true)
 
-    local scroll, child = UI.ScrollArea(f)
-    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 1, -(f.headerHeight + 2))
-    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -(M.SCROLL_W + 4), 40)
+    local scroll, child = UI.ScrollArea(f, { style = "settings" })
+    scroll:SetPoint("TOPLEFT", f, "TOPLEFT", 1, -(f.headerHeight + 1))
+    scroll:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -(M.SCROLL_W + 4), f:FooterHeight() - 8)
     scroll.bar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -3, -(f.headerHeight + 4))
-    scroll.bar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, 44)
+    scroll.bar:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -3, f:FooterHeight() - 4)
+    if scroll.SetClipsChildren then scroll:SetClipsChildren(true) end
     f.scroll, f.child = scroll, child
 
-    -- the footer: a rule, the "all versions" switch, and Got it
-    local foot = CreateFrame("Frame", nil, f)
-    foot:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 1, 1)
-    foot:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -1, 1)
-    foot:SetHeight(38)
-    local rule = foot:CreateTexture(nil, "ARTWORK")
-    rule._zui_own = true
-    rule:SetTexture(FLAT)
-    rule:SetHeight(1)
-    rule:SetPoint("TOPLEFT")
-    rule:SetPoint("TOPRIGHT")
-    foot._zPaint = function()
-        local b = GetColor("ui", "border")
-        rule:SetVertexColor(b.r, b.g, b.b, 1)
-    end
-    foot:_zPaint()
-    f.showAll = UI.Checkbox(foot, "Show all versions", DB().showAll, function(on)
+    -- the foot: the "all versions" switch, level with Got it
+    f.showAll = UI.SettingsBuild(UI.Checkbox, f, "Show all versions", DB().showAll, function(on)
         DB().showAll = on and true or nil
         Fill()
         if PageOpen() and ns.RefreshConfig then ns.RefreshConfig() end
     end)
-    f.showAll:SetPoint("LEFT", foot, "LEFT", 12, 0)
-    local ok = UI.Button(foot, "Got it", { width = 90, onClick = function() UI.CloseWindow(f) end })
-    ok:SetPoint("RIGHT", foot, "RIGHT", -24, 0)
-    ok:SetActive(true)
+    f.showAll:ClearAllPoints()
+    f.showAll:SetPoint("LEFT", f, "BOTTOMLEFT", f.pad - 2, (f.pad - 4) + UI.POP.BTN_H / 2)
 
     UI.AttachResizeGrip(f, { minW = 360, minH = 260, maxW = 900, maxH = 900,
         onResizeStopped = function() Fill() end })

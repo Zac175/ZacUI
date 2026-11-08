@@ -983,7 +983,9 @@ local function ApplyFilter()
 end
 
 local function BuildBar()
-    bar = UI.Window("ZacUIEditModeBar", W, 200, "Edit Mode")
+    -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup), its margin the
+    -- bar's own so the title lines up with the list
+    bar = UI.Popup("ZacUIEditModeBar", W, 200, "Edit Mode", { pad = M.CARD_PAD })
     bar:SetFrameStrata("TOOLTIP")
     bar:SetClampedToScreen(true)
     bar._zOnMoved = function()
@@ -1006,7 +1008,7 @@ local function BuildBar()
         text = "Drag to place. Shift keeps one direction, Alt places freely. "
             .. "Right-click a frame for more.",
         cat = "text", key = "gray", width = iw })
-    desc:SetPoint("TOPLEFT", bar, "TOPLEFT", pad, -(M.TITLEBAR + 8))
+    desc:SetPoint("TOPLEFT", bar, "TOPLEFT", pad, -bar.headerHeight)
     bar.desc = desc
 
     -- the filter: hides every element whose name lacks what is typed
@@ -1165,7 +1167,7 @@ end
 
 local function BarHeight(listH)
     local descH = math.max(12, (bar.desc and bar.desc:GetStringHeight()) or 24)
-    return M.TITLEBAR + 8 + descH + 8 + M.EDIT_H + 8 + M.CHECK + 8 + 30 + 6 + listH
+    return bar.headerHeight + descH + 8 + M.EDIT_H + 8 + M.CHECK + 8 + 30 + 6 + listH
         + 8 + 9 + M.BUTTON_H + 6 + M.BUTTON_H + M.CARD_PAD
 end
 

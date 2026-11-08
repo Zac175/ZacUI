@@ -4,6 +4,11 @@
 -- Part of ZacUI; load order is set by the TOC (after the config pages and
 -- the changelog, before Boot_Events).
 --
+-- FIRST RUN (2026-11-08). A fresh install (and the load after "Reset
+-- ZacUI") now opens the combined first-time setup (Tutorial_Setup2: look,
+-- parts, one reload) in the login queue instead of the welcome; the
+-- welcome below is kept for a client where the setup did not load.
+--
 -- WHO SEES THE WELCOME. A fresh install only. Boot_Events notes at
 -- ADDON_LOADED whether the client handed over any saved variables at all
 -- (ns.freshInstall); this file reads that at PLAYER_LOGIN and writes the
@@ -241,8 +246,17 @@ end)
 -- Stamps the bookkeeping the first time this build sees the DB, then
 -- schedules the welcome when it is still owed. Returns true when it was
 -- scheduled (for the tests).
+T.SET_LINE = "You're set. /zui opens the settings, /zui setup runs the setup again."
+
 function T.CheckOnLogin()
     if type(ZacUIDB) ~= "table" then return false end
+    -- the load after the setup's "Apply and reload": one short line, said
+    -- once the login popups are done (Core_Popups.Say), and nothing else
+    local su = ZacUIDB.setup
+    if type(su) == "table" and su.applied then
+        su.applied = nil
+        if ns.Popups then ns.Popups.Say(T.SET_LINE) elseif Print then Print(T.SET_LINE) end
+    end
     local st = ZacUIDB.tutorial
     if type(st) ~= "table" then
         if ns.freshInstall then
@@ -253,24 +267,31 @@ function T.CheckOnLogin()
         ZacUIDB.tutorial = st
     end
     if st.seen then return false end
-    -- after "Reset ZacUI" the step-by-step setup opens by itself (it has
-    -- its own welcome step and Skip on every step, so the separate welcome
-    -- is not shown as well); a first install keeps the welcome
-    if ns.openSetupAfterReset and ns.TutorialSetup and ns.TutorialSetup.Open then
-        st.seen = true
+    -- A fresh install, and the load after "Reset ZacUI" (ns.openSetupAfterReset):
+    -- the first-time setup (Tutorial_Setup2: the look, the parts, one
+    -- reload) opens by itself, in the welcome's place in the login queue.
+    -- It has its own Skip and a tour pointer, so the welcome and the look
+    -- popup are not shown as well. Marked seen when it actually opens, so
+    -- a logout before then still owes it.
+    if ns.TutorialSetup and ns.TutorialSetup.Open then
+        local function Show()
+            local ok = T.OpenSetup()
+            if ok then T.DB().seen = true end
+            return ok
+        end
         if ns.Popups then
-            -- in the welcome's place in the login queue; while it is open
-            -- the queue waits (Core_Popups asks Setup.Busy)
-            ns.Popups.Want("setup", function() return T.OpenSetup() end, { delay = T.WELCOME_DELAY })
+            -- while it is open the queue waits (Core_Popups asks Setup.Busy)
+            ns.Popups.Want("setup", Show, { delay = T.WELCOME_DELAY })
             return true
         end
         local function Go()
             if InCombat() then C_Timer.After(2, Go) return end
-            T.OpenSetup()
+            Show()
         end
         C_Timer.After(T.WELCOME_DELAY, Go)
         return true
     end
+    -- (no setup loaded: the welcome, as before)
     pending = true
     if ns.Popups then
         ns.Popups.Want("welcome", QueueShow, { delay = T.WELCOME_DELAY })
@@ -304,19 +325,19 @@ end)
 function ns.TutorialCard(L)
     local card = L:Card("Getting started")
     L:Desc("New here? The tour shows you around this window. Quick setup picks "
-        .. "the look and the parts you want in a few screens.")
+        .. "your look and the parts you want, then reloads once.")
     L:Gap(4)
     local tour = UI.Button(card, "Take the tour", { width = 120,
         tooltip = "Walks you around this window, one part at a time. /zui tour does the same.",
         onClick = function() T.StartTour() end })
     local setup = UI.Button(card, "Quick setup", { width = 110,
-        tooltip = "The look, which parts are on, and the basics of your frames. /zui setup does the same.",
+        tooltip = "Your look and which parts are on, in three steps, with one reload. /zui setup does the same.",
         onClick = function() T.OpenSetup() end })
-    local again = UI.Button(card, "Show the welcome again", { width = 170,
-        tooltip = "The welcome window comes back at your next login.",
+    local again = UI.Button(card, "Show the setup at login", { width = 170,
+        tooltip = "The first-time setup opens by itself at your next login.",
         onClick = function()
             T.Reset()
-            Print("The welcome will show at your next login.")
+            Print("The setup will open at your next login.")
         end })
     L:Flow({ tour, setup, again })
     L:EndCard()

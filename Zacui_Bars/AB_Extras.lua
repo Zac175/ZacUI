@@ -526,6 +526,207 @@ AB.RegisterApplier(ApplyMicro)
 -- XP / REPUTATION STRIP
 -- ============================================================
 local status
+
+-- ------------------------------------------------------------
+-- THE GAME'S XP BARS ON A ZacUI HOLDER (2026-11-08, Zac: "xp bar is super
+-- long by default and overlap the action bar"). The bars the player sees
+-- are not StatusTrackingBarManager itself but its two children,
+-- MainStatusTrackingBarContainer and SecondaryStatusTrackingBarContainer.
+-- Each is an Edit Mode system of its own: Edit Mode anchors it to
+-- UIParent (UpdateBottomActionBarPositions stacks it over the stock main
+-- bar) and sizes it to the client's full width (Forever 1192, Era / TBC
+-- 1024), and the bars inside it were sized once at load. Moving and
+-- sizing the manager therefore moved nothing on screen. So the containers
+-- themselves are seated: anchored on the holder, sized to it, their bars,
+-- 20 dividers and frame art fitted to that width.
+-- Taint care: widget calls only (SetPoint / SetWidth / SetFrameStrata), out
+-- of combat; no Blizzard mixin method is called and no field is written on
+-- a Blizzard frame (what is remembered lives in the weak tables below).
+-- Edit Mode puts a container back on its layout passes; a hook on the
+-- container's SetPoint / SetSize puts it back on the holder - at once out
+-- of combat, after the fight in combat, and not at all while Edit Mode is
+-- open (it is the player's to move then; the seat returns when it closes).
+-- ------------------------------------------------------------
+local STATUS_KEYS = { "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer" }
+local stockFit = setmetatable({}, { __mode = "k" })   -- container -> its stock geometry
+local seatHooked = setmetatable({}, { __mode = "k" })
+local seat = { on = false }                            -- the holder the bars sit on, while seated
+local seatBusy = false
+
+local function StatusContainers(mgr)
+    local list = {}
+    if not mgr then return list end
+    for _, key in ipairs(STATUS_KEYS) do
+        local c = rawget(mgr, key)
+        if type(c) ~= "table" then c = _G[key] end
+        if type(c) == "table" and c.SetPoint and c.GetWidth then list[#list + 1] = c end
+    end
+    return list
+end
+
+-- the container's own art, in its groups: Forever's frame atlas, Classic's
+-- main-bar strip and standalone strip (each a row of pieces end to end)
+local function ArtGroups(c)
+    local out = {}
+    local one = rawget(c, "BarFrameTexture")
+    if type(one) == "table" and one.SetWidth then out[#out + 1] = { one } end
+    for _, key in ipairs({ "MainMenuBarTextures", "StandaloneTextures" }) do
+        local arr = rawget(c, key)
+        if type(arr) == "table" then
+            local g = {}
+            for _, t in ipairs(arr) do
+                if type(t) == "table" and t.SetWidth then g[#g + 1] = t end
+            end
+            if #g > 0 then out[#out + 1] = g end
+        end
+    end
+    return out
+end
+-- a piece this narrow or less is an end or a tick (Classic's 16 px left edge,
+-- its 9 px cap ticks): it keeps its size; the long pieces take the rest
+local ART_FIXED = 32
+
+-- read once, before anything is changed: the container's stock width, the
+-- gap its bars leave inside it, and each art piece's width
+local function StockFit(c)
+    local o = stockFit[c]
+    if o then return o end
+    local w = c:GetWidth()
+    if type(w) ~= "number" or w <= 0 then return nil end
+    o = { w = w, inset = 0, art = {} }
+    local bars = rawget(c, "bars")
+    if type(bars) == "table" then
+        for _, b in pairs(bars) do
+            if type(b) == "table" and b.GetWidth then
+                local bw = b:GetWidth()
+                if type(bw) == "number" and bw > 0 and bw <= w then o.inset = w - bw break end
+            end
+        end
+    end
+    -- each group: its long pieces stretch so the row still spans what it
+    -- spanned beyond (or short of) the container's own edges
+    for _, g in ipairs(ArtGroups(c)) do
+        local long, pieces = 0, {}
+        for _, t in ipairs(g) do
+            local tw = t:GetWidth()
+            if type(tw) == "number" and tw > ART_FIXED then
+                pieces[t] = tw
+                long = long + tw
+            end
+        end
+        if long > 0 then o.art[#o.art + 1] = { pieces = pieces, long = long, rest = w - long } end
+    end
+    stockFit[c] = o
+    return o
+end
+
+-- one container at `w` (its own units): the container, its bars, its art,
+-- and the dividers spread evenly across it again
+local function FitContainer(c, w)
+    local o = StockFit(c)
+    if not o then return end
+    c:SetWidth(w)
+    local bw = math.max(1, w - o.inset)
+    local bars = rawget(c, "bars")
+    if type(bars) == "table" then
+        for _, b in pairs(bars) do
+            if type(b) == "table" and b.SetWidth then
+                b:SetWidth(bw)
+                local sb = rawget(b, "StatusBar")
+                if type(sb) == "table" and sb.SetWidth then sb:SetWidth(bw) end
+            end
+        end
+    end
+    for _, g in ipairs(o.art) do
+        local k = math.max(0, w - g.rest) / g.long
+        for t, tw in pairs(g.pieces) do t:SetWidth(tw * k) end
+    end
+    local pool = rawget(c, "HorizontalDividersPool")
+    if type(pool) == "table" and pool.EnumerateActive then
+        local divs = {}
+        for d in pool:EnumerateActive() do
+            local x = d.GetPoint and select(4, d:GetPoint(1)) or 0
+            divs[#divs + 1] = { d = d, x = tonumber(x) or 0 }
+        end
+        table.sort(divs, function(a, b) return a.x < b.x end)
+        local step = w / (#divs + 1)
+        for i, e in ipairs(divs) do
+            e.d:ClearAllPoints()
+            e.d:SetPoint("LEFT", c, "LEFT", step * i, 0)
+        end
+    end
+end
+
+-- every container onto the holder: the main bar at its bottom, the second
+-- (a watched reputation beside the XP) right above it
+local function Reseat()
+    local mgr = _G.StatusTrackingBarManager
+    local holder = seat.holder
+    if not (seat.on and mgr and holder) then return end
+    if InCombatLockdown() then return AB.AfterCombat("statusSeat", Reseat) end
+    seatBusy = true
+    local hs = holder:GetEffectiveScale() or 1
+    local below
+    for _, c in ipairs(StatusContainers(mgr)) do
+        local cs = c:GetEffectiveScale() or 1
+        local w = seat.w * hs / ((cs > 0) and cs or 1)
+        pcall(FitContainer, c, w)
+        c:ClearAllPoints()
+        if below then
+            c:SetPoint("BOTTOMLEFT", below, "TOPLEFT", 0, 0)
+        else
+            c:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, 0)
+        end
+        below = c
+    end
+    seatBusy = false
+end
+
+local function OnStatusMoved()
+    if seatBusy or not seat.on then return end
+    local em = _G.EditModeManagerFrame
+    if em and em.IsShown and em:IsShown() then return end
+    if InCombatLockdown() then AB.AfterCombat("statusSeat", Reseat) return end
+    Reseat()
+end
+
+local function HookStatus(mgr)
+    for _, c in ipairs(StatusContainers(mgr)) do
+        if not seatHooked[c] then
+            seatHooked[c] = true
+            hooksecurefunc(c, "SetPoint", OnStatusMoved)
+            if c.SetSize then hooksecurefunc(c, "SetSize", OnStatusMoved) end
+        end
+    end
+    -- Classic scales the manager on its own layout pass (UpdateBarVisuals)
+    if not seatHooked[mgr] and mgr.SetScale then
+        seatHooked[mgr] = true
+        hooksecurefunc(mgr, "SetScale", OnStatusMoved)
+    end
+    local em = _G.EditModeManagerFrame
+    if em and em.HookScript and not seatHooked[em] then
+        seatHooked[em] = true
+        em:HookScript("OnHide", function() C_Timer.After(0, OnStatusMoved) end)
+    end
+end
+
+-- the manager and its bars on `holder` at `w` (holder units). strata: the
+-- seat on bar 1 sits a layer under the bar (LOW), so bar 1's gryphons draw
+-- over its ends as they do over the game's own; ZacUI's strip keeps the
+-- manager's own MEDIUM.
+local function SeatStatus(mgr, holder, w, strata)
+    seat.on, seat.holder, seat.w = true, holder, w
+    mgr:SetParent(holder)
+    mgr:ClearAllPoints()
+    mgr:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, 0)
+    if mgr.SetFrameStrata then mgr:SetFrameStrata(strata or "MEDIUM") end
+    mgr:SetWidth(w)
+    HookStatus(mgr)
+    Reseat()
+    mgr:Show()
+end
+AB.StatusSeat = seat   -- (read by the tests)
+
 local function ApplyStatus(profile)
     local cfg = profile.status
     local mgr = _G.StatusTrackingBarManager
@@ -538,7 +739,9 @@ local function ApplyStatus(profile)
     -- A GAME LOOK'S SEAT (2026-11-08): with ZacUI's strip off, the game's
     -- own XP / reputation bars sit on top of bar 1's chrome at its width, as
     -- the game's main bar carries them (nothing saved; ZacUI's look and a
-    -- strip of ZacUI's own are never moved)
+    -- strip of ZacUI's own are never moved). Its width is bar 1's FRAME:
+    -- WoW Forever's frame art reaches past the buttons (AB.KIT_FRAME), the
+    -- caps-only looks' frame is the button grid.
     local seatOn, seatFrame, seatFramed
     if not cfg.enabled and mgr and cfg.kitSeat ~= false and AB.Kit and AB.Kit() ~= "zacui" then
         local b1 = AB.actionBars and AB.actionBars[1]
@@ -546,23 +749,22 @@ local function ApplyStatus(profile)
         seatOn = seatFrame ~= nil and b1:IsShown()
     end
     if seatOn then
-        local w = seatFrame:GetWidth()
-        local lift = seatFramed and (6 * ((AB.actionBars[1].cfg and AB.actionBars[1].cfg.buttonSize or AB.BUTTON) / 45)) or 0
-        status:ClearAllPoints()
-        status:SetPoint("TOPLEFT", seatFrame, "TOPLEFT", 0, lift + 14 + 1)
+        local F = AB.KIT_FRAME
+        local k = ((AB.actionBars[1].cfg and AB.actionBars[1].cfg.buttonSize or AB.BUTTON) / 45)
+        local left = seatFramed and (F.l * k) or 0
+        local w = seatFrame:GetWidth() + (seatFramed and ((F.r - F.l) * k) or 0)
+        local lift = seatFramed and (F.t * k) or 0
+        -- bar 1's units to the holder's (bar 1 may be scaled; the holder is not)
         status:SetScale(1)
+        local ss = status:GetEffectiveScale() or 1
+        local u = (seatFrame:GetEffectiveScale() or ss) / ((ss > 0) and ss or 1)
+        status:SetFrameStrata("LOW")
+        status:ClearAllPoints()
+        status:SetPoint("TOPLEFT", seatFrame, "TOPLEFT", left * u, (lift + 14 + 1) * u)
         status.content:ClearAllPoints()
         status.content:SetPoint("TOPLEFT", status, "TOPLEFT", 0, 0)
-        status.content:SetSize(w, 14)
-        mgr:SetParent(status.content)
-        mgr:ClearAllPoints()
-        mgr:SetPoint("BOTTOMLEFT", status.content, "BOTTOMLEFT", 0, 0)
-        mgr:SetWidth(w)
-        for _, key in ipairs({ "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer" }) do
-            local c = rawget(mgr, key)
-            if type(c) == "table" and c.SetWidth then c:SetWidth(w) end
-        end
-        mgr:Show()
+        status.content:SetSize(w * u, 14)
+        SeatStatus(mgr, status.content, w * u, "LOW")
         status.owned = true
         status:SetAlpha(1)
         status:Show()
@@ -570,12 +772,15 @@ local function ApplyStatus(profile)
         AB.RegisterFade(status, { fade = false, alpha = 1 })
         return
     end
+    status:SetFrameStrata("MEDIUM")
     if not cfg.enabled or not mgr then
+        seat.on = false
         UnregisterStateDriver(status, "visibility")
         status:Hide()
         AB.RegisterFade(status, { fade = false, alpha = 1 })
         if status.owned and mgr then
             mgr:SetParent(AB.Hider() or UIParent)
+            if mgr.SetFrameStrata then mgr:SetFrameStrata("MEDIUM") end
             status.owned = nil
         end
         return
@@ -585,13 +790,7 @@ local function ApplyStatus(profile)
     status.content:ClearAllPoints()
     status.content:SetPoint("TOPLEFT", status, "TOPLEFT", 0, 0)
     status.content:SetSize(w, 14)
-    mgr:SetParent(status.content)
-    mgr:ClearAllPoints()
-    mgr:SetPoint("BOTTOMLEFT", status.content, "BOTTOMLEFT", 0, 0)
-    mgr:SetWidth(w)
-    if mgr.MainStatusTrackingBarContainer then mgr.MainStatusTrackingBarContainer:SetWidth(w) end
-    if mgr.SecondaryStatusTrackingBarContainer then mgr.SecondaryStatusTrackingBarContainer:SetWidth(w) end
-    mgr:Show()
+    SeatStatus(mgr, status.content, w, "MEDIUM")
     status.owned = true
     if status.overlay then
         status.overlay:ClearAllPoints()

@@ -280,7 +280,7 @@ RegisterPage(PAGE_ID, function(L)
             set = function(spec) db.titleFont = spec LookSoon() end,
             defaults = Kit.TitleFontDefaults(), sample = "Character" })
         L:Add(fp, 8)
-        Color(L, "titleColor", "Colour", "text", "gold", false)
+        Color(L, "titleColor", "Colour", "text", (Kit and Kit.TITLE_KEY) or "normal", false)
         -- where the title sits (windows.anchors.title; nothing saved = as ever)
         local tg, ts = ns.CustomAccess(Kit.DB, "anchors", "title", LookSoon)
         local list = {}

@@ -955,6 +955,18 @@ local function Build()
     window.titleText = first
     if UI.AnimateMark then pcall(UI.AnimateMark, mark, logo, { inset = 0 }) end
 
+    -- NEED HELP (2026-11-08): a speech bubble at the band's right, level
+    -- with the mark; it opens "Message Zac on Discord" with the name ready
+    -- to copy (UIF_Dialogs UI.ShowContact). On the drag surface, as the
+    -- window's other buttons are.
+    if UI.ContactButton then
+        local help = UI.ContactButton(tb, 28)
+        -- (the mark is 40 tall from 30 down: 28 centred on it is 36 down)
+        help:SetPoint("TOPRIGHT", logo, "TOPRIGHT", -22, -36)
+        help:SetFrameLevel(nav:GetFrameLevel() + 5)
+        window.contactButton = help
+    end
+
     -- EDIT MODE: the sidebar's one fixed row (EllesmereUI's Unlock Mode
     -- row: 40 tall, a 45 x 32 icon box 20 in, the label 10 after it)
     do

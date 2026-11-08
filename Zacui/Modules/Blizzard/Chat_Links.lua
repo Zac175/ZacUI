@@ -183,10 +183,12 @@ function CL.ShowURL(url)
     local UI = ns.UI
     if not UI then return end
     if not box then
-        box = UI.Window("ZacUIChatURL", 460, 104, "Copy link")
-        local eb = UI.EditBox(box, { width = 436 })
+        -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup)
+        box = (UI.Popup or UI.Window)("ZacUIChatURL", 460, 104, "Copy link")
+        local pad = box.pad or 12
+        local eb = (UI.SettingsBuild or function(fn, ...) return fn(...) end)(UI.EditBox, box, { width = 460 - 2 * pad })
         eb:ClearAllPoints()
-        eb:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -((box.headerHeight or 30) + 10))
+        eb:SetPoint("TOPLEFT", box, "TOPLEFT", pad, -((box.headerHeight or 30) + (box.pad and 0 or 10)))
         local inner = eb.editBox
         if inner then
             inner:SetScript("OnEscapePressed", function(self) self:ClearFocus() box:Hide() end)
@@ -198,9 +200,10 @@ function CL.ShowURL(url)
                 end
             end)
         end
-        local hint = UI.Font(box, UI.F.SMALL, { cat = "text", key = "gray",
-            text = "Ctrl+C to copy, Esc to close." })
-        hint:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 12, 10)
+        local hint = UI.PopupText and UI.PopupText(box, "hint", { text = "Ctrl+C to copy, Esc to close." })
+            or UI.Font(box, UI.F.SMALL, { cat = "text", key = "gray", text = "Ctrl+C to copy, Esc to close." })
+        hint:SetPoint("TOPLEFT", eb, "BOTTOMLEFT", 1, -8)
+        if box.FitHeight then box:FitHeight((UI.S and UI.S.EDIT_H or 28) + 8 + 14) end
         box.eb = eb
         box:SetFrameStrata("DIALOG")
     end

@@ -226,26 +226,31 @@ end
 local buyWindow
 
 local function BuildBuyWindow()
-    local win = UI.Window("ZacUIAuctionBuy", 320, 190, "Buying")
+    -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup): the lines and
+    -- buttons keep their places, under its taller header
+    local win = UI.Popup("ZacUIAuctionBuy", 320, 190, "Buying")
     win._zMapOwn = true
+    local D = win.headerHeight - 34
+    win:SetHeight(190 + D + 14)
+    UI.SettingsBuild(function()
 
     win.item = UI.Font(win, F.LABEL, { cat = "text", key = "gold",
         justify = "CENTER" })
-    win.item:SetPoint("TOP", 0, -40)
+    win.item:SetPoint("TOP", 0, -40 - D)
 
     win.progress = UI.Font(win, F.NORMAL, { cat = "text", key = "normal",
         justify = "CENTER" })
-    win.progress:SetPoint("TOP", 0, -64)
+    win.progress:SetPoint("TOP", 0, -64 - D)
 
     win.spent = UI.Font(win, F.SMALL, { cat = "text", key = "gray",
         justify = "CENTER" })
-    win.spent:SetPoint("TOP", 0, -86)
+    win.spent:SetPoint("TOP", 0, -86 - D)
 
     -- The stack callout. "Bought 5 thinking it was 1" happened because
     -- the only place the quantity appeared was inside the button label -
     -- this line exists to make a multi-item purchase impossible to miss.
     win.stackNote = UI.Font(win, F.SMALL, { justify = "CENTER" })
-    win.stackNote:SetPoint("TOP", 0, -104)
+    win.stackNote:SetPoint("TOP", 0, -104 - D)
 
     win.buy = UI.Button(win, "Buy", { width = 200, onClick = function()
         -- THE HARDWARE EVENT. This click is the only thing the client
@@ -254,7 +259,7 @@ local function BuildBuyWindow()
         if not ok and why and why ~= "done" then Print(why) end
         if buyWindow and buyWindow.Refresh then buyWindow:Refresh() end
     end })
-    win.buy:SetPoint("BOTTOM", 0, 50)
+    win.buy:SetPoint("BOTTOM", 0, 62)
     -- NEVER an enabled, unlabeled Buy: until the first Refresh names an
     -- exact quantity and price, this button does nothing. The old bare
     -- "Buy" was live for the instant before Refresh ran - exactly long
@@ -264,19 +269,20 @@ local function BuildBuyWindow()
 
     -- "Done" rather than "Stop": the window no longer ends itself when a
     -- plan runs out, so closing it is what ends a run.
-    win.stop = UI.Button(win, "Done", { width = 90, onClick = function()
+    win.stop = UI.Button(win, "Done", { width = 110, onClick = function()
         AH.CancelPurchase()
     end })
-    win.stop:SetPoint("BOTTOM", -50, 18)
+    win.stop:SetPoint("BOTTOM", -60, 20)
 
     -- Restock without leaving: re-runs the search that opened this
     -- window, and the next Buy click refills from the fresh page. This
     -- is how "keep buying that item" survives past one page.
-    win.searchAgain = UI.Button(win, "Search again", { width = 90,
+    win.searchAgain = UI.Button(win, "Search again", { width = 110,
         onClick = function()
             if win._onSearchAgain then win._onSearchAgain() end
         end })
-    win.searchAgain:SetPoint("BOTTOM", 50, 18)
+    win.searchAgain:SetPoint("BOTTOM", 60, 20)
+    end)
 
     -- Closing the window IS ending the run - by X, by Escape, or by the
     -- Done button (whose cancel also closes it via the finish callback).

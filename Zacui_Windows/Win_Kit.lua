@@ -126,6 +126,10 @@ function Kit.DB()
 end
 
 -- A colour setting, or the theme's (cat, key) when it is unset.
+-- the title's colour when none is picked (2026-11-08: the settings
+-- window's light text, as every ZacUI popup's title; it was the gold)
+Kit.TITLE_KEY = "normal"
+
 function Kit.Color(key, cat, ckey, alpha)
     local c = Kit.DB()[key]
     if type(c) == "table" then
@@ -207,7 +211,7 @@ function Kit.StyleCover(f)
     local t = f.titleText
     if t then
         if ns.ApplyFontSpec then ns.ApplyFontSpec(t, db.titleFont, Kit.TitleFontDefaults()) end
-        t:SetTextColor(Kit.Color("titleColor", "text", "gold"))
+        t:SetTextColor(Kit.Color("titleColor", "text", Kit.TITLE_KEY))
     end
     Kit.PlaceTitle(f)
     -- another look (Core_Look, part "windows"): its window chrome over the
@@ -390,8 +394,12 @@ function Kit.Cover(host, opts)
     bar:SetPoint("TOPLEFT", 1, -1)
     bar:SetPoint("TOPRIGHT", -1, -1)
     UI.Fill(bar, "ui", "headerBg")
-    -- the same header art as every ZacUI window (UIF_Controls)
-    if UI.HeaderArt then UI.HeaderArt(bar, { stepX = opts.stepX or 150 }) end
+    -- (2026-11-08) the popups' flat bar (UIF_Dialogs UI.FlatBar): the
+    -- window's own colour, a white hairline at its foot, the title in the
+    -- settings window's light text, the X white 0.53 -> 1.0. The 30 px
+    -- height stays: every game window lays out from it. (The old header
+    -- art where the framework has no flat bar.)
+    if not UI.FlatBar and UI.HeaderArt then UI.HeaderArt(bar, { stepX = opts.stepX or 150 }) end
 
     local icon = bar:CreateTexture(nil, "ARTWORK", nil, 3)
     icon._zui_own = true
@@ -402,15 +410,16 @@ function Kit.Cover(host, opts)
     icon:Hide()
 
     local title = UI.Font(bar, F.TITLE, { text = opts.title or "", cat = "text", key = "gold" })
-    -- gold unless a colour is picked on the Game windows page
-    title._zPaint = function(self) self:SetTextColor(Kit.Color("titleColor", "text", "gold")) end
+    -- the light text (Kit.TITLE_KEY) unless a colour is picked on the Game windows page
+    title._zPaint = function(self) self:SetTextColor(Kit.Color("titleColor", "text", Kit.TITLE_KEY)) end
     title:SetPoint("LEFT", 10, 2)
     title:SetPoint("RIGHT", bar, "RIGHT", -34, 2)
     title:SetJustifyH("LEFT")
     title:SetWordWrap(false)
 
     bar._zPaint = function(self)
-        if UI.PaintHeaderArt then UI.PaintHeaderArt(self)
+        if self._zFlat then self._zFlat(self)
+        elseif UI.PaintHeaderArt then UI.PaintHeaderArt(self)
         else
             local h = GetColor("ui", "headerBg")
             self._zFill:SetVertexColor(h.r, h.g, h.b, h.a or 1)
@@ -428,6 +437,14 @@ function Kit.Cover(host, opts)
         if opts.onClose then opts.onClose() elseif not opts.preview then HideUIPanel(host) end
     end)
     close:SetPoint("RIGHT", -5, 0)
+    if UI.FlatBar then
+        bar._zFlat = UI.FlatBar(bar, { close = close,
+            fill = function() return Kit.Color("bg", "ui", "windowBg", 1) end })
+        bar._zPaint = function(self)
+            self._zFlat(self)
+            title:_zPaint()
+        end
+    end
 
     -- Drag the window by its title bar (the position is remembered).
     if ns.AttachWindowDrag and not opts.preview then ns.AttachWindowDrag(bar, host) end

@@ -96,6 +96,10 @@ SlashCmdList["ZACUI"] = function(msg)
         -- this client's version and the newest one heard (Core_VersionCheck)
         if ns.VersionCommand then ns.VersionCommand() else Print("v" .. ZUI.VERSION) end
         return
+    elseif cmd == "discord" or cmd == "contact" or cmd == "help" and rest == "discord" then
+        -- Need help? Zac's Discord name, ready to copy
+        if ns.UI and ns.UI.ShowContact then ns.UI.ShowContact() else Print("Need help? Message Zac on Discord: Zac12") end
+        return
     elseif cmd == "raid" or cmd == "summary" then
         -- the raid summary: the last raid (or /zui raid n, counted back)
         if ns.FeatureOn and not ns.FeatureOn("raid_summary") then

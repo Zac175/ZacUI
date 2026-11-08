@@ -583,6 +583,9 @@ function AB.HideBlizzard()
     -- (a fresh install under a game look first takes that look's stock bar
     -- settings, so the spots below are worked out for them)
     if AB.KitFreshDefaults then pcall(AB.KitFreshDefaults) end
+    -- ...and under ZacUI's own look, ZacUI's tidy layout (below); it places
+    -- its bars first, so the read of Blizzard's spots leaves them alone
+    if AB.ZacuiFreshLayout then pcall(AB.ZacuiFreshLayout) end
     if ns.FreshLayout and ns.FreshLayout.Bars then pcall(ns.FreshLayout.Bars, AB) end
     -- ...and where the client's bag buttons and micro menu sit (AB_Extras;
     -- read only, used only by a bar that was never placed)
@@ -2601,6 +2604,8 @@ function AB.SeatFromStock(cfg, list, size, kind, hgt)
     if l and count > 1 and (r - l) < size * 1.5 and (t - b) < size * 1.5 then
         l, b, r, t = nil, nil, nil, nil
     end
+    -- (ZacUI's own fresh layout: the corner, not the client's spot)
+    if AB._cornerFresh then l, b, r, t = nil, nil, nil, nil end
     local cx, cy
     if l then
         cx, cy = (l + r) / 2, (b + t) / 2
@@ -2674,6 +2679,76 @@ function AB.KitFreshDefaults()
     end
     if type(p.stance) == "table" and p.stance.scale == 1.5 then p.stance.scale = 1 end
     if type(p.micro) == "table" and p.micro.scale == 0.8 then p.micro.scale = 1 end
+    return true
+end
+
+-- ------------------------------------------------------------
+-- A FRESH INSTALL UNDER ZacUI'S OWN LOOK (2026-11-08, Zac's Forever fresh
+-- install: bar 1 in two clumps, a lone stance button floating above, the bag
+-- slots off at the far right). Copying the client's spots works for a game
+-- look, whose bars ARE the client's; under ZacUI's look the client's spots
+-- (Forever's stance bar over its hidden bars 2 and 3, a warrior's single
+-- stance button) scatter ZacUI's bars. So a fresh install under ZacUI's look
+-- gets ZacUI's own layout instead, bottom up, in UIParent units:
+--   bar 1          centred at the bottom, one row, its empty slots shown
+--                  (a new character's three spells and its 0 - = keys
+--                  read as one bar, not two clumps)
+--   stance, pet    the row right above it, flush with bar 1's left end
+--                  (a class has one or the other; the pet bar hides with
+--                  no pet out)
+--   bars 6, 5, 2   stacked above that row at bar 1's width and centre (the
+--                  game's Action Bar 2 and 3 pages, then ZacUI's page 2);
+--                  empty until a spell is dragged on, as before
+--   micro menu     in the bottom-right corner, the bag bar right above it
+--                  (AB.SeatFromStock's corner, not the client's own spot)
+-- Bars 3 and 4 keep Core_FreshLayout's spot (the client's right-hand bars).
+-- Once, on a fresh install (or after Reset ZacUI), only for a bar still on
+-- its shipped defaults (no spot saved): an existing save never moves.
+-- ------------------------------------------------------------
+AB.ZACUI_FRESH = { margin = 8, gap = 4 }
+function AB.ZacuiFreshLayout()
+    if not (ns.freshInstall == true or ns.openSetupAfterReset == true) then return false end
+    if AB.Kit() ~= "zacui" then return false end
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table" and type(p.bars) == "table") then return false end
+    if p.zacuiFresh then return false end
+    p.zacuiFresh = true
+    AB._cornerFresh = true
+    local Z = AB.ZACUI_FRESH
+    local uw = UIParent:GetWidth()
+    local cx = uw / 2
+    local function Size(cfg, small) return cfg.buttonSize or (small and AB.PET_BUTTON or AB.BUTTON) end
+    local function Count(cfg) return cfg.buttons or 12 end
+    -- bar 1
+    local c1 = p.bars[1]
+    if type(c1) ~= "table" or c1.point ~= nil then return false end
+    local _, _, _, w1, h1 = AB.SpotFor(c1, 0, 0, Count(c1), Size(c1))
+    c1.point, c1.x, c1.y = AB.SpotFor(c1, cx, Z.margin + h1 / 2, Count(c1), Size(c1))
+    if c1.showgrid == false then c1.showgrid = true end
+    local left = cx - w1 / 2
+    local top = Z.margin + h1
+    -- stance and pet: one row above bar 1, from its left end
+    local rowH = 0
+    for _, key in ipairs({ "stance", "pet" }) do
+        local c = p[key]
+        if type(c) == "table" and c.point == nil then
+            local n = 10
+            local sz = Size(c, true)
+            local _, _, _, w, h = AB.SpotFor(c, 0, 0, n, sz)
+            c.point, c.x, c.y = AB.SpotFor(c, left + w / 2, top + Z.gap + h / 2, n, sz)
+            rowH = math.max(rowH, h)
+        end
+    end
+    if rowH > 0 then top = top + Z.gap + rowH end
+    -- the next bars, stacked above at bar 1's centre
+    for _, n in ipairs({ 6, 5, 2 }) do
+        local c = p.bars[n]
+        if type(c) == "table" and c.point == nil and c.enabled then
+            local _, _, _, _, h = AB.SpotFor(c, 0, 0, Count(c), Size(c))
+            c.point, c.x, c.y = AB.SpotFor(c, cx, top + Z.gap + h / 2, Count(c), Size(c))
+            top = top + Z.gap + h
+        end
+    end
     return true
 end
 

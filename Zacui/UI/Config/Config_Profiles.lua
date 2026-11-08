@@ -13,6 +13,7 @@
 local ADDON_NAME, ns = ...
 
 -- shared state from earlier ZacUI files
+local GetColor = ns.GetColor
 local Print = ns.Print
 local Profiles = ns.Profiles
 local RefreshConfig = ns.RefreshConfig
@@ -141,22 +142,34 @@ function Import.Watch(box, font, expected)
 end
 
 local offer
+-- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup): what the string is
+-- as the title's line, what it holds and what each action does under it,
+-- the actions as buttons (the first the accent one), Cancel in the foot.
 local function BuildOffer()
-    local f = UI.Window("ZacUIImportOffer", 400, 240, "Import")
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
-    f:SetFrameLevel(110)
-    f.what = UI.Font(f, F.LABEL, { cat = "text", key = "gold", width = 368 })
-    f.what:SetPoint("TOPLEFT", 16, -(M.TITLEBAR + 12))
-    f.detail = UI.Font(f, F.SMALL, { cat = "text", key = "gray", width = 368 })
-    f.effect = UI.Font(f, F.SMALL, { width = 368 })
-    f.name = UI.EditBox(f, { width = 240, height = 20, hint = "Name", clear = false })
-    f.buttons = {}
-    for i = 1, 2 do
-        f.buttons[i] = UI.Button(f, "", { width = 182, height = 22 })
+    local f = UI.Popup("ZacUIImportOffer", 420, 240, "Import", { desc = " ",
+        strata = "FULLSCREEN_DIALOG", level = 110 })
+    local tw = 420 - 2 * f.pad
+    f.what = f.descText
+    f.detail = UI.PopupText(f, "hint", { width = tw, justify = "LEFT" })
+    f.effect = UI.PopupText(f, "body", { width = tw, justify = "LEFT" })
+    -- (the effect turns red when it cannot be imported: _zPaintKey)
+    f.effect._zPaintKey = "normal"
+    f.effect._zPaint = function(self)
+        if self._zPaintKey == "red" then
+            local c = GetColor("text", "red")
+            self:SetTextColor(c.r, c.g, c.b, 1)
+        else
+            self:SetTextColor(1, 1, 1, UI.POP.BODY_A)
+        end
     end
-    f.cancel = UI.Button(f, CANCEL or "Cancel", { width = 100, height = 22,
-        onClick = function() UI.CloseWindow(f) end })
-    f.cancel:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 12)
+    f.name = UI.SettingsBuild(UI.EditBox, f, { width = 240, hint = "Name", clear = false })
+    f.buttons2 = {}
+    for i = 1, 2 do
+        f.buttons2[i] = UI.PopupButton(f, "", { width = 182, kind = (i == 1) and "primary" or nil })
+    end
+    f.cancel = f:SetButtons({ { text = CANCEL or "Cancel", onClick = function() UI.CloseWindow(f) end } })[1]
+    -- (the action buttons; f.buttons is the shell's foot row)
+    f.actions = f.buttons2
     return f
 end
 
@@ -171,7 +184,7 @@ function Import.Offer(text, opts)
     offer = offer or BuildOffer()
     local f = offer
 
-    f.what:SetText(tostring(info.title or ""))
+    f:SetTitle(nil, tostring(info.title or ""))
     local lines = {}
     if opts.note then lines[#lines + 1] = opts.note end
     for _, l in ipairs(info.lines or {}) do lines[#lines + 1] = l end
@@ -198,28 +211,31 @@ function Import.Offer(text, opts)
     f._busy = nil
 
     -- stacked top to bottom from measured heights
-    local y = -(M.TITLEBAR + 12) - math.max(14, f.what:GetStringHeight()) - 6
+    local pad = f.pad
+    local y = -f.headerHeight
     f.detail:ClearAllPoints()
-    f.detail:SetPoint("TOPLEFT", 16, y)
+    f.detail:SetPoint("TOPLEFT", pad, y)
     if f.detail:GetText() and f.detail:GetText() ~= "" then
         y = y - math.max(12, f.detail:GetStringHeight()) - 8
     end
     f.effect:ClearAllPoints()
-    f.effect:SetPoint("TOPLEFT", 16, y)
-    y = y - math.max(12, f.effect:GetStringHeight()) - 10
+    f.effect:SetPoint("TOPLEFT", pad, y)
+    y = y - math.max(12, f.effect:GetStringHeight()) - 12
     f.name:ClearAllPoints()
     if wantsName then
-        f.name:SetPoint("TOPLEFT", 16, y)
-        y = y - 28
+        f.name:SetPoint("TOPLEFT", pad, y)
+        y = y - UI.S.EDIT_H - 12
     end
 
-    for i, b in ipairs(f.buttons) do
+    for i, b in ipairs(f.actions) do
         local a = actions[i]
         b:SetShown(a ~= nil)
         b:ClearAllPoints()
         if a then
+            b:SetWidth(UI.POP.BTN_MIN)   -- (as wide as its label needs)
             b:SetLabel(a.label)
-            b:SetPoint("TOPLEFT", 16 + (i - 1) * 186, y)
+            if i == 1 then b:SetPoint("TOPLEFT", pad, y)
+            else b:SetPoint("LEFT", f.actions[i - 1], "RIGHT", UI.POP.BTN_GAP, 0) end
             b:SetScript("OnClick", function()
                 -- The window fades out for a moment after a click and its
                 -- buttons are still there to be clicked: once only.
@@ -249,8 +265,8 @@ function Import.Offer(text, opts)
             end)
         end
     end
-    if #actions > 0 then y = y - 30 end
-    f:SetHeight(-y + 46)
+    if #actions > 0 then y = y - UI.POP.BTN_H end
+    f:FitHeight(-y - f.headerHeight)
     UI.OpenWindow(f)
     f:Raise()
     return true

@@ -107,15 +107,20 @@ local function InitDB()
     -- old standalone ZacUF settings (ZacUFDB, still loaded by the ZacUF
     -- settings-carrier addon when that is present) are adopted as they are.
     ZacUIDB = ZacUIDB or {}
+    local freshSave = false
     if type(ZacUIDB.unitframes) ~= "table" then
         if type(ZacUFDB) == "table" and next(ZacUFDB) then
             ZacUIDB.unitframes = CopyTable(ZacUFDB)
             ns._adoptedOld = true
         else
             ZacUIDB.unitframes = {}
+            freshSave = true
         end
     end
     ns.db = ZacUIDB.unitframes
+    -- (a brand-new save under ZacUI's look: the fresh design's text
+    -- sizes, Config.lua - an existing save keeps what it draws)
+    if freshSave and ns.MatchFreshSave then ns.MatchFreshSave(ns.db) end
     ns.DeepFill(ns.db, ns.defaults)
     -- ZacUI's Edit Mode unlocks the frames only while it is open; a save
     -- written in the middle of it (a /reload, an error on the way out)

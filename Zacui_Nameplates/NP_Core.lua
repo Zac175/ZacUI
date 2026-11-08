@@ -261,10 +261,17 @@ local MATCH = {
     { "enemy", "width", 156 }, { "enemy", "height", 17 },
     { "enemy", "combatWidth", 156 }, { "enemy", "combatHeight", 17 },
     { "enemy", "castWidth", 156 }, { "enemy", "castHeight", 17 }, { "enemy", "castTextSize", 10 },
-    { "enemy", "nameSize", 12 }, { "enemy", "namePos", "above" }, { "enemy", "nameJustify", "CENTER" },
-    { "enemy", "percentSize", 10 }, { "enemy", "nameColor", { 1, 1, 1, 1 } },
+    -- (2026-11-08, Zac: "nameplates ugly as fuck") the name 14 and the
+    -- percent 11, outlined (ApplyNPFont): the reference's 11 / 10 are in
+    -- its wide face; in ZacUI's semi-condensed one they read tiny. The
+    -- hostile red out of combat 0.62 (the reference's 0.39-0.48 read
+    -- brown-black on the dark track); in a fight the threat colours
+    -- (0.80 red) take over as before. Fresh tables only: a saved table
+    -- keeps its values (CopyDefaults fills missing keys only).
+    { "enemy", "nameSize", 14 }, { "enemy", "namePos", "above" }, { "enemy", "nameJustify", "CENTER" },
+    { "enemy", "percentSize", 11 }, { "enemy", "nameColor", { 1, 1, 1, 1 } },
     { "friendly", "nameSize", 15 },
-    { "reaction", "hostile", { 0.48, 0.082, 0.082 } }, { "reaction", "neutral", { 0.81, 0.72, 0.19 } },
+    { "reaction", "hostile", { 0.62, 0.12, 0.11 } }, { "reaction", "neutral", { 0.81, 0.72, 0.19 } },
     { "reaction", "friendly", { 0.314, 0.800, 0.408 } }, { "tapped", { 0.5, 0.5, 0.5 } },
     { "threat", "tankAggro", { 0.800, 0.137, 0.137 } }, { "threat", "tankNoAggro", { 1.00, 0.22, 0.17 } },
     { "threat", "tankOther", { 0.188, 0.761, 0.812 } }, { "threat", "dpsAggro", { 1.00, 0.50, 0.00 } },
@@ -808,15 +815,13 @@ end
 -- shadowY } - the house font shape) at `size`. An empty spec is exactly
 -- SetNPFont: the plate font, outlined, no shadow - which is what every
 -- plate text wore before the specs existed.
-local MATCH_FONT = { outline = "none", shadow = true }
 local function ApplyNPFont(fs, spec, size)
     if type(spec) ~= "table" or not (spec.face or spec.outline or spec.shadow) then
-        -- match pass (ZacUI's look): with nothing saved, no outline and a
-        -- black shadow 1 px down-right, the reference's plate text
-        if not (matchOn and not (type(spec) == "table" and spec.shadow == false)) then
-            return SetNPFont(fs, size)
-        end
-        spec = MATCH_FONT
+        -- (2026-11-08) nothing saved: the plate font, OUTLINED, under every
+        -- look - the match pass's shadow-only text (the reference's) is
+        -- gone, as on the unit frames (Zac: "what happened to the black
+        -- border on text"; "nameplates ugly as fuck")
+        return SetNPFont(fs, size)
     end
     local flags = "OUTLINE"
     if spec.outline ~= nil and ns.FontOutlineFlags then flags = ns.FontOutlineFlags(spec.outline) end

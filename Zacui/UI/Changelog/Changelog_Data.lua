@@ -14,6 +14,41 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.1",
+        date = "2026-11-08",
+        title = "A smoother setup and better starting settings",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "A Discord button to contact Zac for help.",
+                    "Chat: buttons on the rail to swap between the chat and the raid frames.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "The first-time setup is one flow: pick a look, pick your parts, done.",
+                    "Popups and their headers match the new settings window.",
+                    "Bags and the bank follow the look you pick.",
+                    "The chat rail sits on the right of the chat and never changes the chat's size.",
+                    "A fresh install starts with one damage meter window, the threat window closed and the minimap button tray off.",
+                    "A fresh install under the ZacUI look gets a clean action bar layout, shorter unit frames and cleaner nameplates, and the game's own damage meter stays hidden.",
+                    "The XP bar is never wider than the main action bar.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "An error from nameplates on WoW Forever.",
+                    "An error from the chat rail at login.",
+                    "Tooltip boxes in the settings showing white.",
+                    "Overlapping pieces in the settings preview.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.0",
         date = "2026-11-08",
         title = "Looks, a new settings window and a polish pass on everything",

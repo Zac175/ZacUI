@@ -48,10 +48,19 @@ local function Build(name, level)
     m:SetFrameStrata("FULLSCREEN_DIALOG")
     m:SetFrameLevel(level)
     m:SetClampedToScreen(true)
+    -- (2026-11-08) the settings window's menu colours (UI.S: the dropdown
+    -- list's fill at 0.98, a white 0.20 edge), as every ZacUI popup
+    local S = ns.UI and ns.UI.S
     local bg = m:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.05, 0.06, 0.97)
-    if ns.AddPixelBorder then ns.AddPixelBorder(m) end
+    if S then
+        bg:SetColorTexture(S.DD_BG.r, S.DD_BG.g, S.DD_BG.b, S.DD_BG_HA)
+    else
+        bg:SetColorTexture(0.05, 0.05, 0.06, 0.97)
+    end
+    if S and ns.Pixel and ns.Pixel.Border then ns.Pixel.Border(m, 1, 1, 1, S.DD_BRD_A, "BORDER")
+    elseif ns.AddPixelBorder then ns.AddPixelBorder(m) end
+    m._zPopup = true
     m.buttons = {}
     m:Hide()
     return m

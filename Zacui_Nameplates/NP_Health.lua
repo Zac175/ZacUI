@@ -472,9 +472,15 @@ local GLOW_DEF = { 0.41, 0.67, 1.0 }
 local function GlowGradient(t, orient, r, g, b, a, outerFirst)
     local c0 = outerFirst and 0 or a
     local c1 = outerFirst and a or 0
+    -- (2026-11-08, Zac: "nameplates ugly as fuck" - the target wore a big
+    -- WHITE box) the vertex colour is set BEFORE the gradient, never
+    -- after: on the clients with SetGradient(orient, colorA, colorB) the
+    -- gradient IS the vertex colours, so a white SetVertexColor after it
+    -- wiped the fade and left every strip solid white, additive - a 6 px
+    -- white frame round the plate instead of the soft blue glow
+    t:SetVertexColor(1, 1, 1, 1)
     if CreateColor and t.SetGradient
        and pcall(t.SetGradient, t, orient, CreateColor(r, g, b, c0), CreateColor(r, g, b, c1)) then
-        t:SetVertexColor(1, 1, 1, 1)
         return
     end
     if t.SetGradientAlpha and pcall(t.SetGradientAlpha, t, orient, r, g, b, c0, r, g, b, c1) then return end

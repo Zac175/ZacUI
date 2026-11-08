@@ -1184,7 +1184,8 @@ end
 
 local function Build()
     if win then return end
-    win = UI.Window("ZacUIRaidSummary", 600, 640, "Raid summary")
+    -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup)
+    win = UI.Popup("ZacUIRaidSummary", 600, 640, "Raid summary")
     -- not on the Escape list: Escape closes every window on it at once,
     -- and the end of a raid is all loot windows and Escape - the summary
     -- went with them. Its X and /zui raid close it.
@@ -1215,7 +1216,7 @@ local function Build()
                 Relayout()
             end })
     end
-    picker = UI.Dropdown(win, { width = 260,
+    picker = UI.SettingsBuild(UI.Dropdown, win, { width = 260,
         items = function()
             local out = {}
             local st = Store()
@@ -1231,10 +1232,11 @@ local function Build()
             return s and format("%s  %s", s.raid or "?", date and date("%d %b %H:%M", s.started or 0) or "") or "No raids yet"
         end,
         onSelect = function(v) RS.Open(v) end })
-    picker:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -(win.headerHeight + 8))
-    local sa, ch, bar = UI.ScrollArea(win)
-    sa:SetPoint("TOPLEFT", win, "TOPLEFT", 4, -(win.headerHeight + 40))
+    picker:SetPoint("TOPLEFT", win, "TOPLEFT", win.pad, -win.headerHeight)
+    local sa, ch, bar = UI.ScrollArea(win, { style = "settings" })
+    sa:SetPoint("TOPLEFT", win, "TOPLEFT", 4, -(win.headerHeight + 42))
     sa:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -22, 18)
+    if sa.SetClipsChildren then sa:SetClipsChildren(true) end
     bar:SetPoint("TOPLEFT", sa, "TOPRIGHT", 2, 0)
     bar:SetPoint("BOTTOMLEFT", sa, "BOTTOMRIGHT", 2, 0)
     ch:SetWidth(574)

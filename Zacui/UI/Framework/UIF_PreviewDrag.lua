@@ -648,11 +648,18 @@ local function Learned()
     for _, L in pairs(PD.layers) do
         local t = L.hint
         if t and t:IsShown() then
+            -- gone: its band at the sample box's foot goes with it (the
+            -- strip is laid out again, the sample gets the room back)
+            local function Gone()
+                t:Hide()
+                local PV = ns.ConfigPreview
+                if PV and PV.Place then pcall(PV.Place) end
+            end
             if ns.Motion and ns.Motion.FadeTo then
                 pcall(ns.Motion.FadeTo, t, 0, { duration = 0.4 })
-                if C_Timer and C_Timer.After then C_Timer.After(0.45, function() t:Hide() end) else t:Hide() end
+                if C_Timer and C_Timer.After then C_Timer.After(0.45, Gone) else Gone() end
             else
-                t:Hide()
+                Gone()
             end
         end
     end
@@ -664,9 +671,30 @@ local function ShowHint(L)
     if L.hint:IsShown() then L.hint:SetAlpha(1) end
 end
 
+-- THE HINT'S BAND (2026-11-08, Zac: "overlap here looks bad" - the line
+-- ran across the Warrior HUD's sample): while the first-use hint shows,
+-- the strip keeps a band that tall along the sample box's foot and fits
+-- the sample above it (ConfigPreview.FootFor), so the line never covers a
+-- piece. The hint goes after the first drag or click, and the band with it.
+local HINT_FOOT = 15        -- before the hint is made: one small line
+function PD.FootFor(key)
+    if not (ns.Hints and PD.Enabled()) or HintsSeen("preview_drag") then return 0 end
+    if not (PD.decls[key] or PD.Declared(key)) then return 0 end
+    local L = PD.layers[key]
+    local t = L and L.hint
+    local h = t and t.GetStringHeight and tonumber(t:GetStringHeight()) or nil
+    return (h and h > 0) and math_floor(h + 6.5) or HINT_FOOT
+end
+local function InstallFoot()
+    local PV = ns.ConfigPreview
+    if PV and PV.FootFor ~= PD.FootFor then PV.FootFor = PD.FootFor end
+end
+PD.InstallFoot = InstallFoot
+
 local function Layer(key, canvas)
     local L = PD.layers[key]
     if L then return L end
+    InstallFoot()
     local view = canvas:GetParent() or canvas
     L = CreateFrame("Frame", nil, view)
     L:SetAllPoints(view)
@@ -692,7 +720,7 @@ local function Layer(key, canvas)
     if ns.Hints and UI.Font then
         L.hint = UI.Font(L, UI.F.SMALL, { cat = "text", key = "gray",
             text = "Drag a piece to move it. Click selects (arrow keys nudge), right-click for more." })
-        L.hint:SetPoint("BOTTOMLEFT", L, "BOTTOMLEFT", 6, 4)
+        L.hint:SetPoint("BOTTOMLEFT", L, "BOTTOMLEFT", 6, 3)
         L.hint:SetPoint("RIGHT", L, "RIGHT", -6, 0)
         L.hint:SetJustifyH("LEFT")
         L.hint:SetWordWrap(false)
@@ -1763,6 +1791,8 @@ function PD.LayoutMenu(L)
             q.dragOff = (not q.dragOff) and true or nil
             if q.dragOff then PD.Cancel() Select(nil) SetHover(nil) end
             if ns.ConfigPreview and ns.ConfigPreview.Request then ns.ConfigPreview.Request() end
+            -- (the hint's band comes or goes with dragging)
+            if ns.ConfigPreview and ns.ConfigPreview.Place then ns.ConfigPreview.Place() end
         end }
     items[#items + 1] = { text = "Show snap guides", checked = function() return not Prefs().dragNoGuides end,
         tooltip = "A thin line where a dragged piece lines up with an edge or a centre.",
@@ -1796,8 +1826,41 @@ function PD.LayoutButton(L)
             end
             PD.LayoutMenu(L)
         end })
-    b:SetPoint("TOPRIGHT", L, "TOPRIGHT", -2, -2)
-    b:SetFrameLevel(LAYER_LEVEL + 400)
+    -- ON THE STRIP'S CONTROL LINE (2026-11-08), left of the background
+    -- swatches - not over the sample box's corner, where a wide sample
+    -- ran under it - shown while its layer is
+    local PV = ns.ConfigPreview
+    local slot = PV and PV.Slot and PV.Slot()
+    if slot then
+        b:SetParent(slot)
+        b:ClearAllPoints()
+        b:SetPoint("RIGHT", slot, "RIGHT", 0, 0)
+        b:SetFrameLevel(slot:GetFrameLevel() + 2)
+        local function Fill()
+            local any
+            for _, o in pairs(PD.layers) do
+                if o.layoutButton and o:IsShown() and o.layoutButton:IsShown() then any = o.layoutButton end
+            end
+            local w = any and math_max(1, any:GetWidth() or 46) or 1
+            if math_abs((slot:GetWidth() or 1) - w) > 0.5 then
+                slot:SetWidth(w)
+                -- (laid out again once things settle: a page switch hides
+                -- one layer and shows the next inside the strip's own layout)
+                if PV.Place and not PD._zPlaceSoon then
+                    PD._zPlaceSoon = true
+                    local function Go() PD._zPlaceSoon = nil pcall(PV.Place) end
+                    if C_Timer and C_Timer.After then C_Timer.After(0, Go) else Go() end
+                end
+            end
+        end
+        b:SetShown(L:IsShown())
+        L:HookScript("OnShow", function() b:Show() Fill() end)
+        L:HookScript("OnHide", function() b:Hide() Fill() end)
+        Fill()
+    else
+        b:SetPoint("TOPRIGHT", L, "TOPRIGHT", -2, -2)
+        b:SetFrameLevel(LAYER_LEVEL + 400)
+    end
     -- a menu not opened yet: a small accent dot on its corner
     if ns.Hints then
         local dot = b:CreateTexture(nil, "OVERLAY")
@@ -1876,6 +1939,7 @@ function PD.Attach(spec, decl)
     if type(spec) ~= "table" or type(spec.key) ~= "string" or type(decl) ~= "table" then return spec end
     local key = spec.key
     PD.decls[key] = decl
+    InstallFoot()
     if spec._zDrag then return spec end
     spec._zDrag = true
     local update = spec.update
@@ -1908,6 +1972,7 @@ function PD.Register(key, decl)
     if type(key) ~= "string" or type(decl) ~= "table" then return end
     PD.registered[key] = decl
     Hook()
+    InstallFoot()
 end
 -- a family of previews (every class HUD's "hud.<store>"): a Lua pattern
 PD.matched = {}
@@ -1915,6 +1980,7 @@ function PD.RegisterMatch(pattern, decl)
     if type(pattern) ~= "string" or type(decl) ~= "table" then return end
     PD.matched[#PD.matched + 1] = { pattern = pattern, decl = decl }
     Hook()
+    InstallFoot()
 end
 -- the declaration for a preview key: its own, else the first pattern's
 function PD.Declared(key)

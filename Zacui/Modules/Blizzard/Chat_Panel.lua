@@ -317,6 +317,9 @@ end
 -- (now, before the bar is first built, for the buttons already on)
 if type(ZacUIDB) == "table" then AddItems() end
 
+-- the rail's state, declared before the login hook below uses it (set
+-- further down; 2026-11-08 fix: the hook read an undeclared global)
+local rail
 local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent", function(self)
@@ -360,12 +363,17 @@ end)
 --   copy        the copy-chat window for the tab you are on
 --   channels    the game's chat channels window, where it has one (off)
 --   menu        the game's chat menu (emotes, languages), where it has one (off)
+--   swap        the chat box: the raid / party frames or the chat (only while
+--               the box holds the frames); its glyph shows which is up
+--   msgs        the raid messages over the frames on / off (same; off)
+--   raidbox     raid frames in the chat box on / off; waits out a fight (off)
 --   settings    ZacUI's Chat page
 --   scroll      to the newest line - only while you are scrolled up
 -- Each its own switch (chat.railItems[id] = false / true; nothing saved =
 -- the default above), the whole rail one (chat.rail = false), its side
--- (chat.railSide "left" / "right"; nothing saved = left, or right when
--- the chat sits too close to the screen's left edge for it). A right-click
+-- (chat.railSide "left" / "right"; nothing saved = RIGHT, or left when
+-- the chat sits too close to the screen's right edge for it). It hangs
+-- outside the panel: the chat box never changes size or place for it. A right-click
 -- on the rail lists the icons to switch.
 -- ONLY UNDER THE ZACUI LOOK: under a game look (Classic, WoW Forever,
 -- Blizzard style) the chat's skin stands down and the game's own chat
@@ -381,9 +389,9 @@ end)
 local RAIL_ID = "chat_rail"
 local ICONS = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\"
 local RAIL = { W = 40, ICON = 22, FRIEND = 26, SPACE = 10, COUNT = 9, GLYPH = 18, FGLYPH = 17,
-    ALPHA = 0.4, HOVER = 0.9, COUNT_A = 0.5, COUNT_HOVER = 0.9, HOVER_FILL = 0.08 }
+    ALPHA = 0.4, HOVER = 0.9, DIM = 0.2, COUNT_A = 0.5, COUNT_HOVER = 0.9, HOVER_FILL = 0.08 }
 CP.RAIL = RAIL
-local rail = {}            -- the frame and its buttons, once built
+rail = {}                  -- the frame and its buttons, once built
 CP.Rail = rail
 
 local function InCombat() return InCombatLockdown and InCombatLockdown() end
@@ -441,7 +449,7 @@ end
 
 -- id, the glyph, the tooltip's title, default, whether this client has it
 CP.RAIL_ITEMS = {
-    { id = "friends", glyph = "friends", label = "Friends", default = true, count = true, big = true,
+    { id = "friends", keep = 3, glyph = "friends", label = "Friends", default = true, count = true, big = true,
       count_fn = function() return tostring(OnlineFriends()) end,
       tip = function(self)
           local T = ns.MinimapTips
@@ -453,7 +461,7 @@ CP.RAIL_ITEMS = {
           local T = ns.MinimapTips
           if T and T.OpenSocial then T.OpenSocial() elseif ToggleFriendsFrame then ToggleFriendsFrame() end
       end },
-    { id = "guild", glyph = "guild", label = "Guild", default = false, count = true, big = true,
+    { id = "guild", keep = 6, glyph = "guild", label = "Guild", default = false, count = true, big = true,
       count_fn = function() local n = GuildOnline() return n and tostring(n) or "" end,
       tip = function(self)
           local T = ns.MinimapTips
@@ -468,7 +476,7 @@ CP.RAIL_ITEMS = {
               if T and T.OpenSocial then T.OpenSocial() end
           end
       end },
-    { id = "durability", glyph = "durability", label = "Durability", default = false, count = true, big = true,
+    { id = "durability", keep = 7, glyph = "durability", label = "Durability", default = false, count = true, big = true,
       count_fn = function() local p = WornPct() return p and (p .. "%") or "" end,
       tip = function(self)
           TipTitle(self, DURABILITY or "Durability", "Your most worn piece of gear.")
@@ -486,18 +494,79 @@ CP.RAIL_ITEMS = {
           if not NotInCombat() then return end
           if ToggleCharacter then pcall(ToggleCharacter, "PaperDollFrame") end
       end },
-    { id = "copy", glyph = "copy", label = "Copy chat", default = true,
+    { id = "copy", keep = 4, glyph = "copy", label = "Copy chat", default = true,
       tip = function(self) TipTitle(self, "Copy chat", "The tab you are on, in a box you can select and copy from.") end,
       click = function() if Chat.CopyChat then Chat.CopyChat() end end },
-    { id = "channels", glyph = "channels", label = "Chat channels", default = false,
+    { id = "channels", keep = 8, glyph = "channels", label = "Chat channels", default = false,
       has = function() return type(ToggleChannelFrame) == "function" end,
       tip = function(self) TipTitle(self, CHANNELS or "Chat channels", "The game's channels window: join, leave, voice.") end,
       click = function() if NotInCombat() then pcall(ToggleChannelFrame) end end },
-    { id = "menu", glyph = "report", label = "Chat menu", default = false,
+    { id = "menu", keep = 9, glyph = "report", label = "Chat menu", default = false,
       has = function() return CP.HasMenu() end,
       tip = function(self) TipTitle(self, "Chat menu", "The game's chat menu: emotes, languages, channels.") end,
       click = function(self) CP.OpenMenu(self) end },
-    { id = "settings", glyph = "settings", label = "Chat settings", default = true,
+    -- THE RAID BOX (2026-11-08, Zac: "add buttons there to swap between raid
+    -- frames and chat"): Blz_Chat's raid mode puts the raid (and, with that
+    -- switch, party) frames in the chat box. The swap button shows which
+    -- view is up - the frames' glyph or the chat's - and flips it; it and
+    -- the messages button are only there while the box holds the frames.
+    -- The swap is the box's own strip buttons' action (opacity only), so it
+    -- works in a fight; switching the mode itself moves the secure frames
+    -- and waits for the fight to end.
+    { id = "swap", keep = 1, glyph = "raidframes", label = "Swap chat and raid frames", default = true,
+      live = function() local RM = Chat.RaidMode return RM and RM.active and true or false end,
+      art = function()
+          local RM = Chat.RaidMode
+          return (RM and RM.peek) and "chatview" or "raidframes"
+      end,
+      tip = function(self)
+          local RM = Chat.RaidMode
+          local what = (RM and RM.kind == "party") and "party" or "raid"
+          if RM and RM.peek then
+              TipTitle(self, "Showing: the chat", "The " .. what .. " frames are in the chat box, behind the chat.")
+              TipHint("Click to show the " .. what .. " frames")
+          else
+              TipTitle(self, "Showing: the " .. what .. " frames", "The chat is behind them; nothing is lost.")
+              if RM and (RM.unread or 0) > 0 then GameTooltip:AddLine(RM.unread .. " new in the chat", 1, 0.82, 0) end
+              TipHint("Click to show the chat")
+          end
+      end,
+      click = function()
+          local RM = Chat.RaidMode
+          if RM and RM.active and RM.SetPeek then RM.SetPeek(not RM.peek or RM.temp, false) end
+          rail.t = 99
+      end },
+    { id = "msgs", keep = 5, glyph = "eye", label = "Raid messages on / off", default = false,
+      live = function() local RM = Chat.RaidMode return RM and RM.active and true or false end,
+      dim = function() return DB().raidMsgsHidden == true end,
+      tip = function(self)
+          local off = DB().raidMsgsHidden == true
+          TipTitle(self, off and "Raid messages: hidden" or "Raid messages: showing",
+              "Raid warnings, whispers and raid lines popping over the frames for a few seconds.")
+          TipHint(off and "Click to show them again" or "Click to stop them (the chat still counts them)")
+      end,
+      click = function()
+          local RM = Chat.RaidMode
+          if RM and RM.ToggleMsgs then RM.ToggleMsgs() end
+          rail.t = 99
+      end },
+    { id = "raidbox", keep = 10, glyph = "raidbox", label = "Raid frames in the chat box (on / off)", default = false,
+      dim = function() local RM = Chat.RaidMode return not (RM and RM.Enabled and RM.Enabled()) end,
+      tip = function(self)
+          local RM = Chat.RaidMode
+          local on = RM and RM.Enabled and RM.Enabled()
+          TipTitle(self, on and "Raid frames in the chat box: on" or "Raid frames in the chat box: off",
+              "In a raid (and a party, if set on the Chat page) the chat box holds the frames. Same as /zacui raidchat.")
+          if rail.raidQueued ~= nil then
+              GameTooltip:AddLine("Switching " .. (rail.raidQueued and "on" or "off") .. " when this fight ends.", 1, 0.82, 0, true)
+          elseif InCombat() then
+              TipHint("In a fight: a click waits for the fight to end")
+          else
+              TipHint("Click to switch it " .. (on and "off" or "on"))
+          end
+      end,
+      click = function() CP.ToggleRaidBox() end },
+    { id = "settings", keep = 2, glyph = "settings", label = "Chat settings", default = true,
       tip = function(self) TipTitle(self, "Chat settings", "Opens ZacUI's Chat page.") end,
       click = function() if ns.OpenConfig then ns.OpenConfig("chat") end end },
     { id = "scroll", glyph = "bottom", label = "Scroll to the newest line", default = true, bottom = true,
@@ -513,6 +582,39 @@ CP.RAIL_ITEMS = {
 }
 local RAIL_BY = {}
 for _, it in ipairs(CP.RAIL_ITEMS) do RAIL_BY[it.id] = it end
+
+-- the raid box on / off (the Chat page's switch: the account's, a
+-- character's own override cleared); in a fight it waits for the end
+local function SetRaidBox(on)
+    local RM = Chat.RaidMode
+    local d = DB()
+    d.raidMode = on and true or false
+    if ZacUICharDB then ZacUICharDB.chatRaidMode = nil end
+    if RM and RM.Update then pcall(RM.Update) end
+    rail.t = 99
+end
+function CP.ToggleRaidBox()
+    local RM = Chat.RaidMode
+    local on = RM and RM.Enabled and RM.Enabled()
+    if InCombat() then
+        -- a second click in the same fight takes the wish back
+        if rail.raidQueued ~= nil then rail.raidQueued = nil return end
+        rail.raidQueued = not on
+        if not rail.regen then
+            rail.regen = CreateFrame("Frame")
+            rail.regen:SetScript("OnEvent", function(self)
+                self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                local want = rail.raidQueued
+                rail.raidQueued = nil
+                if want ~= nil then SetRaidBox(want) end
+            end)
+        end
+        rail.regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        if UIErrorsFrame then UIErrorsFrame:AddMessage("Raid frames in the chat box: switching when this fight ends.", 1, 0.82, 0) end
+        return
+    end
+    SetRaidBox(not on)
+end
 
 -- whether the rail can exist here: the feature, and the ZacUI look
 function CP.RailAvailable()
@@ -554,28 +656,35 @@ function CP.SetRail(on)
     if CP.RailRefresh then CP.RailRefresh() end
 end
 
--- the side: as saved, else left unless the chat is too near the screen's
--- left edge for the rail to fit there
+-- the side: as saved, else RIGHT of the chat (Zac, 2026-11-08: "on the
+-- other side of the chat"), or left when the chat is too near the screen's
+-- right edge for the rail to fit there. Either way it hangs OUTSIDE the
+-- panel: the chat itself never changes size or place.
+local function Num(v) return type(v) == "number" and not (ns.IsSecret and ns.IsSecret(v)) end
 function CP.RailSide(bg)
     local s = DB().railSide
     if s == "left" or s == "right" then return s end
-    local l = bg and bg.GetLeft and bg:GetLeft()
-    if type(l) == "number" and not (ns.IsSecret and ns.IsSecret(l)) then
+    local r = bg and bg.GetRight and bg:GetRight()
+    local sw = UIParent and UIParent.GetRight and UIParent:GetRight()
+    if not Num(sw) and UIParent and UIParent.GetWidth then sw = UIParent:GetWidth() end
+    if Num(r) and Num(sw) then
         local k = 1
         if bg.GetEffectiveScale and UIParent and UIParent.GetEffectiveScale then
             local ok, a = pcall(bg.GetEffectiveScale, bg)
             local ok2, u = pcall(UIParent.GetEffectiveScale, UIParent)
-            if ok and ok2 and type(a) == "number" and type(u) == "number" and u > 0 then k = a / u end
+            if ok and ok2 and Num(a) and Num(u) and u > 0 then k = a / u end
         end
-        if l * k < RAIL.W then return "right" end
+        if r * k + RAIL.W > sw then return "left" end
     end
-    return "left"
+    return "right"
 end
 
 local function Snap(v, f) return (ns.Pixel and ns.Pixel.Snap) and ns.Pixel.Snap(v, f) or v end
 
 local function PaintButton(b, hot)
     local a = hot and RAIL.HOVER or RAIL.ALPHA
+    -- a switch that is off: dimmer still at rest
+    if b._dim and not hot then a = RAIL.DIM end
     b._glyph:SetVertexColor(1, 1, 1, a)
     b._hover:SetShown(hot and true or false)
     if b._count then b._count:SetTextColor(1, 1, 1, hot and RAIL.COUNT_HOVER or RAIL.COUNT_A) end
@@ -727,6 +836,26 @@ local function PlaceRail(d)
     local h = f.GetHeight and f:GetHeight() or nil
     if type(h) ~= "number" or h <= 0 or (ns.IsSecret and ns.IsSecret(h)) then h = nil end
     local bottomRoom = RAIL.SPACE + RAIL.ICON + RAIL.SPACE
+    -- what is up, and what fits: when the chat is too short for all of them
+    -- the least needed step off first (RAIL_KEEP), the rest keep their order
+    local want, total = {}, RAIL.SPACE
+    for _, it in ipairs(CP.RAIL_ITEMS) do
+        if not it.bottom and CP.RailItemOn(it.id) and (not it.live or it.live()) then
+            want[it.id] = true
+            total = total + rail.buttons[it.id]._size + RAIL.SPACE
+        end
+    end
+    if h then
+        local order = {}
+        for id in pairs(want) do order[#order + 1] = id end
+        table.sort(order, function(x, y) return (RAIL_BY[x].keep or 50) > (RAIL_BY[y].keep or 50) end)
+        local i = 1
+        while total - RAIL.SPACE > h - bottomRoom and order[i] do
+            want[order[i]] = nil
+            total = total - rail.buttons[order[i]]._size - RAIL.SPACE
+            i = i + 1
+        end
+    end
     local y = RAIL.SPACE
     local shown = {}
     for _, it in ipairs(CP.RAIL_ITEMS) do
@@ -738,26 +867,59 @@ local function PlaceRail(d)
             b:ClearAllPoints()
             b:SetPoint("BOTTOM", f, "BOTTOM", 0, Snap(RAIL.SPACE, f))
         else
-            local extra = 0
-            local fits = CP.RailItemOn(it.id) and (not h or y + s + extra <= h - bottomRoom)
+            local fits = want[it.id] and true or false
             if fits then
                 b:ClearAllPoints()
                 b:SetPoint("TOP", f, "TOP", 0, -Snap(y, f))
-                y = y + s + extra + RAIL.SPACE
+                y = y + s + RAIL.SPACE
                 shown[it.id] = true
             end
-            b._fits = fits and true or false
+            b._fits = fits
             if not fits then b:Hide() end
         end
     end
     rail.shown = shown
+    rail.liveKey = CP.RailLiveKey()
     return true
+end
+
+-- which conditional icons are up (the raid box's): a change lays the rail out again
+function CP.RailLiveKey()
+    local k = ""
+    for _, it in ipairs(CP.RAIL_ITEMS) do
+        if it.live then
+            local ok, v = pcall(it.live)
+            k = k .. ((ok and v) and "1" or "0")
+        end
+    end
+    return k
 end
 
 -- the quarter-second look: scrolled up? the numbers
 function CP.RailTick()
     local f = rail.frame
     if not (f and f:IsShown()) then return end
+    if CP.RailLiveKey() ~= rail.liveKey then PlaceRail(DB()) end
+    -- the glyph that says what the box shows, and switches that are off dimmed
+    for id in pairs(rail.shown or {}) do
+        local b = rail.buttons[id]
+        local it = b._it
+        if it.art then
+            local ok, name = pcall(it.art)
+            if ok and name and name ~= b._art then
+                b._art = name
+                b._glyph:SetTexture(ICONS .. name)
+            end
+        end
+        if it.dim then
+            local ok, v = pcall(it.dim)
+            local dim = ok and v and true or false
+            if dim ~= b._dim then
+                b._dim = dim
+                PaintButton(b, false)
+            end
+        end
+    end
     local sb = rail.buttons.scroll
     local cf = Chat.SelectedFrame and Chat.SelectedFrame()
     local up = false
@@ -996,7 +1158,7 @@ function CP.RailCard(L)
         end
     end
     L:Dependent(boxes, CP.RailOn(), 2, nil, "Show the icon rail")
-    local SIDES = { { value = "auto", text = "Left (right when there is no room)" },
+    local SIDES = { { value = "auto", text = "Right (left when there is no room)" },
         { value = "left", text = "Left of the chat" }, { value = "right", text = "Right of the chat" } }
     local function SideText()
         local v = d.railSide or "auto"

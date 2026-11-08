@@ -845,8 +845,14 @@ function UI:Window(name, title, w, h)
     header:SetPoint("TOPLEFT", 1, -1); header:SetPoint("TOPRIGHT", -1, -1); header:SetHeight(30)
     -- the header art every ZacUI window wears, when ZacUI's framework is up
     local ZUI = ns.ZUI or _G.ZacUI
-    local art = ZUI and ZUI.UI and ZUI.UI.HeaderArt
-    if art then
+    -- (2026-11-08) ZacUI's popups' flat bar (UIF_Dialogs UI.FlatBar): the
+    -- window's own colour, a white hairline, the title white; the old
+    -- header art where the framework has no flat bar
+    local flat = ZUI and ZUI.UI and ZUI.UI.FlatBar
+    local art = (not flat) and ZUI and ZUI.UI and ZUI.UI.HeaderArt
+    if flat then
+        flat(header, { fill = function() return C.window[1], C.window[2], C.window[3], 1 end })
+    elseif art then
         art(header, { stepX = 150 })
     else
         self:Backdrop(header, C.header, C.border)
@@ -859,9 +865,9 @@ function UI:Window(name, title, w, h)
     local titleFS = self:FS(header, 14)
     titleFS:SetPoint("LEFT", 10, art and 2 or 0)
     titleFS:SetText(title)
-    titleFS:SetTextColor(unpackc(C.headerText))
+    if flat then titleFS:SetTextColor(1, 1, 1, 1) else titleFS:SetTextColor(unpackc(C.headerText)) end
 
-    if not art then
+    if not (art or flat) then
         local underline = header:CreateTexture(nil, "OVERLAY")
         underline:SetPoint("BOTTOMLEFT", 0, 0); underline:SetPoint("BOTTOMRIGHT", 0, 0)
         underline:SetHeight(1)

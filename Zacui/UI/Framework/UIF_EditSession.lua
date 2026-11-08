@@ -454,6 +454,7 @@ local PAGE_BY_KEY = {
     tooltip = "tooltips", privacytag = "chat", flighttimer = "flighttimes",
     raidtimers = "qol", gcdtracker = "qol", snowball = "qol", lootfeed = "qol",
     talentreminder = "qol", unitframes = "unitframes", hesitation = "hesitation",
+    qolalerts = "qol", qolstats = "qol", qoljunk = "qol", qolreminders = "qol", qoldistance = "qol",
     platePreview = "nameplates", prioWarn = "nameplates", rmRazTarget = "raidmods",
 }
 local PAGE_BY_PREFIX = {

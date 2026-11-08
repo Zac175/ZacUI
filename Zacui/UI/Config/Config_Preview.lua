@@ -129,6 +129,10 @@ local RIGHT_W = 3 * ICON + 2 * 2 + 8 + 3 * SW + 2 * GAP   -- the right-hand clus
 local CELL = 8                -- the checker background's square
 
 local window, host, dock, bar, view, label, slim, sizeNote, labelHit
+-- slot: a place on the control line, left of the swatches, for what a
+-- page's sample adds there (the drag layer's Layout button); clusterLeft:
+-- the leftmost swatch (the cluster's real left edge)
+local slot, clusterLeft
 local foldBtn, foldArrow, heightBtn, replayBtn
 local swatches, rightItems = {}, {}
 local entries = {}        -- key -> { key, spec, canvas, P, built, row }
@@ -348,6 +352,44 @@ local function GuardedUpdate(e)
 end
 Preview.GuardedUpdate = GuardedUpdate
 
+-- NOTHING CUT OFF (2026-11-08, Zac's Warrior HUD with its last row under
+-- the box's edge): after an update, everything the sample shows must lie
+-- inside its canvas, which the strip fits into the box. A page that sized
+-- its canvas from a box that missed something (a row laid out late, a
+-- text under the icons) gets a canvas that holds it all, about the same
+-- centre - only ever bigger, and never for a sample that is shown "top
+-- part" on purpose (spec.overflow).
+local MeasureBox     -- (Measure, below)
+function Preview.Contain(e)
+    e = e or current
+    if not (e and e.canvas and e.spec and MeasureBox) or e.spec.overflow ~= nil then return false end
+    if not e.canvas:IsVisible() then return false end
+    local ok, cx, cy, w, h = pcall(MeasureBox, e.canvas)
+    if not (ok and cx and w and h) then return false end
+    local cw, ch = CanvasSize(e)
+    local needW = 2 * math.max(math.abs(cx - w / 2), math.abs(cx + w / 2)) + 2
+    local needH = 2 * math.max(math.abs(cy - h / 2), math.abs(cy + h / 2)) + 2
+    if needW <= cw + 1 and needH <= ch + 1 then return false end
+    if e.containOff then return false end
+    e.P.Resize(math.max(cw, math.ceil(needW)), math.max(ch, math.ceil(needH)))
+    Preview.stats.contains = (Preview.stats.contains or 0) + 1
+    -- (something that hangs off the canvas's edge moves out with it: a
+    -- bigger canvas never holds it. Put back, and not tried again for
+    -- this preview - no strip that grows on every update)
+    local ok2, cx2, cy2, w2, h2 = pcall(MeasureBox, e.canvas)
+    if ok2 and cx2 then
+        local nw, nh = CanvasSize(e)
+        local n2W = 2 * math.max(math.abs(cx2 - w2 / 2), math.abs(cx2 + w2 / 2)) + 2
+        local n2H = 2 * math.max(math.abs(cy2 - h2 / 2), math.abs(cy2 + h2 / 2)) + 2
+        if n2W > nw + 1 or n2H > nh + 1 then
+            e.containOff = true
+            e.P.Resize(cw, ch)
+            return false
+        end
+    end
+    return true
+end
+
 local function RunUpdate()
     local e = current
     if not (e and dock and dock:IsVisible()) then return end
@@ -363,6 +405,16 @@ local function RunUpdate()
     end
     FitStrata(e)
     Preview.stats.updates = Preview.stats.updates + 1
+    Preview.Contain(e)
+    -- (and once more next frame: the game lays new frames out lazily, so
+    -- a row just made may only now have its place)
+    if not e.containWait and C_Timer and C_Timer.After then
+        e.containWait = true
+        C_Timer.After(0, function()
+            e.containWait = nil
+            if current == e and dock and dock:IsVisible() then Preview.Contain(e) end
+        end)
+    end
 end
 
 local function RunReplay()
@@ -626,14 +678,26 @@ Preview.CapHeight = CapHeight
 -- only its top part shows (spec.overflow = "clip", or a function(P)
 -- answering it per mode: a long list keeps its real size and shows its
 -- top rather than shrinking to unreadable).
+-- The band along the sample box's foot that a page's sample keeps for a
+-- line of its own (the drag layer's first-use hint): the sample is fitted
+-- above it, never under it. Preview.FootFor(key) -> px (nil = none).
+local function Foot(e)
+    local f = Preview.FootFor
+    if type(f) ~= "function" or not e then return 0 end
+    local ok, v = pcall(f, e.key)
+    v = ok and tonumber(v) or 0
+    return (v and v > 0) and math.ceil(v) or 0
+end
+
 local function Fit(e, w, capH)
     local cw, ch = CanvasSize(e)
     local R = RealScale(e)
+    local foot = Foot(e)
     local vw = math.max(10, w - 2 * EDGE)
     local fitW = math.min(1, (vw - BOX_PAD) / (cw * R))
-    local want = math.ceil(VIEW_Y + EDGE + BOX_PAD + ch * R * fitW)
+    local want = math.ceil(VIEW_Y + EDGE + BOX_PAD + foot + ch * R * fitW)
     local h = Clamp(want, MIN_H, math.max(MIN_H, capH))
-    local vh = math.max(10, h - VIEW_Y - EDGE)
+    local vh = math.max(10, h - VIEW_Y - EDGE - foot)
     local fitH = (vh - BOX_PAD) / (ch * R)
     local ov = e.spec and e.spec.overflow
     if type(ov) == "function" then
@@ -691,12 +755,15 @@ local function LayoutInside(e, w, h)
     local cw, ch = CanvasSize(e)
     e.canvas:SetScale(R * fit)
     e.canvas:ClearAllPoints()
+    -- (centred in the box above the foot band, when a page keeps one)
+    local foot = Foot(e)
     if clipped then
         -- the top of a long list, at its size
         e.canvas:SetPoint("TOP", view, "TOP", 0, -BOX_PAD / 2 / (R * fit))
     else
-        e.canvas:SetPoint("CENTER", view, "CENTER", 0, 0)
+        e.canvas:SetPoint("CENTER", view, "CENTER", 0, foot / 2 / (R * fit))
     end
+    e.foot = foot
     e.P.scale, e.P.fit, e.P.real, e.P.clipped = R * fit, fit, R, clipped
     -- the room under the cap, in canvas units at the real size
     e.P.boxW = (vw - BOX_PAD) / R
@@ -708,10 +775,31 @@ local function LayoutInside(e, w, h)
     sizeNote:SetShown(note ~= nil)
     local noteW = note and (math.ceil(sizeNote:GetStringWidth() or 60) + 8) or 0
     local labW = math.ceil(label:GetStringWidth() or 40)
+    -- (the right-hand cluster as it really is: the settings window's
+    -- buttons are bigger than RIGHT_W counts, and the slot may hold a
+    -- button; the note sits left of both, never under them)
+    local rightW = RIGHT_W
+    if clusterLeft and bar then
+        local br, cl = bar:GetRight(), clusterLeft:GetLeft()
+        if br and cl and br > cl then rightW = math.max(RIGHT_W, br - cl) end
+    end
+    -- (the slot as wide as what is shown in it now)
+    if slot then
+        local sw = 1
+        for _, k in ipairs({ slot:GetChildren() }) do
+            if k:IsShown() then sw = math.max(sw, k:GetWidth() or 0) end
+        end
+        slot:SetWidth(sw)
+    end
+    local slotW = (slot and (slot:GetWidth() or 0) > 1) and (slot:GetWidth() + 6) or 0
+    sizeNote:ClearAllPoints()
+    if slotW > 0 then sizeNote:SetPoint("RIGHT", slot, "LEFT", -6, 0)
+    elseif clusterLeft then sizeNote:SetPoint("RIGHT", clusterLeft, "LEFT", -8, 0)
+    else sizeNote:SetPoint("RIGHT", bar, "RIGHT", -(RIGHT_W + 6), 0) end
     if e.row then
         e.row:ClearAllPoints()
         e.row:SetPoint("LEFT", bar, "LEFT", labW + 8, 0)
-        LayoutRow(e, bw - labW - 8 - RIGHT_W - 8 - noteW)
+        LayoutRow(e, bw - labW - 8 - rightW - 8 - slotW - noteW)
     end
     PaintBackground()
 end
@@ -924,6 +1012,12 @@ local function EnsureDock()
     end
     rightItems[#rightItems + 1] = replayBtn
     rightItems[#rightItems + 1] = heightBtn
+    clusterLeft = prev
+    -- the slot: left of the swatches; empty (no width) until a page's
+    -- sample puts something there
+    slot = CreateFrame("Frame", nil, bar)
+    slot:SetPoint("RIGHT", clusterLeft, "LEFT", -8, 0)
+    slot:SetSize(1, BTN_H)
 
     -- THE SAMPLE BOX: the backdrop and the canvases, clipped to the box.
     view = CreateFrame("Frame", nil, dock)
@@ -1198,6 +1292,45 @@ local function Measure(root)
     return (l + r) / 2 - rcx, (b + t) / 2 - rcy, r - l, t - b
 end
 
+-- What the sample DRAWS (its textures and texts; a frame itself draws
+-- nothing - a stage or holder frame bigger than what it shows must not
+-- count), relative to root's centre, in root's units.
+MeasureBox = function(root)
+    if not (root and root.GetCenter) then return nil end
+    local rs = root:GetEffectiveScale() or 1
+    local rcx, rcy = root:GetCenter()
+    if not rcx then return nil end
+    local l, b, r, t
+    local function Add(x)
+        if (x.GetAlpha and (x:GetAlpha() or 1) <= 0) then return end
+        if x.GetObjectType and x:GetObjectType() == "FontString" then
+            local s = x:GetText()
+            if not s or s == "" then return end
+        end
+        local xl, xb, xr0, xt0 = x:GetLeft(), x:GetBottom(), x:GetRight(), x:GetTop()
+        if not (xl and xb and xr0 and xt0) then return end
+        local w, h = xr0 - xl, xt0 - xb
+        if w <= 0 or h <= 0 then return end
+        local k = (x:GetEffectiveScale() or 1) / rs
+        xl, xb = xl * k, xb * k
+        local xr, xt = xl + w * k, xb + h * k
+        l, b = math.min(l or xl, xl), math.min(b or xb, xb)
+        r, t = math.max(r or xr, xr), math.max(t or xt, xt)
+    end
+    local function Visit(f, depth)
+        if depth > 12 then return end
+        for _, x in ipairs({ f:GetRegions() }) do
+            if x:IsVisible() then Add(x) end
+        end
+        for _, x in ipairs({ f:GetChildren() }) do
+            if x:IsVisible() and (x:GetAlpha() or 1) > 0 then Visit(x, depth + 1) end
+        end
+    end
+    Visit(root, 0)
+    if not l then return nil end
+    return (l + r) / 2 - rcx, (b + t) / 2 - rcy, r - l, t - b
+end
+
 local function Entry(key)
     local e = entries[key]
     if e then return e end
@@ -1396,6 +1529,8 @@ function Preview.UseMode(key, id)
 end
 Preview.Frame = function() return dock end
 Preview.View = function() return view end
+-- the control line's slot for a page's sample (left of the swatches)
+Preview.Slot = function() EnsureDock() return slot end
 
 -- The page builders' way in.
 function ConfigLayout:Preview(spec)

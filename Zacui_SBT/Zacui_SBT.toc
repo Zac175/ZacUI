@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Scrolling Text|r
 ## Notes: Damage, healing and notices scrolling around your character.
 ## Author: Zac
-## Version: 3.0.0
+## Version: 3.0.1
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

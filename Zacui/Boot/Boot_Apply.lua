@@ -22,6 +22,13 @@ local DEFAULT_MODULES = {}
 for _, m in ipairs(MODULE_ORDER) do
     DEFAULT_MODULES[m] = true
 end
+-- THE ONE EXCEPTION: the button tray (2026-11-08, Zac: "why is the minimap
+-- icon hider on by default?"). Sweeping every other addon's minimap
+-- button off the minimap surprises a new user who has never asked for
+-- it, so a fresh install starts with it off. The nil-fill at
+-- ADDON_LOADED only writes keys a save has never seen, so a save that
+-- already has the tray on keeps it; no FORCE_DEFAULT_AT entry, on purpose.
+DEFAULT_MODULES.tray = false
 
 -- HUD modules allocate textures on secure frames - action buttons, unit
 -- frames, the main bar. Doing that from a keypress in the middle of a

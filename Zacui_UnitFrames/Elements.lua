@@ -318,7 +318,12 @@ local function fillAnchorDefaults(frame, cfg, D)
     if stripOn then
         setDef(D, "name", "LEFT", frame and frame.NameStrip, "LEFT", 5, 0, "LEFT")
     else
-        setDef(D, "name", a.p, ov, a.rp, a.x + (cfg.nameX or 0), vy + (cfg.nameY or 0), a.j)
+        -- (2026-11-08, ZacUI's look: a name on the middle row sits on the
+        -- health bar's middle, level with the health text there, as the
+        -- reference's do - not the whole frame's, half the power bar low)
+        local to = ov
+        if ns._matchApplied and a.vert == "CENTER" and hb then to = hb end
+        setDef(D, "name", a.p, to, a.rp, a.x + (cfg.nameX or 0), vy + (cfg.nameY or 0), a.j)
     end
     -- castbar and its pieces
     local cbA = NA()[cfg.cbAnchor] or NA().BELOW

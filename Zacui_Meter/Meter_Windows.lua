@@ -54,9 +54,13 @@ local CLASS_COLORS = Meter.CLASS_COLORS
 local function DB()
     ZacUIDB.meter = ZacUIDB.meter or {}
     local d = ZacUIDB.meter
+    -- a meter save written for the first time on this call (a fresh
+    -- install, a new profile, Reset ZacUI)
+    local fresh = false
     if not d._rev or d._rev < 1 then
         wipe(d)
         d._rev = 1
+        fresh = true
         d.enabled = true
         d.updateSpeed = 3          -- his update_speed (seconds)
         d.psAbbrev = 2             -- ToK: "12.3K"
@@ -81,14 +85,23 @@ local function DB()
         d.bgAlpha = 0.4000000357627869
         d.windows = {
             -- window 1: the TinyThreat host. libwindow point BOTTOM.
-            { open = true, display = "threat",
+            -- Closed on a fresh install (2026-11-08, Zac: "why is the
+            -- threat meter on by default"): a new user switches it on
+            -- from the Damage meter page or the + in a window's header.
+            -- This block only runs on a meter save that has never been
+            -- written (_rev nil), so a save with it open keeps it open.
+            { open = false, display = "threat",
               point = "BOTTOM", x = 215.3836669921875, y = 98.97835540771484,
               w = 159.4192199707031, h = 133.9609222412109,
               locked = true, clickthrough = true, segment = 0,
               lastMeterDisplay = "damage_done" },
-            -- window 2: Damage Done, locked, bottom-right.
+            -- window 2: Damage Done, locked, bottom-right. (2026-11-08,
+            -- Zac: "by default I only want the 1 damage meter showing")
+            -- the one window a fresh install shows: 8 in from the right
+            -- edge (the bars' fresh margin) and clear of the micro menu
+            -- and bag bar in the bottom-right corner below it
             { open = true, display = "damage_done",
-              point = "BOTTOMRIGHT", x = 0, y = 0,
+              point = "BOTTOMRIGHT", x = -8, y = 124,
               w = 225.6758728027344, h = 199.8019866943359,
               locked = true, clickthrough = false, segment = 0,
               lastMeterDisplay = "damage_done" },
@@ -189,7 +202,10 @@ local function DB()
         end
         local base = right or d.windows[#d.windows] or {}
         d.windows[#d.windows + 1] = {
-            open = true, display = "damage_done",
+            -- (2026-11-08) a fresh install keeps it closed: one damage
+            -- window on the screen; the Meter page's "Show window 3" (or
+            -- the + in a window's header, for a new one) brings it up
+            open = not fresh, display = "damage_done",
             point = base.point or "BOTTOMRIGHT",
             x = base.x or 0,
             y = (base.y or 0) + (base.h or 200) + 6,
@@ -1571,6 +1587,9 @@ Modules.meter = function()
     Meter.EnableParser()
     -- the windows themselves: Meter_Win_Frame (Meter v2)
     local Win = Meter.Win
+    -- the game's own meter on or off for this look before any window is
+    -- built, so it is settled even with every ZacUI window closed
+    if Win and Win.SyncGameMeter and not Win.gmSynced then Win.gmSynced = true Win.SyncGameMeter() end
     if Win and Win.Create then
         for id = 1, #d.windows do
             if d.windows[id].open then Win.Create(id) end

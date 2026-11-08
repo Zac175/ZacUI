@@ -660,38 +660,44 @@ local function SendLines(lines, channel, whisperTarget)
     end
 end
 
+-- (2026-11-08) in the popups' look (UIF_Dialogs): the settings window's
+-- near-black with a white 0.05 edge, "Report to..." at 14, the channels
+-- as 26 px rows at 13, white 0.53, white and a white 0.08 wash under the
+-- mouse (EllesmereUI's menu rows, by number).
+local REP_W, REP_ROW, REP_TOP = 180, 26, 40
 local function BuildReport()
+    local S = UI.S
     local f = CreateFrame("Frame", "ZacUIMeterReport", UIParent)
-    f:SetSize(160, 30 + #CHANNELS * 22 + 34)
+    f:SetSize(REP_W, REP_TOP + #CHANNELS * REP_ROW + 8)
     f:SetFrameStrata("FULLSCREEN_DIALOG")
     f:SetClampedToScreen(true)
+    f:EnableMouse(true)
+    f._zPopup = true
     local bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
     bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.05, 0.06, 0.97)
-    if AddPixelBorder then AddPixelBorder(f) end
+    bg:SetColorTexture(S.BG.r, S.BG.g, S.BG.b, 1)
+    if ns.Pixel and ns.Pixel.Border then ns.Pixel.Border(f, 1, 1, 1, S.BORDER_A, "BORDER")
+    elseif AddPixelBorder then AddPixelBorder(f) end
 
-    local title = f:CreateFontString(nil, "OVERLAY")
-    MeterFont(title, 12)
-    title:SetShadowColor(0, 0, 0, 1)
-    title:SetShadowOffset(1, -1)
-    title:SetPoint("TOP", 0, -8)
-    title:SetText("Report to...")
+    local title = UI.PopupText(f, "title", { text = "Report to..." })
+    title:SetPoint("TOPLEFT", 14, -14)
+    f.title = title
 
     f.buttons = {}
     for i, ch in ipairs(CHANNELS) do
         local b = CreateFrame("Button", nil, f)
-        b:SetHeight(20)
-        b:SetPoint("TOPLEFT", 8, -26 - (i - 1) * 22)
-        b:SetPoint("RIGHT", -8, 0)
+        b:SetHeight(REP_ROW)
+        b:SetPoint("TOPLEFT", 4, -REP_TOP - (i - 1) * REP_ROW)
+        b:SetPoint("RIGHT", -4, 0)
         local hl = b:CreateTexture(nil, "HIGHLIGHT")
         hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.08)
-        local t = b:CreateFontString(nil, "OVERLAY")
-        MeterFont(t, 11)
-        t:SetShadowColor(0, 0, 0, 1)
-        t:SetShadowOffset(1, -1)
-        t:SetPoint("LEFT", 4, 0)
-        t:SetText(ch.label)
+        hl:SetColorTexture(1, 1, 1, S.DD_HL_A)
+        local t = UI.SFont(b, S.F_VALUE, { text = ch.label })
+        t:SetPoint("LEFT", 10, 0)
+        t._zPaint = function(self) self:SetTextColor(1, 1, 1, b._zHot and 1 or S.DIM_A) end
+        t:_zPaint()
+        b:SetScript("OnEnter", function(self) self._zHot = true t:_zPaint() end)
+        b:SetScript("OnLeave", function(self) self._zHot = nil t:_zPaint() end)
         b:SetScript("OnClick", function()
             f:Hide()
             if ch.key == "WHISPER" then
@@ -976,25 +982,29 @@ local function ShowRecap(f)
     end
 end
 
+-- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup): the title in the
+-- settings window's type, the close box, the paging under it, the recap,
+-- Report to chat in the foot. The recap itself keeps its size.
+local RECAP_PANEL_H = RECAP_H - UM.TITLEBAR - 34 - 34
 local function BuildRecap()
-    local f = UI.Window("ZacUIMeterDeathRecap", RECAP_W, RECAP_H, "Death recap")
-    local top = f.headerHeight or UM.TITLEBAR
-    f.prev = UI.Button(f, "<", { width = 24, tooltip = "An earlier death" })
-    f.prev:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -(top + 6))
-    f.next = UI.Button(f, ">", { width = 24, tooltip = "A later death" })
+    local f = UI.Popup("ZacUIMeterDeathRecap", RECAP_W, RECAP_H, "Death recap")
+    local top, pad = f.headerHeight, f.pad
+    f.prev = UI.SettingsBuild(UI.Button, f, "<", { width = 26, height = 24, tooltip = "An earlier death" })
+    f.prev:SetPoint("TOPLEFT", f, "TOPLEFT", pad, -top)
+    f.next = UI.SettingsBuild(UI.Button, f, ">", { width = 26, height = 24, tooltip = "A later death" })
     f.next:SetPoint("LEFT", f.prev, "RIGHT", 4, 0)
-    f.navText = UI.Font(f, UF.SMALL, { cat = "text", key = "gray" })
-    f.navText:SetPoint("LEFT", f.next, "RIGHT", 8, 0)
+    f.navText = UI.PopupText(f, "hint")
+    f.navText:SetPoint("LEFT", f.next, "RIGHT", 10, 0)
     f.prev:SetScript("OnClick", function() if f.index < #f.deaths then f.index = f.index + 1 ShowRecap(f) end end)
     f.next:SetScript("OnClick", function() if f.index > 1 then f.index = f.index - 1 ShowRecap(f) end end)
-    f.panel = Meter.NewRecapPanel(f, RECAP_W, RECAP_H - top - 34 - 34)
-    f.panel:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(top + 32))
-    f.report = UI.Button(f, "Report to chat", { width = 120,
-        tooltip = "Sends a short recap to a channel: what killed them and the hits before it." })
-    f.report:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -PAD, 8)
+    f.panel = Meter.NewRecapPanel(f, RECAP_W, RECAP_PANEL_H)
+    f.panel:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -(top + 30))
+    f.report = f:SetButtons({ { text = "Report to chat", width = 130,
+        tooltip = "Sends a short recap to a channel: what killed them and the hits before it." } })[1]
     f.report:SetScript("OnClick", function(self)
         if f.sentence then Meter.OpenReportLines(self, function() return { f.sentence } end) end
     end)
+    f:FitHeight(30 + RECAP_PANEL_H)
     return f
 end
 

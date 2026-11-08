@@ -147,13 +147,21 @@ local function SkinQuickKeybind()
     bar:SetHeight(M.TITLEBAR)
     bar:SetPoint("TOPLEFT", 1, -1)
     bar:SetPoint("TOPRIGHT", -1, -1)
-    if UI.HeaderArt then UI.HeaderArt(bar, { stepX = 150 }) else UI.Fill(bar, "ui", "headerBg") end
+    -- (2026-11-08) the flat bar every ZacUI popup's small windows wear
+    -- (UIF_Dialogs UI.FlatBar); the old header art without it
+    local flat = UI.FlatBar
+    if flat then UI.Fill(bar, "ui", "windowBg")
+    elseif UI.HeaderArt then UI.HeaderArt(bar, { stepX = 150 }) else UI.Fill(bar, "ui", "headerBg") end
     local label = UI.Font(bar, F.TITLE, { text = title, cat = "text", key = "gold" })
-    label:SetPoint("LEFT", 10, 2)
+    label:SetPoint("LEFT", 10, flat and 0 or 2)
     label:SetJustifyH("LEFT")
-    bar._zPaint = function(self)
-        if UI.PaintHeaderArt then UI.PaintHeaderArt(self) end
-        label:_zPaint()
+    if flat then
+        flat(bar, { title = label })
+    else
+        bar._zPaint = function(self)
+            if UI.PaintHeaderArt then UI.PaintHeaderArt(self) end
+            label:_zPaint()
+        end
     end
 
     -- anything hanging from the frame's top edge now hangs from the bar

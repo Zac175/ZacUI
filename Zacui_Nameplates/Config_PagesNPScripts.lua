@@ -27,18 +27,23 @@ local editor
 local function BuildEditor()
     if editor then return editor end
     local S = Engine()
-    editor = UI.Window("ZacUI_NPScriptEditor", 640, 540, "Plate script editor")
+    -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup); the fields in
+    -- the settings window's look, laid from under its header
+    editor = UI.Popup("ZacUI_NPScriptEditor", 640, 540, "Plate script editor")
+    local X, D = editor.pad, editor.headerHeight - 42
+    local function Y(y) return y - D end
+    UI.SettingsBuild(function()
 
     local nameLabel = UI.Font(editor, F.LABEL,
         { text = "Name", cat = "text", key = "gray" })
-    nameLabel:SetPoint("TOPLEFT", 14, -42)
+    nameLabel:SetPoint("TOPLEFT", X, Y(-42))
     editor.nameBox = UI.EditBox(editor, { width = 280 })
-    editor.nameBox:SetPoint("TOPLEFT", 14, -58)
+    editor.nameBox:SetPoint("TOPLEFT", X, Y(-62))
 
     -- trigger row (scripts only; hidden for mods)
     editor.trigKindLabel = UI.Font(editor, F.LABEL,
         { text = "Trigger", cat = "text", key = "gray" })
-    editor.trigKindLabel:SetPoint("TOPLEFT", 310, -42)
+    editor.trigKindLabel:SetPoint("TOPLEFT", X + 296, Y(-42))
     local kinds = { cast = "Cast (spell id / name)",
                     aura = "Aura (spell id / name)",
                     npc = "NPC (npc id / name)" }
@@ -54,7 +59,7 @@ local function BuildEditor()
         onSelect = function(v)
             if editor.entry then editor.entry.triggerKind = v end
         end })
-    editor.trigKind:SetPoint("TOPLEFT", 310, -58)
+    editor.trigKind:SetPoint("TOPLEFT", X + 296, Y(-62))
     editor.trigBox = UI.EditBox(editor, { width = 150,
         hint = "116, Frostbolt, ..." })
     editor.trigBox:SetPoint("LEFT", editor.trigKind, "RIGHT", 8, 0)
@@ -62,7 +67,7 @@ local function BuildEditor()
     -- hook picker
     editor.hookLabel = UI.Font(editor, F.LABEL,
         { text = "Hook", cat = "text", key = "gray" })
-    editor.hookLabel:SetPoint("TOPLEFT", 14, -92)
+    editor.hookLabel:SetPoint("TOPLEFT", X, Y(-100))
     editor.hookDD = UI.Dropdown(editor, { width = 200,
         items = function()
             local S2 = Engine()
@@ -88,14 +93,15 @@ local function BuildEditor()
             editor.code:SetText((editor.entry.hooks or {})[v] or "")
             editor:SetStatus("")
         end })
-    editor.hookDD:SetPoint("TOPLEFT", 14, -108)
+    editor.hookDD:SetPoint("TOPLEFT", X, Y(-120))
 
     editor.status = UI.Font(editor, F.SMALL,
-        { text = "", cat = "text", key = "gray", width = 380 })
+        { text = "", cat = "text", key = "gray", width = 340 })
     editor.status:SetPoint("LEFT", editor.hookDD, "RIGHT", 12, 0)
 
-    editor.code = UI.TextBox(editor, { width = 612, height = 330 })
-    editor.code:SetPoint("TOPLEFT", 14, -142)
+    editor.code = UI.TextBox(editor, { width = 640 - 2 * X, height = 330 })
+    UI.PopupField(editor.code)
+    editor.code:SetPoint("TOPLEFT", X, Y(-164))
 
     function editor:SetStatus(text, bad)
         self.status:SetText(text or "")
@@ -111,7 +117,7 @@ local function BuildEditor()
         end
     end
 
-    local check = UI.Button(editor, "Check code", { width = 100,
+    local check = UI.PopupButton(editor, "Check code", { width = 110,
         tooltip = "Compiles the current hook without running it.",
         onClick = function()
             local S2 = Engine()
@@ -122,9 +128,7 @@ local function BuildEditor()
                 editor:SetStatus(tostring(err), true)
             end
         end })
-    check:SetPoint("BOTTOMLEFT", 14, 14)
-
-    local save = UI.Button(editor, "Save and apply", { width = 120,
+    local save = UI.PopupButton(editor, "Save and apply", { width = 130, kind = "primary",
         onClick = function()
             local S2 = Engine()
             editor:StashCode()
@@ -147,7 +151,11 @@ local function BuildEditor()
                 RefreshConfig()
             end
         end })
-    save:SetPoint("LEFT", check, "RIGHT", 8, 0)
+    -- the foot: Check code, then Save and apply (the accent one)
+    editor.buttons = { check, save }
+    editor:LayoutButtons()
+    end)
+    editor:FitHeight(164 - 42 + 330)
 
     return editor
 end

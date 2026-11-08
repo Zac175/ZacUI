@@ -421,13 +421,564 @@ local function SecureWanted()
     return ZacUIDB and ZacUIDB.bags and ZacUIDB.bags.secureUse == true
 end
 
+-- ============================================================
+-- THE GAME LOOKS' KIT (2026-11-08, Zac: "zui bags need to follow the
+-- styling from the style i pick even if its a combined bag")
+-- ============================================================
+-- Under Classic WoW UI, Blizzard style and WoW Forever (Core_Look, part
+-- "bags": its own override, else the global look) ZacUI's bag and bank
+-- windows wear the game's own art, the way the unit frame and action bar
+-- kits do: the window is the look's (Look.Dress: the dialog border, the
+-- client's metal / bronze rim), the slots are the stock item button's
+-- pieces, the header and footer widgets the stock ones. Every name below
+-- is Blizzard's own, read in wow-ui-source (live and classic_era):
+--   item button (Blizzard_ItemButton ItemButton, 37 x 37, every client):
+--     ring UI-Quickslot2 64 x 64 at CENTER (0, -1); pushed
+--     UI-Quickslot-Depress; hover ButtonHilight-Square (ADD); quality
+--     border Interface\Common\WhiteIconFrame 37 x 37 tinted; quest
+--     Interface\ContainerFrame\UI-Icon-QuestBorder 37 x 38 at TOP
+--   the empty slot: Classic, Interface\Buttons\UI-EmptySlot 64 on 37 (the
+--     merchant's empty slot, a well in its own frame, so the ring steps
+--     aside); the modern clients' combined bag, a slot well
+--     (ItemSlotBackgroundCombinedBagsTemplate: UI-Bag-Components cut
+--     0.6445-0.7891 x 0.4258-0.4980, all points) under every slot and the
+--     button's emptyBackgroundAtlas bags-item-slot64 on an empty one
+--   close: Classic UI-Panel-MinimizeButton-Up / -Down / -Highlight 32;
+--     the modern looks RedButton-Exit / -exit-pressed / -Highlight 24
+--   buttons: UI-Panel-Button-Up / -Down / -Highlight, 12 | middle | 12 on
+--     22 (every client's UIPanelButtonTemplate); text GameFontNormal gold,
+--     white under the mouse
+--   search: common-search-border-left / -middle / -right 8 | 10 | 8 on
+--     20 and common-search-magnifyingglass 10 (the InputBox and SearchBox
+--     templates of Era, TBC and the modern clients alike); without them
+--     the old Interface\Common\Common-Input-Border cut
+--   sort (modern looks): bags-button-autosort-up / -down
+--   view list: UIDropDownMenuTemplate's CharacterCreate-LabelFrame cut
+--     (25 | 115 | 25 on a 32 frame) and UI-ChatIcon-ScrollDown-Up
+-- An atlas is used only when C_Texture.GetAtlasInfo knows it; a missing
+-- one falls back to the file art (or leaves ZacUI's piece). Geometry and
+-- every saved setting stay as they are: the slot size, spacing, columns,
+-- the window's place, the count's font and spot, quality borders on / off
+-- and the search fade all still apply; the ZacUI-only colours (slot,
+-- border, window) wait for ZacUI's look. Latched with the look: a change
+-- of look is a reload. Under ZacUI's look none of this runs.
+local KIT_IDS = { classic = true, blizzard = true, forever = true }
+local KIT = {
+    unit = 37,
+    ring = "Interface\\Buttons\\UI-Quickslot2", ringSize = 64, ringDy = -1,
+    pushed = "Interface\\Buttons\\UI-Quickslot-Depress",
+    hilight = "Interface\\Buttons\\ButtonHilight-Square",
+    quality = "Interface\\Common\\WhiteIconFrame",
+    quest = "Interface\\ContainerFrame\\UI-Icon-QuestBorder", questH = 38,
+    emptySlot = "Interface\\Buttons\\UI-EmptySlot", emptySize = 64, emptyDx = 0.5, emptyDy = -0.5,
+    well = "Interface\\ContainerFrame\\UI-Bag-Components",
+    wellTC = { 0.64453125, 0.7890625, 0.42578125, 0.498046875 },
+    emptyAtlas = "bags-item-slot64",
+    closeClassic = { "Interface\\Buttons\\UI-Panel-MinimizeButton-Up", "Interface\\Buttons\\UI-Panel-MinimizeButton-Down",
+                     "Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", size = 32 },
+    closeModern = { "RedButton-Exit", "RedButton-exit-pressed", "RedButton-Highlight", size = 24 },
+    btnUp = "Interface\\Buttons\\UI-Panel-Button-Up",
+    btnDown = "Interface\\Buttons\\UI-Panel-Button-Down",
+    btnHi = "Interface\\Buttons\\UI-Panel-Button-Highlight",
+    btnCap = 12, btnH = 22,
+    -- the three cuts of the panel button sheet: left, middle, right, then
+    -- its bottom (the art's top is 0)
+    btnTC = { 0, 0.09375, 0.53125, 0.625, 0.6875 },
+    search = { "common-search-border-left", "common-search-border-middle", "common-search-border-right" },
+    searchFile = "Interface\\Common\\Common-Input-Border",
+    searchTC = { 0, 0.0625, 0.9375, 1, 0.625 },
+    glass = "common-search-magnifyingglass",
+    clearX = "common-search-clearbutton",
+    sortUp = "bags-button-autosort-up", sortDown = "bags-button-autosort-down",
+    dropFile = "Interface\\Glues\\CharacterCreate\\CharacterCreate-LabelFrame",
+    dropTC = { 0, 0.1953125, 0.8046875, 1 },
+    dropArrow = "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up",
+    gold = { 1, 0.82, 0 },
+    -- the stock bags space their buttons 5 apart (ContainerFrame's
+    -- ITEM_SPACING_X; the ring reaches past the slot): the bag-slot row's
+    -- gap (the item grid keeps the saved spacing)
+    bagGap = 5,
+}
+
+-- the kit the bags wear this session (nil: ZacUI's own look). A preview
+-- drawn inside Look.With answers the look it draws.
+local function KitNow()
+    local L = ns.Look
+    local lk = L and L.For and L.For("bags")
+    local id = lk and lk.id
+    return KIT_IDS[id] and id or nil
+end
+local function LookNow()
+    local L = ns.Look
+    return L and L.For and L.For("bags") or nil
+end
+
+-- atlas presence, asked once per name
+local atlasOK = {}
+local function AtlasOK(name)
+    local v = atlasOK[name]
+    if v == nil then
+        v = false
+        local get = C_Texture and C_Texture.GetAtlasInfo
+        if get and type(name) == "string" then
+            local ok, info = pcall(get, name)
+            v = (ok and type(info) == "table") and true or false
+        end
+        atlasOK[name] = v
+    end
+    return v
+end
+
+local function OwnTex(host, layer, sub)
+    local t = host:CreateTexture(nil, layer, nil, sub)
+    t._zui_own = true
+    return t
+end
+local function FileArt(t, file, l, r, top, b)
+    t:SetTexture(file)
+    if t.SetTexCoord then t:SetTexCoord(l or 0, r or 1, top or 0, b or 1) end
+end
+-- the atlas when the client has it (true), else nothing (false)
+local function AtlasArt(t, name)
+    if not (AtlasOK(name) and t.SetAtlas) then return false end
+    if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
+    t:SetAtlas(name)
+    return true
+end
+
+-- a text in the look's font: the game's face, outlined (Zac keeps the
+-- black edge on text), at `size`
+local function KitFont(fs, size)
+    if not (fs and fs.SetFont) then return end
+    local face = ns.GAME_FONT or STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+    local ok, set = pcall(fs.SetFont, fs, face, size, "OUTLINE")
+    if not (ok and set) then pcall(fs.SetFont, fs, "Fonts\\FRIZQT__.TTF", size, "OUTLINE") end
+    if fs.SetShadowOffset then fs:SetShadowOffset(0, 0) end
+end
+
+-- ZacUI's flat fill and pixel edge on a widget step back (alpha 0: the
+-- paint passes that recolour them leave the alpha alone)
+local function HideFlat(f)
+    if not f then return end
+    local fill = rawget(f, "_zFill")
+    if fill and fill.SetAlpha then fill:SetAlpha(0) end
+    for _, t in ipairs(rawget(f, "_zBorder") or {}) do if t.SetAlpha then t:SetAlpha(0) end end
+end
+
+-- a stock three-slice on `host` (left cap, stretched middle, right cap), the
+-- caps `cap` wide; pieces = { left, middle, right } textures
+local function ThreeSlice(host, layer, sub, cap, dx)
+    local p = { OwnTex(host, layer, sub), OwnTex(host, layer, sub), OwnTex(host, layer, sub) }
+    p[1]:SetPoint("TOPLEFT", host, "TOPLEFT", dx or 0, 0)
+    p[1]:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", dx or 0, 0)
+    p[1]:SetWidth(cap)
+    p[3]:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, 0)
+    p[3]:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+    p[3]:SetWidth(cap)
+    p[2]:SetPoint("TOPLEFT", p[1], "TOPRIGHT", 0, 0)
+    p[2]:SetPoint("BOTTOMRIGHT", p[3], "BOTTOMLEFT", 0, 0)
+    return p
+end
+local function PanelArt(p, file)
+    local tc = KIT.btnTC
+    FileArt(p[1], file, tc[1], tc[2], 0, tc[5])
+    FileArt(p[2], file, tc[2], tc[3], 0, tc[5])
+    FileArt(p[3], file, tc[3], tc[4], 0, tc[5])
+end
+
+-- A label of the kit's own over a ZacUI one (which steps back): the game's
+-- font, never re-dressed by ZacUI's font passes; follows the ZacUI label's
+-- text.
+local function KitLabel(host, src, size, justify)
+    local fs = host:CreateFontString(nil, "OVERLAY")
+    fs._zui_own = true
+    KitFont(fs, size)
+    if justify and fs.SetJustifyH then fs:SetJustifyH(justify) end
+    if src then
+        fs:SetText(src.GetText and src:GetText() or "")
+        src:SetAlpha(0)
+        if hooksecurefunc and src.SetText then
+            hooksecurefunc(src, "SetText", function(_, t) fs:SetText(t) end)
+        end
+    end
+    return fs
+end
+
+-- A ZacUI button (UI.Button) as the stock red panel button: the three-slice
+-- up / down art, the highlight sheet (ADD), the label gold, white under the
+-- mouse, grey while disabled.
+local function KitButton(b)
+    if not b or rawget(b, "_zKitBtn") then return b end
+    rawset(b, "_zKitBtn", true)
+    HideFlat(b)
+    -- ZacUI's own hover wash and pushed shade step back
+    for _, r in ipairs({ b:GetRegions() }) do
+        if r ~= b._zFill and r.IsObjectType and r:IsObjectType("Texture") and r._zui_own then r:SetAlpha(0) end
+    end
+    local h = b:GetHeight() or KIT.btnH
+    if type(h) ~= "number" or h <= 0 then h = KIT.btnH end
+    local cap = math.floor(KIT.btnCap * h / KIT.btnH + 0.5)
+    local up = ThreeSlice(b, "BACKGROUND", 1, cap)
+    PanelArt(up, KIT.btnUp)
+    local hi = OwnTex(b, "HIGHLIGHT")
+    hi:SetAllPoints(b)
+    FileArt(hi, KIT.btnHi, 0, KIT.btnTC[4], 0, KIT.btnTC[5])
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    local label = KitLabel(b, b._zText, h >= 20 and 12 or 10, "CENTER")
+    label:SetPoint("CENTER", b, "CENTER", 0, 0)
+    rawset(b, "_zKitLabel", label)
+    local function Tint(self, hot)
+        local G = KIT.gold
+        if rawget(self, "_zDisabled") then label:SetTextColor(0.5, 0.5, 0.5, 1)
+        elseif hot then label:SetTextColor(1, 1, 1, 1)
+        else label:SetTextColor(G[1], G[2], G[3], 1) end
+    end
+    b:HookScript("OnEnter", function(self) Tint(self, true) end)
+    b:HookScript("OnLeave", function(self) Tint(self, false) PanelArt(up, KIT.btnUp) end)
+    b:HookScript("OnMouseDown", function(self) if self:IsEnabled() then PanelArt(up, KIT.btnDown) end end)
+    b:HookScript("OnMouseUp", function() PanelArt(up, KIT.btnUp) end)
+    local own = b._zPaint
+    b._zPaint = function(self)
+        if own then own(self) end
+        Tint(self, false)
+    end
+    Tint(b, false)
+    return b
+end
+
+-- the sort button on a modern look: the bag's own autosort button art
+-- (the panel button where the client lacks it)
+local function KitSortButton(b, kit)
+    if kit == "classic" or not AtlasOK(KIT.sortUp) then return KitButton(b) end
+    HideFlat(b)
+    for _, r in ipairs({ b:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= b._zFill then r:SetAlpha(0) end
+    end
+    if b._zText then b._zText:SetAlpha(0) end
+    b:SetSize(24, 24)
+    local n = OwnTex(b, "ARTWORK")
+    n:SetAllPoints(b)
+    AtlasArt(n, KIT.sortUp)
+    local p = OwnTex(b, "ARTWORK", 1)
+    p:SetAllPoints(b)
+    if not AtlasArt(p, KIT.sortDown) then FileArt(p, KIT.pushed) end
+    p:Hide()
+    b:HookScript("OnMouseDown", function() n:Hide() p:Show() end)
+    b:HookScript("OnMouseUp", function() p:Hide() n:Show() end)
+    b:HookScript("OnLeave", function() p:Hide() n:Show() end)
+    local hi = OwnTex(b, "HIGHLIGHT")
+    hi:SetAllPoints(b)
+    FileArt(hi, KIT.hilight)
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    rawset(b, "_zKitBtn", true)
+    return b
+end
+
+-- A ZacUI close button (UI.CloseX) as the look's: Classic's round red
+-- button, the modern clients' red square (Classic's where the client lacks
+-- the atlas). `size`: the button's edge (the look's own when left out).
+local function KitClose(b, kit, size)
+    if not b or rawget(b, "_zKitBtn") then return b end
+    rawset(b, "_zKitBtn", true)
+    if rawget(b, "_zA") then b._zA:SetAlpha(0) end
+    local modern = kit ~= "classic" and AtlasOK(KIT.closeModern[1])
+    local art = modern and KIT.closeModern or KIT.closeClassic
+    b:SetSize(size or art.size, size or art.size)
+    local n, p, h = OwnTex(b, "ARTWORK"), OwnTex(b, "ARTWORK", 1), OwnTex(b, "HIGHLIGHT")
+    for _, t in ipairs({ n, p, h }) do t:SetAllPoints(b) end
+    if modern then
+        AtlasArt(n, art[1])
+        if not AtlasArt(p, art[2]) then AtlasArt(p, art[1]) end
+        AtlasArt(h, art[3])
+    else
+        FileArt(n, art[1]) FileArt(p, art[2]) FileArt(h, art[3])
+    end
+    if h.SetBlendMode then h:SetBlendMode("ADD") end
+    p:Hide()
+    b:HookScript("OnMouseDown", function() n:Hide() p:Show() end)
+    b:HookScript("OnMouseUp", function() p:Hide() n:Show() end)
+    b:HookScript("OnLeave", function() p:Hide() n:Show() end)
+    return b
+end
+
+-- A ZacUI edit box (UI.EditBox) as the stock search box: the border cut,
+-- the magnifying glass, the small clear cross; the text and the hint start
+-- after the glass.
+local function KitSearch(host)
+    if not host or rawget(host, "_zKitBtn") then return host end
+    rawset(host, "_zKitBtn", true)
+    HideFlat(host)
+    local h = host:GetHeight() or 20
+    if type(h) ~= "number" or h <= 0 then h = 20 end
+    local p = ThreeSlice(host, "BACKGROUND", 1, 8)
+    local S = KIT.search
+    if not (AtlasArt(p[1], S[1]) and AtlasArt(p[2], S[2]) and AtlasArt(p[3], S[3])) then
+        local tc = KIT.searchTC
+        FileArt(p[1], KIT.searchFile, tc[1], tc[2], 0, tc[5])
+        FileArt(p[2], KIT.searchFile, tc[2], tc[3], 0, tc[5])
+        FileArt(p[3], KIT.searchFile, tc[3], tc[4], 0, tc[5])
+    end
+    local inset = 6
+    local glass = OwnTex(host, "OVERLAY")
+    if AtlasArt(glass, KIT.glass) then
+        glass:SetSize(10, 10)
+        glass:SetPoint("LEFT", host, "LEFT", 6, -1)
+        glass:SetVertexColor(0.6, 0.6, 0.6, 1)
+        inset = 19
+    else
+        glass:Hide()
+    end
+    local eb = host.editBox
+    if eb then
+        eb:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -2)
+        eb:SetTextColor(1, 1, 1, 1)
+    end
+    -- the hint ("Search") follows the text's new start
+    for _, r in ipairs({ host:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("FontString") then
+            r:SetPoint("LEFT", host, "LEFT", inset + 1, 0)
+            KitFont(r, 10)
+            r:SetTextColor(0.5, 0.5, 0.5, 1)
+        end
+    end
+    local x = host.clearButton
+    if x and AtlasOK(KIT.clearX) then
+        if rawget(x, "_zA") then x._zA:SetAlpha(0) end
+        local t = OwnTex(x, "ARTWORK")
+        t:SetSize(10, 10)
+        t:SetPoint("CENTER", x, "CENTER", 0, 0)
+        AtlasArt(t, KIT.clearX)
+        t:SetAlpha(0.5)
+        x:HookScript("OnEnter", function() t:SetAlpha(1) end)
+        x:HookScript("OnLeave", function() t:SetAlpha(0.5) end)
+    end
+    return host
+end
+
+-- A ZacUI dropdown (UI.Dropdown) as the stock one: the label frame cut and
+-- the round arrow button; its value in the game's font.
+local function KitDropdown(dd)
+    if not dd or rawget(dd, "_zKitBtn") then return dd end
+    rawset(dd, "_zKitBtn", true)
+    HideFlat(dd)
+    for _, r in ipairs({ dd:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= dd._zFill then r:SetAlpha(0) end
+    end
+    local h = dd:GetHeight() or 22
+    if type(h) ~= "number" or h <= 0 then h = 22 end
+    -- the frame's 32 rows sit 17 down a 64-high sheet: the sheet drawn at
+    -- the box's scale, its band on the box
+    local k = h / 32
+    local tc = KIT.dropTC
+    local p = ThreeSlice(dd, "BACKGROUND", 1, math.floor(25 * k + 0.5))
+    for i, t in ipairs(p) do
+        t:ClearAllPoints()
+        FileArt(t, KIT.dropFile, tc[i], tc[i + 1], 0, 1)
+    end
+    local capW = math.floor(25 * k + 0.5)
+    p[1]:SetPoint("TOPLEFT", dd, "TOPLEFT", -math.floor(8 * k + 0.5), 17 * k)
+    p[1]:SetSize(capW, 64 * k)
+    p[3]:SetPoint("TOPRIGHT", dd, "TOPRIGHT", math.floor(8 * k + 0.5), 17 * k)
+    p[3]:SetSize(capW, 64 * k)
+    p[2]:SetPoint("TOPLEFT", p[1], "TOPRIGHT", 0, 0)
+    p[2]:SetPoint("BOTTOMRIGHT", p[3], "BOTTOMLEFT", 0, 0)
+    local arrow = OwnTex(dd, "ARTWORK", 2)
+    arrow:SetSize(h, h)
+    arrow:SetPoint("RIGHT", dd, "RIGHT", 2, 0)
+    FileArt(arrow, KIT.dropArrow)
+    local hi = OwnTex(dd, "HIGHLIGHT")
+    hi:SetAllPoints(arrow)
+    FileArt(hi, KIT.hilight)
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    if dd._zText then
+        local label = KitLabel(dd, dd._zText, 10, "LEFT")
+        label:SetPoint("LEFT", dd, "LEFT", 8, 0)
+        label:SetPoint("RIGHT", dd, "RIGHT", -(h + 2), 0)
+        if label.SetWordWrap then label:SetWordWrap(false) end
+        label:SetTextColor(1, 1, 1, 1)
+        if dd.SetText and hooksecurefunc then
+            hooksecurefunc(dd, "SetText", function() label:SetText(dd._zText:GetText()) end)
+        end
+    end
+    return dd
+end
+
+-- A small ZacUI box (UI.Box: the gold list) as the look's small box: the
+-- tooltip edge and fill of Classic, the client's tooltip slice on the
+-- modern looks (Core_Look's own primitive).
+local function KitBox(box)
+    if not box or rawget(box, "_zKitBtn") then return box end
+    local lk = LookNow()
+    if not (lk and ns.Look.AddFill and lk.border) then return box end
+    rawset(box, "_zKitBtn", true)
+    HideFlat(box)
+    pcall(ns.Look.AddFill, box, lk.border, lk.bgSmall or lk.bgTexture, 1)
+    return box
+end
+
+-- The pieces of the kit on one item slot (real or sample), made once. A
+-- slot's look follows its contents in PaintKit.
+local function FitKit(btn, s)
+    local P = rawget(btn, "_zKitParts")
+    if not (P and type(s) == "number" and s > 0) then return end
+    rawset(btn, "_zKitSize", s)
+    local k = s / KIT.unit
+    P.ring:ClearAllPoints()
+    P.ring:SetPoint("CENTER", btn, "CENTER", 0, KIT.ringDy * k)
+    P.ring:SetSize(KIT.ringSize * k, KIT.ringSize * k)
+    if P.emptySlot then
+        P.emptySlot:ClearAllPoints()
+        P.emptySlot:SetPoint("CENTER", btn, "CENTER", KIT.emptyDx * k, KIT.emptyDy * k)
+        P.emptySlot:SetSize(KIT.emptySize * k, KIT.emptySize * k)
+    end
+    P.qual:SetSize(s, s)
+    P.quest:SetSize(s, KIT.questH * k)
+end
+
+local function DressKitSlot(btn, kit)
+    rawset(btn, "_zKit", kit)
+    local icon = btn._zIcon
+    if icon then
+        ZacUI.Look.CropIcon(icon, nil, nil, { part = "bags" })
+        icon:SetDrawLayer("ARTWORK")
+        SharpenIcon(icon)
+    end
+    KillSlotArt(btn)
+    local P = {}
+    if kit == "classic" then
+        -- the empty slot: a well in its own frame
+        P.emptySlot = OwnTex(btn, "BACKGROUND", -6)
+        FileArt(P.emptySlot, KIT.emptySlot)
+    else
+        -- the combined bag's slot well, and the empty slot's own art
+        P.well = OwnTex(btn, "BACKGROUND", -6)
+        P.well:SetAllPoints(btn)
+        local tc = KIT.wellTC
+        FileArt(P.well, KIT.well, tc[1], tc[2], tc[3], tc[4])
+        P.empty = OwnTex(btn, "BACKGROUND", -5)
+        P.empty:SetAllPoints(btn)
+        if not AtlasArt(P.empty, KIT.emptyAtlas) then P.empty:Hide() P.empty = nil end
+    end
+    P.ring = OwnTex(btn, "ARTWORK", 1)
+    FileArt(P.ring, KIT.ring)
+    P.qual = OwnTex(btn, "OVERLAY", 0)
+    P.qual:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    FileArt(P.qual, KIT.quality)
+    P.qual:Hide()
+    P.quest = OwnTex(btn, "OVERLAY", 1)
+    P.quest:SetPoint("TOP", btn, "TOP", 0, 0)
+    FileArt(P.quest, KIT.quest)
+    P.quest:Hide()
+    rawset(btn, "_zKitParts", P)
+    -- hover and press: the button's own state textures wear the stock art
+    -- and leave the art sweep's list, so a repaint never wipes them
+    local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if not hl then
+        hl = OwnTex(btn, "HIGHLIGHT")
+        hl:SetAllPoints(btn)
+    end
+    FileArt(hl, KIT.hilight)
+    if hl.SetBlendMode then hl:SetBlendMode("ADD") end
+    hl:SetAlpha(1)
+    hl._zui_own = true
+    local pushed = btn.GetPushedTexture and btn:GetPushedTexture()
+    if not pushed and btn.SetPushedTexture then
+        pushed = OwnTex(btn, "OVERLAY", 2)
+        btn:SetPushedTexture(pushed)
+    end
+    if pushed then
+        FileArt(pushed, KIT.pushed)
+        pushed:SetAlpha(1)
+        if pushed.SetDrawLayer then pushed:SetDrawLayer("OVERLAY", 2) end
+        pushed._zui_own = true
+    end
+    local list = rawget(btn, "_zRegions")
+    if list then
+        for i = #list, 1, -1 do
+            if list[i] == hl or list[i] == pushed then table.remove(list, i) end
+        end
+    end
+    local s = btn.GetWidth and btn:GetWidth() or 0
+    FitKit(btn, (type(s) == "number" and s > 0) and s or SlotSize())
+end
+
+-- One slot's paint under the kit: the empty art or the ring, the quality
+-- or quest border (the stock way: green and up, the quest border first),
+-- the search fade.
+local function PaintKit(btn, item, isQuest, faded, cfg)
+    local P = rawget(btn, "_zKitParts")
+    if not P then return end
+    local s = btn.GetWidth and btn:GetWidth() or 0
+    if type(s) == "number" and s > 0 and s ~= rawget(btn, "_zKitSize") then FitKit(btn, s) end
+    local empty = not item
+    local kit = rawget(btn, "_zKit")
+    if kit == "classic" then
+        P.emptySlot:SetShown(empty)
+        P.ring:SetShown(not empty)
+    else
+        if P.empty then P.empty:SetShown(empty) end
+        P.ring:Show()
+    end
+    local q = item and item.quality
+    if isQuest then
+        P.quest:Show()
+        P.qual:Hide()
+    elseif cfg.qualityBorders ~= false and q and q > 1 and _G.ITEM_QUALITY_COLORS and _G.ITEM_QUALITY_COLORS[q] then
+        P.qual:SetVertexColor(ns.QualityRGB(q))
+        P.qual:Show()
+        P.quest:Hide()
+    else
+        P.qual:Hide()
+        P.quest:Hide()
+    end
+    -- the fade, on every piece (as ZacUI's look does: nothing rests on
+    -- alpha inheritance through Blizzard's template)
+    local dim = faded and (tonumber(cfg.fadedAlpha) or 0.25) or 1
+    btn:SetAlpha(dim)
+    if btn._zIcon then
+        btn._zIcon:SetAlpha(item and dim or 0)
+        if btn._zIcon.SetDesaturated then
+            btn._zIcon:SetDesaturated((faded or (item and item.locked)) and true or false)
+        end
+    end
+    for _, key in ipairs({ "ring", "qual", "quest", "emptySlot", "well", "empty" }) do
+        local t = P[key]
+        if t then t:SetAlpha(dim) end
+    end
+    if btn._zCount then btn._zCount:SetAlpha(dim) end
+end
+
+-- the bag-slot row's pieces under the kit: the ring, the stock hover, no
+-- ZacUI edge
+local function KitBagSlot(btn)
+    if not btn or rawget(btn, "_zKitParts") then return end
+    HideFlat(btn)
+    local k = BAGBTN / KIT.unit
+    local ring = OwnTex(btn, "ARTWORK", 1)
+    ring:SetPoint("CENTER", btn, "CENTER", 0, KIT.ringDy * k)
+    ring:SetSize(KIT.ringSize * k, KIT.ringSize * k)
+    FileArt(ring, KIT.ring)
+    for _, r in ipairs({ btn:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and r.GetDrawLayer and r:GetDrawLayer() == "HIGHLIGHT" then
+            FileArt(r, KIT.hilight)
+            if r.SetBlendMode then r:SetBlendMode("ADD") end
+            r:SetAlpha(1)
+            r:SetVertexColor(1, 1, 1, 1)
+        end
+    end
+    rawset(btn, "_zKitParts", { ring = ring })
+end
+
 -- A slot's own look, on a real item button or a sample: the icon
 -- cropped, a flat backing, a pixel border, our highlight and pushed
 -- states. btn._zIcon / btn._zCount are set by the caller.
+-- (Under a game look the kit's pieces instead: DressKitSlot.)
 function DressSlot(btn)
+    local kit = KitNow()
+    if kit then return DressKitSlot(btn, kit) end
     local icon = btn._zIcon
     if icon then
-        ZacUI.Look.CropIcon(icon)
+        ZacUI.Look.CropIcon(icon, nil, nil, { part = "bags" })
         icon:SetDrawLayer("ARTWORK")
         SharpenIcon(icon)
     end
@@ -797,7 +1348,7 @@ local function PaintSlot(btn, item, isQuest, faded)
     -- Icon last, after everything that could have wiped it.
     if btn._zIcon then
         btn._zIcon:SetTexture(item and item.icon or nil)
-        ZacUI.Look.CropIcon(btn._zIcon)
+        ZacUI.Look.CropIcon(btn._zIcon, nil, nil, { part = "bags" })
         SharpenIcon(btn._zIcon)
         btn._zIcon:SetAlpha(item and 1 or 0)
         btn._zIcon:SetDesaturated(item and item.locked and true or false)
@@ -807,6 +1358,8 @@ local function PaintSlot(btn, item, isQuest, faded)
     -- value below has its default beside it
     local cfg = (ZacUIDB and ZacUIDB.bags) or BAG_LOOK
     if btn._zLookVer ~= lookVer then StyleSlot(btn, cfg) end
+    -- a game look: the kit's own paint (THE GAME LOOKS' KIT)
+    if rawget(btn, "_zKit") then return PaintKit(btn, item, isQuest, faded, cfg) end
     local er, eg, eb
     if type(cfg.slotColor) == "table" then
         er, eg, eb = ns.ColorOf(cfg.slotColor)
@@ -979,7 +1532,7 @@ local function CreateBagSlot(view, index)
     local icon = btn:CreateTexture(nil, "ARTWORK")
     icon._zui_own = true
     icon:SetAllPoints()
-    ZacUI.Look.CropIcon(icon)
+    ZacUI.Look.CropIcon(icon, nil, nil, { part = "bags" })
     btn._zIcon = icon
     pcall(UI.Border, btn, "ui", "border")
 
@@ -987,6 +1540,8 @@ local function CreateBagSlot(view, index)
     hl._zui_own = true
     hl:SetAllPoints()
     hl:SetColorTexture(1, 1, 1, 0.15)
+    -- a game look: the stock bag slot (the ring, the square hover)
+    if KitNow() then KitBagSlot(btn) end
 
     btn:SetScript("OnClick", BagSlotClick)
     btn:SetScript("OnReceiveDrag", function(self)
@@ -1004,6 +1559,8 @@ local function BuildBagBar(view)
     local count = view.key == "bank" and (Bags.NUM_BANKBAGSLOTS or 7) or 4
     view.bagSlots = {}
     local x = PAD
+    -- (a game look's rings reach past the slot: the stock row's wider step)
+    local step = BAGBTN + (KitNow() and KIT.bagGap or 3)
     if view.key ~= "bank" then
         -- The backpack is not a slot - nothing goes in or out of it - but
         -- the row reads wrong without it at the front.
@@ -1014,15 +1571,17 @@ local function BuildBagBar(view)
         ico._zui_own = true
         ico:SetAllPoints()
         ico:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
-        ZacUI.Look.CropIcon(ico)
+        ZacUI.Look.CropIcon(ico, nil, nil, { part = "bags" })
         pcall(UI.Border, pack, "ui", "border")
-        x = x + BAGBTN + 3
+        if KitNow() then KitBagSlot(pack) end
+        view.packSlot = pack
+        x = x + step
     end
     for i = 1, count do
         local btn = CreateBagSlot(view, i)
         btn:SetPoint("TOPLEFT", x, -(M.TITLEBAR + HEADER - BAGBTN - 4))
         view.bagSlots[i] = btn
-        x = x + BAGBTN + 3
+        x = x + step
     end
 end
 
@@ -1056,11 +1615,15 @@ local function PaintWindow(frame)
         local r, g, b, a = ns.ColorOf(cfg.frameBorderColor)
         for _, t in ipairs(frame._zBorder) do t:SetVertexColor(r, g, b, a) end
     end
+    -- a game look: the look's window over the flat one (the dialog border
+    -- and background, the client's rim); returns at once under ZacUI's
+    if KitNow() and ns.Look and ns.Look.Dress then ns.Look.Dress(frame, "window", "bags") end
 end
 
 -- The footer's text (free slots, money): ZacUI's font until one is chosen.
 local function StyleFooter(list)
     local spec = BagCfg().footerFont
+    local kit = KitNow()
     for _, fs in ipairs(list) do
         if fs and fs.SetFont then
             if Empty(spec) then
@@ -1068,6 +1631,11 @@ local function StyleFooter(list)
                     fs._zCustom = nil
                     if ns.HouseFont then ns.HouseFont(fs, F.SMALL) end
                     if fs.SetShadowOffset and fs._zShadow then fs:SetShadowOffset(fs._zShadow[1], fs._zShadow[2]) end
+                end
+                -- a game look: the game's own font (outlined)
+                if kit then
+                    local f = ZacUIDB and ZacUIDB.font
+                    KitFont(fs, F.SMALL + 1 + ((f and f.delta) or 0))
                 end
             elseif ns.ApplyFontSpec then
                 if not fs._zShadow and fs.GetShadowOffset then fs._zShadow = { fs:GetShadowOffset() } end
@@ -1099,6 +1667,50 @@ local function NewSampleSlot(parent)
     btn._zCount = count
     DressSlot(btn)
     return btn
+end
+
+-- The window's own furniture under a game look: the title in the game's
+-- font and gold, centred in the bar (ZacUI's mark steps aside), the look's
+-- close button, the stock search box and sort button. Once, when the
+-- window is built (the look is latched).
+local function DressViewKit(view, kit)
+    local f = view.frame
+    view.kit = kit
+    local bar, label = f.titleBar, f.titleText
+    if bar and label then
+        -- ZacUI's mark: the texture the title is anchored to
+        local _, mark = label:GetPoint(1)
+        if mark and mark ~= bar and mark.IsObjectType and mark:IsObjectType("Texture") then
+            mark:Hide()
+            mark:SetAlpha(0)
+        end
+        local t = KitLabel(bar, label, 12, "CENTER")
+        t:SetPoint("CENTER", bar, "CENTER", 0, 1)
+        t:SetTextColor(KIT.gold[1], KIT.gold[2], KIT.gold[3], 1)
+        view.kitTitle = t
+    end
+    local close = f.closeButton
+    if close and bar then
+        KitClose(close, kit)
+        close:ClearAllPoints()
+        if kit == "classic" or not AtlasOK(KIT.closeModern[1]) then
+            -- the round button's art sits in the middle of its 32: its
+            -- edge lands 5 in from the bar's
+            close:SetPoint("RIGHT", bar, "RIGHT", 2, 0)
+        else
+            close:SetPoint("RIGHT", bar, "RIGHT", -3, 0)
+        end
+    end
+    KitSearch(view.search)
+    local sort = view.sortButton
+    if sort then
+        KitSortButton(sort, kit)
+        if kit ~= "classic" and AtlasOK(KIT.sortUp) then
+            -- the autosort button, centred on the search row
+            sort:ClearAllPoints()
+            sort:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, -(M.TITLEBAR + 3))
+        end
+    end
 end
 
 local function CreateView(key, globalName, title, bagList)
@@ -1219,6 +1831,10 @@ local function CreateView(key, globalName, title, bagList)
     end)
     moneyHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
     view.moneyHit = moneyHit
+
+    -- a game look: the furniture in the look's art
+    local kit = KitNow()
+    if kit then DressViewKit(view, kit) end
 
     -- The grid area, and one ID-carrying holder per bag on top of it.
     local grid = CreateFrame("Frame", nil, frame)
@@ -1761,6 +2377,15 @@ ns.BagViews = views
 -- change there restyles and re-lays out the open windows at once.
 ns.BagLook = {
     DEFAULTS = BAG_LOOK,
+    -- the game looks' kit (nil under ZacUI's look) and its widget dressers,
+    -- for the parts Bags_Alts adds to the window
+    Kit = KitNow,
+    KIT = KIT,
+    KitButton = KitButton,
+    KitClose = KitClose,
+    KitDropdown = KitDropdown,
+    KitBox = KitBox,
+    KitFont = KitFont,
     Cfg = BagCfg,
     SlotSize = SlotSize,
     SlotGap = SlotGap,

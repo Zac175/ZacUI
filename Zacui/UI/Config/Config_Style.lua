@@ -26,7 +26,11 @@
 -- cancelling keeps the moves staged on the page, leaving the window drops
 -- them (Config_Window calls Look.Discard). Then the icon zoom.
 --
--- THE FIRST-RUN POPUP. A fresh install's first thing, before the welcome
+-- THE FIRST-RUN POPUP. RETIRED from the login path (2026-11-08): the
+-- first-time setup (Tutorial_Setup2) asks for the look as its first step,
+-- so Look.FirstRunDue answers false while it is loaded; what follows is
+-- the popup as it still works for a client without the setup.
+-- A fresh install's first thing, before the welcome
 -- (which waits for it): the same cards over a dimmed screen. The current
 -- look's card closes it with nothing written, so does Escape (the welcome
 -- follows); any other card asks for the one reload (the welcome shows on
@@ -695,6 +699,9 @@ function Look.HoldWelcome() return holding end
 function Look.FirstRunDue()
     if type(ZacUIDB) ~= "table" then return false end
     if ns.openSetupAfterReset then return false end
+    -- the first-time setup has the look step: it takes this popup's place
+    -- (Tutorial_Setup2, 2026-11-08)
+    if ns.TutorialSetup and ns.TutorialSetup.OWNS_FIRST_RUN then return false end
     local st = ZacUIDB.tutorial
     if type(st) == "table" then
         if st.existing or not st.fresh or st.lookPicked then return false end

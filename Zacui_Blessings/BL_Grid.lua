@@ -203,7 +203,8 @@ end
 local function Build()
     if win then return end
     local w = PAD * 2 + NAME_W + (D.NUM_CLASSES + 1) * (CELL + GAP)
-    win = UI.Window("ZacUIBlessingsGrid", w, 200, "Blessings")
+    -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup) when there is one
+    win = (UI.Popup or UI.Window)("ZacUIBlessingsGrid", w, 200, "Blessings")
     win._zOnMoved = function()
         local p = { win:GetPoint(1) }
         local c = BL.Cfg()

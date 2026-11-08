@@ -251,6 +251,18 @@ RegisterPage("General", function(L)
         if ZacUIDB.modules[m] then on = on + 1 end
     end
 
+    -- NEED HELP (2026-11-08): Zac's Discord name, ready to copy
+    -- (UIF_Dialogs UI.ShowContact)
+    if UI.ShowContact then
+        local card = L:Card("Need help?")
+        L:Desc("Message Zac on Discord: " .. (ns.CONTACT_DISCORD or "Zac12")
+            .. ". The button shows the name ready to copy.")
+        local b = UI.Button(card, "Discord", { width = 120, onClick = function() UI.ShowContact() end,
+            tooltip = "Shows Zac's Discord name selected, ready for Ctrl+C." })
+        L:Flow({ b }, 8, 6)
+        L:EndCard()
+    end
+
     L:Card("At a glance")
     local stats = {
         { "Version",    ZUI.VERSION },

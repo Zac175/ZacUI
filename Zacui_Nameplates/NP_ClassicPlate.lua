@@ -36,6 +36,16 @@ local ART = {
 }
 local TOP, BOTTOM = 0.230, 0.229
 
+-- (2026-11-08) a plate's bar height read safely: on the modern clients a
+-- nameplate's regions can't always be measured (an error, or a hidden value)
+local function SafeHeight(r, d)
+    local ok, h = pcall(r.GetHeight, r)
+    if not ok or type(h) ~= "number" then return d end
+    if issecretvalue and issecretvalue(h) then return d end
+    local ok2, pos = pcall(function() return h > 0 end)
+    if ok2 and pos then return h end
+    return d
+end
 local function Classic()
     local L = ns.Look
     return L and L.Is and L.Is("nameplates", "classic") or false
@@ -66,8 +76,7 @@ local function Plate(bar, spec)
     -- the bar's own edge steps back; the art is the edge now
     local edge = rawget(bar, "_zui_edge")
     if edge and edge.SetAlpha then edge:SetAlpha(0) end
-    local k = bar:GetHeight()
-    if type(k) ~= "number" or k <= 0 then k = 12 end
+    local k = SafeHeight(bar, 12)
     local top, bot = TOP * k, BOTTOM * k
     local L, M, R = pieces[1], pieces[2], pieces[3]
     for _, t in ipairs(pieces) do
@@ -142,8 +151,7 @@ local function Shade(bar, on)
         end
         rawset(bar, "_zModernShade", sh)
     end
-    local h = bar:GetHeight()
-    if type(h) ~= "number" or h <= 0 then h = 10 end
+    local h = SafeHeight(bar, 10)
     local top, bottom, ends = math.max(2, math.floor(h * 0.2)), math.max(1, math.floor(h * 0.1)), math.max(2, math.floor(h * 0.15))
     for i = 1, 4 do sh[i]:ClearAllPoints() sh[i]:Show() end
     sh[1]:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0) sh[1]:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0) sh[1]:SetHeight(top)
@@ -256,24 +264,20 @@ local LEVEL_OFF, LEVEL_FONT = 0.584, 0.75
 local function ClassicLevel(f)
     local lv, hb = f and f.level, f and f.health
     if not (lv and hb) then return end
-    local k = hb:GetHeight()
-    if type(k) ~= "number" or k <= 0 then k = 12 end
+    local k = SafeHeight(hb, 12)
     lv:ClearAllPoints()
     lv:SetPoint("CENTER", hb, "RIGHT", LEVEL_OFF * k, 0)
     if lv.SetJustifyH then lv:SetJustifyH("CENTER") end
     local face, _, flags = lv:GetFont()
     if face then pcall(lv.SetFont, lv, face, math.max(6, math.floor(LEVEL_FONT * k + 0.5)), flags) end
+    -- a name inside the bar hangs off the level (NP_Health): it goes back
+    -- to the bar's left end. Read from our own flag, never the name's
+    -- points: a plate's regions can't be measured on the modern clients.
     local nm = f.name
-    if nm and nm.GetNumPoints then
-        for i = 1, nm:GetNumPoints() do
-            local p, rel, rp, x, y = nm:GetPoint(i)
-            if rel == lv then
-                nm:ClearAllPoints()
-                nm:SetPoint(p, hb, "LEFT", 3, y or 0)
-                if f.percent then nm:SetPoint("RIGHT", f.percent, "LEFT", -3, 0) end
-                break
-            end
-        end
+    if nm and f._nameInside and not f.nameOnly then
+        nm:ClearAllPoints()
+        nm:SetPoint("LEFT", hb, "LEFT", 3, 0)
+        if f.percent then nm:SetPoint("RIGHT", f.percent, "LEFT", -3, 0) end
     end
     rawset(f, "_zClassicLevel", true)
 end
@@ -296,8 +300,7 @@ local function ModernLevel(f)
     local lv, hb = f and f.level, f and f.health
     if not (lv and hb) then return end
     local box = rawget(hb, "_zLevelBox")
-    local h = hb:GetHeight()
-    if type(h) ~= "number" or h <= 0 then h = 12 end
+    local h = SafeHeight(hb, 12)
     if AtlasOK(LVL.atlas) then
         if not box then
             box = hb:CreateTexture(nil, "OVERLAY", nil, 1)
@@ -317,17 +320,14 @@ local function ModernLevel(f)
     if lv.SetJustifyH then lv:SetJustifyH("CENTER") end
     local face, _, flags = lv:GetFont()
     if face then pcall(lv.SetFont, lv, face, LVL.font, flags) end
+    -- a name inside the bar hangs off the level (NP_Health): it goes back
+    -- to the bar's left end. Read from our own flag, never the name's
+    -- points: a plate's regions can't be measured on the modern clients.
     local nm = f.name
-    if nm and nm.GetNumPoints then
-        for i = 1, nm:GetNumPoints() do
-            local p, rel, rp, x, y = nm:GetPoint(i)
-            if rel == lv then
-                nm:ClearAllPoints()
-                nm:SetPoint(p, hb, "LEFT", 3, y or 0)
-                if f.percent then nm:SetPoint("RIGHT", f.percent, "LEFT", -3, 0) end
-                break
-            end
-        end
+    if nm and f._nameInside and not f.nameOnly then
+        nm:ClearAllPoints()
+        nm:SetPoint("LEFT", hb, "LEFT", 3, 0)
+        if f.percent then nm:SetPoint("RIGHT", f.percent, "LEFT", -3, 0) end
     end
 end
 local function LevelBoxOff(f)

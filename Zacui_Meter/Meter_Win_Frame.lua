@@ -1339,15 +1339,32 @@ function Meter.UsesGameMeter()
     if v == nil then return Win.LookPrefersGameMeter() end
     return v and true or false
 end
--- the game's meter switched on when it is the one in use, and back off
--- when ZacUI switched it on and ZacUI's windows are back (a player's own
--- choice in the game's options is never undone otherwise)
+-- (2026-11-08, Zac: "why is the blizzard damage meter on when i went to
+-- zui style?") ZacUI's damage windows are the meter under ZacUI's own
+-- look, or by the page's "ZacUI's meter" choice: the game's meter window
+-- is then OFF, whoever switched it on (the game's default, a game look
+-- before, the player in Edit Mode). Its numbers still reach ZacUI's
+-- windows: C_DamageMeter keeps counting with the window off. Only the
+-- page's "The game's own meter" choice keeps it (then UsesGameMeter).
+function Win.GameMeterKeptOff()
+    if Meter.UsesGameMeter() then return false end
+    local v = Look().gameMeter
+    if v == false then return true end
+    return v == nil and LookId() == "zacui"
+end
+-- the game's meter switched on when it is the one in use, off under
+-- ZacUI's own meter (above), and otherwise back off only when ZacUI
+-- switched it on and ZacUI's windows are back (under Classic a player's
+-- own choice in the game's options is never undone)
 function Win.SyncGameMeter()
     if not Win.GameMeterAvailable() then return end
     local d = Look()
     local cur = tostring(GetCV(GM_CVAR) or "")
     if Meter.UsesGameMeter() then
         if cur == "0" and SetCV(GM_CVAR, "1") then d.gameMeterSwitchedOn = true end
+    elseif Win.GameMeterKeptOff() then
+        if cur ~= "0" then SetCV(GM_CVAR, "0") end
+        d.gameMeterSwitchedOn = nil
     elseif d.gameMeterSwitchedOn then
         if cur == "1" then SetCV(GM_CVAR, "0") end
         d.gameMeterSwitchedOn = nil

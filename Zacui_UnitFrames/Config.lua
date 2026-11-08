@@ -486,6 +486,38 @@ ns.MATCH_EXTRA = {
         { "nameClassColor", true, false }, { "cbY", -2, 0 } },
 }
 
+-- THE FRESH DESIGN (2026-11-08, Zac: "what are these ugly ass default
+-- settings with super tall player and target frames do better"). The
+-- 181 x 52 above is the reference's frame WITH its portrait (a 52 square
+-- beside 181 x 46 + 6 of bars, ~233 wide in all); ZacUI's look has no
+-- portrait, so the bars alone read as a tall block. Without one the
+-- frames run wider and shorter (zui_tests/mock_1108/fresh_look_1108*.png):
+--   player / target  224 x 36: a 31 health bar over the slim 5 power bar
+--                    (power.height above), name left and health right at
+--                    14, outlined, both centred on the health bar; the
+--                    cast bar (14) flush under the frame (cbY 0)
+--   target of target 112 x 22, its name at 12, the target's top edge, 8
+--                    clear of the target's right end
+-- On the defaults only, after MATCH, under ZacUI's look: every save has
+-- these keys written (DeepFill), so a save that exists keeps its sizes
+-- and spots - only a fresh install (Reset, a new profile) draws them.
+-- They are NOT in MATCH: no migration ever moves a saved value to them,
+-- and the _matchRev 1 restore keeps reading MATCH's 181 x 52.
+local DESIGN_TOT = { w = 112, h = 22, gap = 8 }
+ns.MATCH_DESIGN = {
+    { "frames", "player", "width", 224 }, { "frames", "player", "height", 36 },
+    { "frames", "target", "width", 224 }, { "frames", "target", "height", 36 },
+    { "frames", "targettarget", "width", DESIGN_TOT.w }, { "frames", "targettarget", "height", DESIGN_TOT.h },
+    { "name", "size", 14 },
+}
+-- the keys a save does not carry until set (nil = the look's own size):
+-- written into a brand-new unit frame save only (Core.lua's InitDB), so
+-- a save that exists keeps the size it draws today
+ns.MATCH_FRESH_SAVE = {
+    { "fonts", "health", "size", 14 },
+    { "frames", "targettarget", "nameSize", 12 },
+}
+
 local function deepCopy(v)
     if type(v) ~= "table" then return v end
     local t = {}
@@ -539,14 +571,50 @@ function ns.ApplyMatchOverlay()
             end
         end
     end
+    -- the fresh design over the match numbers (above), and the target of
+    -- target's spot worked out from the target's: its top edge, 8 clear
+    -- of the target's right end
+    for _, e in ipairs(ns.MATCH_DESIGN) do
+        local t = ns.defaults
+        for j = 1, #e - 2 do t = t and t[e[j]] end
+        if type(t) == "table" then t[e[#e - 1]] = deepCopy(e[#e]) end
+    end
+    local F = ns.defaults.frames
+    local T, ToT = F and F.target, F and F.targettarget
+    if type(T) == "table" and type(ToT) == "table" and T.point == "CENTER" and ToT.point == "CENTER" then
+        ToT.x = (tonumber(T.x) or 240) + T.width / 2 + DESIGN_TOT.gap + ToT.width / 2
+        ToT.y = (tonumber(T.y) or -170) + T.height / 2 - ToT.height / 2
+    end
     for _, x in ipairs(ns.UF_EXTRA_FRAMES or {}) do
         local mx = x.defaults and ns.MATCH_EXTRA[x.key]
         if mx then
             for _, p in ipairs(mx) do x.defaults[p[1]] = p[3] end
+            -- (the fresh design: the focus target is the ToT's twin)
+            if x.key == "focustarget" then
+                x.defaults.width, x.defaults.height = DESIGN_TOT.w, DESIGN_TOT.h
+            end
         end
     end
     ns._matchApplied = true
     return true
+end
+
+-- a brand-new save under ZacUI's look takes the fresh design's keys that
+-- no save carries until set (ns.MATCH_FRESH_SAVE); a value already there
+-- stays
+function ns.MatchFreshSave(db)
+    if not ns._matchApplied or type(db) ~= "table" then return 0 end
+    local n = 0
+    for _, e in ipairs(ns.MATCH_FRESH_SAVE) do
+        local t = db
+        for j = 1, #e - 2 do
+            if type(t[e[j]]) ~= "table" then t[e[j]] = {} end
+            t = t[e[j]]
+        end
+        local k = e[#e - 1]
+        if t[k] == nil then t[k] = deepCopy(e[#e]) n = n + 1 end
+    end
+    return n
 end
 
 -- a saved value still on the old shipped default (colours within 0.005)
