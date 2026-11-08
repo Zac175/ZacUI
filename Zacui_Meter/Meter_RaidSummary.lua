@@ -283,6 +283,9 @@ end
 -- ============================================================
 local function Num(v)
     v = v or 0
+    -- (feature cluster 3) the shared formatter's "summary" style is this
+    -- function to the byte, and takes a value the client hides
+    if ns.Numbers then return ns.Numbers.Format(v, "summary") end
     if v >= 1e6 then return format("%.2fM", v / 1e6) end
     if v >= 1e4 then return format("%.1fK", v / 1e3) end
     return tostring(floor(v + 0.5))
@@ -379,7 +382,9 @@ function RS.Build(s)
     for id, e in pairs(me.spells or {}) do
         if e.t > 0 then
             local share = e.t / max(myTotal, 1)
-            local perMin = e.n / max((me.act or 0) / 60, 0.1)
+            -- (a night filled from the game's own meter - Forever, Retail -
+            -- keeps no hit counts or crits: they read as none)
+            local perMin = (e.n or 0) / max((me.act or 0) / 60, 0.1)
             local pShare, pMin, pn = 0, 0, 0
             for _, p in ipairs(peers) do
                 local pt = 0
@@ -389,8 +394,8 @@ function RS.Build(s)
                 pMin = pMin + ((x and x.n or 0) / max((p.act or 0) / 60, 0.1))
                 pn = pn + 1
             end
-            rows[#rows + 1] = { id = id, name = SpellName(s, id), total = e.t, n = e.n, share = share, perMin = perMin,
-                crit = e.c / max(e.n, 1),
+            rows[#rows + 1] = { id = id, name = SpellName(s, id), total = e.t, n = e.n or 0, share = share, perMin = perMin,
+                crit = (e.c or 0) / max(e.n or 0, 1),
                 pShare = pn > 0 and pShare / pn or nil, pMin = pn > 0 and pMin / pn or nil }
         end
     end
@@ -709,7 +714,7 @@ local function AcquireRow(card)
         row.rule:SetHeight(1)
         row.rule:SetColorTexture(1, 1, 1, 0.12)
         row.icon = row:CreateTexture(nil, "ARTWORK")
-        row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(row.icon)
         row.cells, row.hcells = {}, {}
         row:SetScript("OnEnter", RowEnter)
         row:SetScript("OnLeave", RowLeave)

@@ -30,6 +30,9 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's character sheet is its own; a Retail version comes later):
+-- this window stands down here, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_character") then return end
 
 -- shared state from earlier ZacUI files
 local FLAT = ns.FLAT
@@ -565,7 +568,16 @@ end
 local function FillCard(card)
     local cat = CATEGORY_BY[Category(card.side)]
     card.dd:SetText(cat.text)
-    local lines = cat.fn()
+    local lines
+    if _G.ZACUI_MODERN then
+        -- (WoW Forever and Retail can hand your stats back hidden - secret values, no
+        -- maths on them: the card keeps what it last showed)
+        local ok, r = pcall(cat.fn)
+        if not ok then return end
+        lines = r
+    else
+        lines = cat.fn()
+    end
     for i, row in ipairs(card.rows) do
         local spec = lines[i]
         row.spec = spec
@@ -596,7 +608,16 @@ local resistCells = {}
 
 local function UpdateResists()
     if not resistCells[1] then return end
-    local lines = ResistLines()
+    local lines
+    if _G.ZACUI_MODERN then
+        -- (hidden resistances on the modern client: the cells keep what they showed)
+        local ok, r = pcall(ResistLines)
+        if not ok then return end
+        for _, spec in ipairs(r) do if ns.IsSecret(spec.value) then return end end
+        lines = r
+    else
+        lines = ResistLines()
+    end
     for i, cell in ipairs(resistCells) do
         local spec = lines[i]
         cell.spec = spec
@@ -699,6 +720,7 @@ local function UpdateCooldown(b)
     if not cd then return end
     if not b.hasItem then cd:Hide() return end
     local start, duration, enable = GetInventoryItemCooldown("player", b.slotId)
+    if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 0 end   -- (WoW Forever)
     if CooldownFrame_Set then
         CooldownFrame_Set(cd, start or 0, duration or 0, enable or 0)
     elseif start and duration and duration > 0 then
@@ -1097,6 +1119,12 @@ end
 
 local function UpdateModel()
     if not model then return end
+    -- WoW Forever / Retail: Blizzard's own character-sheet scene and orbit
+    -- camera (the one their paper doll uses) frames the whole character
+    if model._zScene then
+        pcall(ModelSceneUtil.SetUpCharacterSheetScene, model)
+        return
+    end
     model:SetUnit("player", false)
     model:SetRotation(model.rotation)
     if model.SetPortraitZoom then model:SetPortraitZoom(model.zoom) end
@@ -1104,7 +1132,30 @@ local function UpdateModel()
     FitCamera(model)
 end
 
+-- WoW Forever / Retail (2026-11-07, the head cut off): the modern client's
+-- PlayerModel has no camera distance, so a wide, short stage crops the
+-- head. Blizzard's paper doll there is a ModelScene on the character-sheet
+-- scene; ours is the same: their template (drag to turn, wheel to zoom)
+-- and their set-up call, on our own frame.
+local function BuildScene(parent)
+    if not (_G.ZACUI_MODERN and ModelSceneUtil and ModelSceneUtil.SetUpCharacterSheetScene) then return nil end
+    local ok, m = pcall(CreateFrame, "ModelScene", nil, parent, "ModelSceneMixinTemplate")
+    if not ok or not m then return nil end
+    m:SetPoint("TOPLEFT", 1, -1)
+    m:SetPoint("BOTTOMRIGHT", -1, 1)
+    m._zScene = true
+    -- an item on the cursor dropped on the model is put on, as on Blizzard's
+    local function Equip()
+        if CursorHasItem() and not InCombatLockdown() then AutoEquipCursorItem() end
+    end
+    m:HookScript("OnMouseUp", function(_, button) if button == "LeftButton" then Equip() end end)
+    m:SetScript("OnReceiveDrag", Equip)
+    return m
+end
+
 local function BuildModel(parent)
+    local scene = BuildScene(parent)
+    if scene then return scene end
     local m = CreateFrame("PlayerModel", nil, parent)
     m:SetPoint("TOPLEFT", 1, -1)
     m:SetPoint("BOTTOMRIGHT", -1, 1)
@@ -1154,6 +1205,17 @@ local function BuildModel(parent)
         end
     end)
     m:SetScript("OnSizeChanged", FitCamera)
+    -- WoW Forever (2026-11-07, the head cut off): the modern client loads
+    -- the model after SetUnit returns and resets the camera when it lands,
+    -- throwing away the framing set a moment before. It is put back once
+    -- the model is in. Classic sets the model up at once, so nothing there.
+    if _G.ZACUI_MODERN and m.HasScript and m:HasScript("OnModelLoaded") then
+        m:SetScript("OnModelLoaded", function(self)
+            self:SetRotation(self.rotation)
+            if self.SetPortraitZoom then self:SetPortraitZoom(self.zoom) end
+            FitCamera(self)
+        end)
+    end
     m:SetScript("OnHide", StopDrag)
     m:RegisterEvent("UI_SCALE_CHANGED")
     m:RegisterEvent("DISPLAY_SIZE_CHANGED")
@@ -1287,6 +1349,16 @@ end
 local function PlaceOverCharacter(f)
     local host = CharacterFrame
     local ins = ns.GetPanelInset("CharacterFrame", host)
+    -- WoW Forever / Retail: their character frame is much taller than this
+    -- page's slots, model and stats (an empty band under them), and its
+    -- tabs are on the side: the page is exactly as tall as its content
+    if f._zContentH then
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", host, "TOPLEFT", ins.l or 0, -(ins.t or 0))
+        f:SetPoint("TOPRIGHT", host, "TOPRIGHT", -(ins.r or 0), -(ins.t or 0))
+        f:SetHeight(f._zContentH)
+        return
+    end
     local bottom = ins.b or 0
     -- With ZacUI's tab strip on, Blizzard's tabs are faded out and the
     -- strip hangs below the panel line, so the page runs down to it.
@@ -1430,6 +1502,11 @@ local function Build()
             if not InCombatLockdown() then HideUIPanel(CharacterFrame) end
         end,
     })
+    if _G.ZACUI_MODERN then
+        -- title, info line, the slot columns, a pad, the footer
+        win._zContentH = M.TITLEBAR + 2 + INFO_H + 4 + 8 * SLOT + 7 * SLOT_GAP
+            + Kit.PAD + Kit.FOOTER_H + 1
+    end
     win.Reanchor = function() PlaceOverCharacter(win) end
     win.Reanchor()
 
@@ -1555,6 +1632,10 @@ local function Build()
     RegisterEvents(ev)
     ev:SetScript("OnEvent", OnEvent)
 
+    -- Forever's modern page parts (slots, level line, pane chrome): hushed
+    -- by name with the cover, hushed again when Blizzard rebuilds the page
+    Kit.CharacterCover(win, "paperdoll")
+
     -- Blizzard pieces around the cover are silenced only while this page
     -- is up, so the other Character tabs (their own covers, or Blizzard's
     -- skinned pages) get them back.
@@ -1585,11 +1666,19 @@ end
 function Leftovers()
     local t = {}
     local function Add(f) if f then t[#t + 1] = f end end
-    Add(_G.CharacterFrameCloseButton)
-    Add(_G.CharacterFramePortrait)
-    if CharacterFrame then
-        Add(CharacterFrame.PortraitContainer)
-        Add(CharacterFrame.NineSlice)
+    -- (on the modern client the window's own chrome - close button,
+    -- portrait, frame art, title bar - is Kit.CharacterCover's, quietened
+    -- in a side table with the other parts, never with fields on them)
+    if not _G.ZACUI_MODERN then
+        Add(_G.CharacterFrameCloseButton)
+        Add(_G.CharacterFramePortrait)
+        if CharacterFrame then
+            Add(CharacterFrame.PortraitContainer)
+            Add(CharacterFrame.NineSlice)
+            -- Forever's (modern) CharacterFrame has a title bar at frame level
+            -- 510 that draws over the cover ("Zac Warrior" twice); Classic's has none
+            Add(CharacterFrame.TitleContainer)
+        end
     end
     Add(_G.CharacterModelFrame)
     if PaperDollFrame then
@@ -1597,6 +1686,10 @@ function Leftovers()
             if r.IsObjectType and r:IsObjectType("Texture") and not r._zui_own then Add(r) end
         end
     end
+    -- (Forever's modern paperdoll - the item slots at frame level 100, the
+    -- level line, the pane divider and toggle - is Kit.CharacterCover's:
+    -- quietened by name, never hidden, hushed again whenever Blizzard
+    -- rebuilds the page under the cover)
     return t
 end
 

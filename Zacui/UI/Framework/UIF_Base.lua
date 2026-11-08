@@ -13,6 +13,13 @@ local TEX_ARROW = ns.TEX_ARROW
 local TEX_ARROWL = ns.TEX_ARROWL
 local TEX_NORM = ns.TEX_NORM
 local ZUI = ns.ZUI
+-- THE LOOK (Core_Look): which art a primitive draws. Every skinner below
+-- keeps today's code as its ZacUI branch, byte for byte, and adds the
+-- Classic branch beside it; `look` is the optional last argument (a part
+-- key, a look table or the explicit "pixel" / "edge"), nil = the
+-- Blizzard windows' look.
+local Look = ns.Look
+local function LookOf(x, part) return Look.Pick(x, part) end
 
 -- ============================================================
 -- PRIMITIVES
@@ -61,23 +68,51 @@ end
 -- decoration: on item slots it is the only surface left that can carry
 -- quality colour once Blizzard's ring is gone, so something has to be
 -- able to find these again and retint them.
-local function AddPixelBorder(frame, colorKey, alpha)
+local function AddPixelBorder(frame, colorKey, alpha, look)
+    -- Classic: a Blizzard edge instead of the strips; the four handles are
+    -- proxies onto it (Core_Look.AddEdge), so every retint below still
+    -- lands. Untinted (white) unless a colour was asked for: the gold is
+    -- the art's own.
+    local lk = LookOf(look)
+    if lk.border.style == "edge" then
+        if colorKey then
+            local bd = Col(colorKey)
+            Look.AddEdge(frame, lk.border, bd.r, bd.g, bd.b, alpha or bd.a or 1)
+        else
+            Look.AddEdge(frame, lk.border, 1, 1, 1, alpha or 1)
+        end
+        return
+    end
     local bd = Col(colorKey or "border")
     local ba = alpha or bd.a or 1
     local strips = frame._zui_borderTex or {}
     frame._zui_borderTex = strips
+    -- a frame outside UIParent (a nameplate's bar, scaled by the camera):
+    -- the strips go on a holder that ignores that scale (Core_Pixel), so
+    -- they stay one physical pixel as the plate grows and shrinks
+    local host = frame
+    if ns.Pixel and ns.Pixel.On() and not ns.Pixel.UnderUIParent(frame) then
+        host = ns.Pixel.Holder(frame) or frame
+    end
     for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-        local t = frame:CreateTexture(nil, "OVERLAY", nil, 7)
+        local t = host:CreateTexture(nil, "OVERLAY", nil, 7)
         t._zui_own = true
         strips[#strips + 1] = t
         t:SetColorTexture(bd.r, bd.g, bd.b, ba)
         if side == "TOP" or side == "BOTTOM" then
             t:SetPoint(side .. "LEFT")
             t:SetPoint(side .. "RIGHT")
-            t:SetHeight(1)
         else
             t:SetPoint("TOP" .. side)
             t:SetPoint("BOTTOM" .. side)
+        end
+        -- one PHYSICAL pixel under the ZacUI look (Core_Pixel); exactly
+        -- SetHeight(1) / SetWidth(1) everywhere else
+        if ns.Pixel then
+            ns.Pixel.Edge(t, side, host)
+        elseif side == "TOP" or side == "BOTTOM" then
+            t:SetHeight(1)
+        else
             t:SetWidth(1)
         end
     end
@@ -88,16 +123,41 @@ local function TintBorder(frame, r, g, b, a)
     local strips = frame and frame._zui_borderTex
     if not strips then return end
     if not r then
+        -- a Classic edge's "palette" is the art's own colour
+        if strips._zEdge then
+            r, g, b, a = 1, 1, 1, 1
+        else
         local bd = Col("border")
         r, g, b, a = bd.r, bd.g, bd.b, bd.a or 1
+        end
     end
     for _, t in ipairs(strips) do
         t:SetColorTexture(r, g, b, a or 1)
     end
 end
 
-local function SkinBackdrop(frame, bgKey, alpha)
+local function SkinBackdrop(frame, bgKey, alpha, look)
     if not frame then return end
+    -- Classic: Blizzard's own backdrop - the dialog background and border
+    -- on a window (bgKey "windowBg"), the tooltip ones on anything smaller
+    -- - drawn by Core_Look.AddFill, untinted. A pre-existing SetBackdrop is
+    -- still cleared first, as below.
+    local lk = LookOf(look)
+    if lk.border.style == "edge" then
+        if not frame._zui_cbg then
+            if frame.GetBackdrop and frame.SetBackdrop then
+                local ok, bd = pcall(frame.GetBackdrop, frame)
+                if ok and type(bd) == "table" then
+                    pcall(frame.SetBackdrop, frame, nil)
+                end
+            end
+            local window = (bgKey or "windowBg") == "windowBg"
+            frame._zui_cbg = Look.AddFill(frame, window and lk.borderWindow or lk.border,
+                window and lk.bgTexture or lk.bgSmall, lk.bgAlpha or alpha or 1)
+            frame._zui_cbg._zui_own = true
+        end
+        return
+    end
     local bg = Col(bgKey or "windowBg")
     if not frame._zui_cbg then
         -- Neutralize any EXISTING Blizzard backdrop first: modern dialogs
@@ -168,16 +228,18 @@ local function AccentTitle(frame, lineY, rightInset, titleFrame)
     line:SetColorTexture(a.r, a.g, a.b, 0.6)
     line:SetPoint("TOPLEFT",  frame, "TOPLEFT",  1, lineY or -24)
     line:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(rightInset or 1), lineY or -24)
-    line:SetHeight(1)
+    if ns.Pixel then ns.Pixel.Edge(line, "TOP", frame) else line:SetHeight(1) end
     return line
 end
 
 -- TEXT buttons: flat fill, 1px border, hover fill + GOLD hover text.
 -- (normTex is a bright gradient - reserved for status bars only.)
 -- Sweeps unnamed regions too: modern buttons carry unnamed atlas art.
-local function SkinButton(btn, bgKey, hoverKey, borderKey, borderAlpha)
+local function SkinButton(btn, bgKey, hoverKey, borderKey, borderAlpha, look)
     if not btn or ZUI.skinned[btn] then return end
     ZUI.skinned[btn] = true
+    -- Classic: the button keeps its stock art (UI-Panel-Button)
+    if LookOf(look).button == "stock" then return end
     ClearButtonArt(btn)
     for _, region in ipairs({ btn:GetRegions() }) do
         if region.IsObjectType and region:IsObjectType("Texture") then
@@ -244,7 +306,7 @@ end
 -- ICON/SLOT buttons: nuke every texture region EXCEPT the icon (and the
 -- normal texture when the icon IS the normal texture - attachments,
 -- repair buttons), crop, border, additive hover.
-local function SkinIconButton(btn, keepNormal)
+local function SkinIconButton(btn, keepNormal, look)
     if not btn or ZUI.skinned[btn] then return end
     -- Callers pass GLOBALS whose widget type varies by client build, and
     -- a Texture has no GetRegions. Bail instead of erroring: these run
@@ -252,6 +314,15 @@ local function SkinIconButton(btn, keepNormal)
     -- widget after it in that function, not just this button.
     if not btn.GetRegions then return end
     ZUI.skinned[btn] = true
+    -- Classic: Blizzard's ring, quality ring and overlays stay as drawn;
+    -- the icon is only sharpened, never cropped or bordered
+    if LookOf(look).iconButton == "stock" then
+        local nm = btn.GetName and btn:GetName()
+        local ic = btn.icon or btn.Icon
+            or (nm and (_G[nm .. "IconTexture"] or _G[nm .. "Icon"] or _G[nm:gsub("Button$", "") .. "Icon"]))
+        SharpenIcon(ic)
+        return
+    end
 
     local name = btn.GetName and btn:GetName()
     -- Icon lookup, three name spellings: <Name>IconTexture, <Name>Icon,
@@ -324,10 +395,10 @@ local function SkinIconButton(btn, keepNormal)
     -- show the wrong icon. Callers set the flag; everything else keeps
     -- the standard zoom.
     if icon and icon.SetTexCoord and not btn._zui_noCrop then
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ns.Look.CropIcon(icon, nil, nil, { border = false })
     end
     if keepNormal and normal and normal.SetTexCoord and not btn._zui_noCrop then
-        normal:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ns.Look.CropIcon(normal, nil, nil, { border = false })
     end
     -- Sharpen whether or not it was cropped: _zui_noCrop is about sheet
     -- texcoords, and a sheet icon blurs from grid snapping just the same.
@@ -416,43 +487,43 @@ local function SkinArrowButton(btn, direction)
 end
 
 -- X close: chromeless two rotated lines (Readycheck CreateXCloseButton port).
-local function SkinCloseButton(btn, size)
+local function SkinCloseButton(btn, size, look)
     if not btn or ZUI.skinned[btn] then return end
     ZUI.skinned[btn] = true
+    -- Classic: the stock round X stays
+    if LookOf(look).closeX == "stock" then return end
     ClearButtonArt(btn)
 
     local w = (btn.GetWidth and btn:GetWidth()) or 0
     local s = size or (w > 0 and math.min(w, 24)) or 24
-    local xSize, xThick = math.floor(s * 0.5), 2
     local nc = Col("xNormal")
 
-    local function MakeLine(rot)
-        local t = btn:CreateTexture(nil, "ARTWORK")
-        t._zui_own = true
-        t:SetSize(xSize, xThick)
-        t:SetPoint("CENTER")
-        t:SetColorTexture(nc.r, nc.g, nc.b, 1)
-        t:SetRotation(math.rad(rot))
-        return t
-    end
-    btn._zui_x1 = MakeLine(45)
-    btn._zui_x2 = MakeLine(-45)
+    -- ZacUI's own close icon (2026-11-07; it replaced two rotated lines),
+    -- as wide as the lines were (its glyph spans 12/32 of the icon)
+    local t = btn:CreateTexture(nil, "ARTWORK")
+    t._zui_own = true
+    local is = math.floor(s * 0.95 + 0.5)
+    t:SetSize(is, is)
+    t:SetPoint("CENTER")
+    t:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\close")
+    t:SetVertexColor(nc.r, nc.g, nc.b, 1)
+    btn._zui_xIcon = t
 
     btn:HookScript("OnEnter", function(self)
         local h = Col("xHover")
-        self._zui_x1:SetColorTexture(h.r, h.g, h.b, 1)
-        self._zui_x2:SetColorTexture(h.r, h.g, h.b, 1)
+        self._zui_xIcon:SetVertexColor(h.r, h.g, h.b, 1)
     end)
     btn:HookScript("OnLeave", function(self)
         local nn = Col("xNormal")
-        self._zui_x1:SetColorTexture(nn.r, nn.g, nn.b, 1)
-        self._zui_x2:SetColorTexture(nn.r, nn.g, nn.b, 1)
+        self._zui_xIcon:SetVertexColor(nn.r, nn.g, nn.b, 1)
     end)
 end
 
-local function SkinEditBox(eb, height)
+local function SkinEditBox(eb, height, look)
     if not eb or ZUI.skinned[eb] then return end
     ZUI.skinned[eb] = true
+    -- Classic: the stock input art stays
+    if LookOf(look).widgets == "stock" then return end
     local name = eb.GetName and eb:GetName()
     if name then
         HideNamed(name, { "Left", "Mid", "Middle", "Right",
@@ -473,9 +544,11 @@ end
 -- classic art hidden, fitted dark box, media arrow, palette text. The
 -- OPEN lists (DropDownList1/2) are dark-skinned once globally, so every
 -- dropdown MENU in the game matches too.
-local function SkinDropdown(dd)
+local function SkinDropdown(dd, look)
     if not dd or ZUI.skinned[dd] then return end
     ZUI.skinned[dd] = true
+    -- Classic: the stock dropdown art stays
+    if LookOf(look).widgets == "stock" then return end
     local name = dd.GetName and dd:GetName()
     if name then
         HideNamed(name, { "Left", "Middle", "Right" })
@@ -521,6 +594,8 @@ local dropListsSkinned = false
 local function SkinDropDownLists()
     if dropListsSkinned then return end
     dropListsSkinned = true
+    -- Classic: the game's menus keep their own art
+    if LookOf(nil).widgets == "stock" then return end
     for i = 1, (UIDROPDOWNMENU_MAXLEVELS or 2) do
         local list = _G["DropDownList" .. i]
         if list then
@@ -577,9 +652,11 @@ end
 
 -- Blizzard CheckButtons (UICheckButtonTemplate family): dark box + border,
 -- Blizzard's own check glyph kept on top.
-local function SkinBlizzCheck(cb)
+local function SkinBlizzCheck(cb, look)
     if not cb or ZUI.skinned[cb] then return end
     ZUI.skinned[cb] = true
+    -- Classic: the stock check box stays
+    if LookOf(look).widgets == "stock" then return end
     KillTexture(cb.GetNormalTexture and cb:GetNormalTexture())
     KillTexture(cb.GetPushedTexture and cb:GetPushedTexture())
     KillTexture(cb.GetHighlightTexture and cb:GetHighlightTexture())

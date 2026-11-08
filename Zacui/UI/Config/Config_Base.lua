@@ -136,6 +136,9 @@ local MENU = {
     -- (2026-11-02 polish: what draws on screen first, the settings about
     -- settings - look, modules, profiles - after it)
     { id = "appearance", label = "Appearance", children = {
+        { id = "style",  label = "Style", page = "Style",
+          keywords = "look looks style styles classic vanilla blizzard forever bronze gold zacui flat "
+              .. "skin theme art icon zoom crop per part apply" },
         { id = "font",   label = "Fonts & Textures", page = "Font",
           keywords = "typeface size outline sharedmedia lsm texture statusbar status bar health power cast media global everywhere weakauras readycheck" },
         { id = "colors", label = "Colours", page = "Colors",
@@ -242,12 +245,23 @@ local function VisibleRows(filter, hits)
         return true
     end
 
+    -- a part or feature this game version does not run has no page there
+    -- (Core_Flavor; General > Game versions lists it)
+    local function Off(item)
+        return ns.FeatureOffForPage and ns.FeatureOffForPage(item.id) and true or false
+    end
+
     local s = State()
     for _, item in ipairs(MENU) do
-        if item.children then
-            local kept = {}
+        if Off(item) then
+            -- (nothing: not listed, not searched)
+        elseif item.children then
+            local kept, here = {}, {}
             for _, child in ipairs(item.children) do
-                if Matches(child, item) then kept[#kept + 1] = child end
+                if not Off(child) then
+                    here[#here + 1] = child
+                    if Matches(child, item) then kept[#kept + 1] = child end
+                end
             end
             local selfMatch = Matches(item)
             if selfMatch or #kept > 0 then
@@ -256,7 +270,7 @@ local function VisibleRows(filter, hits)
                 -- results are hidden inside a collapsed category.
                 local open = filter and true or s.expanded[item.id]
                 if open then
-                    local list = (filter and #kept > 0) and kept or item.children
+                    local list = (filter and #kept > 0) and kept or here
                     for _, child in ipairs(list) do
                         rows[#rows + 1] = { item = child, isChild = true }
                     end
@@ -322,8 +336,57 @@ end
 local Layout = {}
 Layout.__index = Layout
 
+-- THE SETTINGS WINDOW'S ROWS (match pass 2026-11-07, UI.S). A layout made
+-- while UI._zSettings is on (the /zui window's builds) lays EllesmereUI's
+-- page: every row is a band the card's width, 36 tall for a checkbox and
+-- 50 for a control, black at 0.10 / 0.20 by turns (restarting each card),
+-- its control centred in it 20 in. Two controls that each fit half a row
+-- (a checkbox, a slider, a labelled dropdown, a colour) share one row, the
+-- second at the half, as their two-up rows. A layout made anywhere else
+-- (Meter_RaidSummary's window) works as before.
+local SET = UI.S
+
+local function BandH(wh)
+    if wh <= 22 then return SET.ROW end
+    return math.max(SET.ROW_CTL, math.ceil(wh) + 20)
+end
+
+-- a band of the open card: y (its top, card units) and h
+local function AddBand(card, y, h)
+    card._zBands = card._zBands or {}
+    local b = { y = y, h = h }
+    card._zBands[#card._zBands + 1] = b
+    return b
+end
+
+-- the bands, drawn when the card closes: one small frame each (pooled on
+-- a live page, see UIF_Pool), so a rebuild makes nothing new
+local function NewBand(card)
+    local f = CreateFrame("Frame", nil, card)
+    local t = f:CreateTexture(nil, "BACKGROUND", nil, -6)
+    t._zui_own = true
+    t:SetTexture(ns.FLAT)
+    t:SetAllPoints(f)
+    f._zBandTex = t
+    f:EnableMouse(false)
+    return f
+end
+local function PaintBands(card)
+    for i, b in ipairs(card._zBands or {}) do
+        local f = ns.UIPool and ns.UIPool.Make("RowBand", NewBand, card) or NewBand(card)
+        f:SetFrameLevel(math.max(0, card:GetFrameLevel()))
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", card, "TOPLEFT", 0, b.y)
+        f:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, b.y)
+        f:SetHeight(b.h)
+        f._zBandTex:SetVertexColor(0, 0, 0, (i % 2 == 0) and SET.ROW_EVEN or SET.ROW_ODD)
+        f:Show()
+    end
+end
+
 function Layout.New(parent, y)
-    return setmetatable({ parent = parent, y = y or -14, cards = {}, tabRanges = {} }, Layout)
+    local set = UI._zSettings or nil
+    return setmetatable({ parent = parent, y = y or (set and 0 or -14), cards = {}, tabRanges = {}, set = set }, Layout)
 end
 
 function Layout:Header(title, subtitle)
@@ -339,12 +402,22 @@ function Layout:Header(title, subtitle)
         self.flavorNotes = nil
         for _, text in ipairs(notes) do self:Notice("flavor", text) end
     end
+    -- a part wearing a look other than ZacUI's says so first, with the
+    -- way to the Style page (Config_Style)
+    if self.live and ns.LookBanner then pcall(ns.LookBanner, self) end
     return f
 end
 
 function Layout:Card(title)
     local card = UI.Card(self.parent, title, self.y)
     self.cards[#self.cards + 1] = card
+    if self.set then
+        card._zBands, card._zPair = {}, nil
+        card._y = -(title and SET.SECTION or 0) - (card._zTitleExtra or 0)
+        card._zTopY = card._y
+        self.current = card
+        return card
+    end
     card._y = UI.M.CONTENT_Y - (card._zTitleExtra or 0)
     card._zTopY = card._y
     self.current = card
@@ -368,7 +441,12 @@ end
 local function CardHelp(card, text)
     if card._zHelp then return card._zHelp end
     local b = ns.UIPool and ns.UIPool.Make("CardHelp", NewCardHelp, card) or NewCardHelp(card)
-    b:SetPoint("TOPRIGHT", card, "TOPRIGHT", -8, -7)
+    b:ClearAllPoints()
+    if rawget(card, "_zSet") then
+        b:SetPoint("BOTTOMRIGHT", card, "TOPRIGHT", -2, -SET.SECTION + 4)
+    else
+        b:SetPoint("TOPRIGHT", card, "TOPRIGHT", -8, -7)
+    end
     local title = card._zTitle and card._zTitle:GetText() or "About this"
     UI.Tooltip(b, title, text)
     b._zCardHelp = true
@@ -398,6 +476,13 @@ function Layout:EndCard()
     local card = self.current
     if not card then return end
     card:SetContentHeight(-card._y)
+    if self.set then
+        PaintBands(card)
+        card._zPair = nil
+        self.y = self.y - card:GetHeight() - SET.CARD_GAP
+        self.current = nil
+        return
+    end
     self.y = self.y - card:GetHeight() - UI.M.CARD_GAP
     self.current = nil
 end
@@ -411,11 +496,83 @@ local function CardWidth(card)
     if type(w) == "number" and w >= 200 then return w end
     local page = card and card.GetParent and card:GetParent()
     local pw = page and page.GetWidth and page:GetWidth()
-    if type(pw) == "number" and pw >= 200 + 2 * UI.M.MARGIN then return pw - 2 * UI.M.MARGIN end
+    local m = (card and rawget(card, "_zSet")) and SET.PAD or UI.M.MARGIN
+    if type(pw) == "number" and pw >= 200 + 2 * m then return pw - 2 * m end
     return 420
 end
 
+-- A row in the settings window: fitted, centred in its band, or put in
+-- the free half of the row above (see the top of this section).
+local function SetRow(self, widget, height, indent)
+    local card = self.current
+    local cw = CardWidth(card)
+    local x = indent or SET.SIDE
+    local room = cw - x - SET.SIDE
+    local half = math.floor(cw / 2)
+    local halfRoom = half - 2 * SET.SIDE
+    -- a slider placed by the layout: half a row wide (EllesmereUI's row)
+    if rawget(widget, "_zSet") and widget.slider and widget._zFit
+        and (widget:GetWidth() or 0) < math.min(SET.SLIDER_W, room) - 0.5 then
+        widget:_zFit(math.min(SET.SLIDER_W, room))
+    end
+    if widget._zFit and (widget:GetWidth() or 0) > room + 0.5 then widget:_zFit(room)
+    elseif not widget._zFit and widget.GetObjectType and widget:GetObjectType() == "FontString"
+        and not widget._zExtraH and (widget:GetStringWidth() or 0) > room + 0.5 then
+        local one = widget:GetStringHeight() or 12
+        widget:SetWidth(room)
+        widget:SetJustifyH("LEFT")
+        widget:SetWordWrap(true)
+        widget._zExtraH = math.max(0, math.ceil((widget:GetStringHeight() or one) - one))
+    end
+    local ww = widget:GetWidth() or 0
+    local wh = widget:GetHeight() or 0
+    if widget.GetObjectType and widget:GetObjectType() == "FontString" then wh = math.max(wh, widget:GetStringHeight() or 0) end
+    local halfable = widget._zHalf and not indent and ww <= halfRoom + 0.5 and wh <= 34
+    local open = card._zPair
+    widget:ClearAllPoints()
+    -- (and only when the page made nothing else on the card since the row
+    -- above: a page that hangs its own parts on that row by hand keeps
+    -- its rows one under the other)
+    local nk, nr = select("#", card:GetChildren()), select("#", card:GetRegions())
+    if halfable and open and open.y == card._y and nk == open.nk + 1 and nr == open.nr then
+        -- the second half of the row above
+        local b = open.b
+        local need = BandH(wh)
+        if need > b.h then
+            card._y = card._y - (need - b.h)
+            b.h = need
+            local fw = open.w
+            fw:ClearAllPoints()
+            fw:SetPoint("TOPLEFT", card, "TOPLEFT", open.x, b.y - math.floor((b.h - open.wh) / 2))
+        end
+        widget:SetPoint("TOPLEFT", card, "TOPLEFT", half + SET.SIDE, b.y - math.floor((b.h - wh) / 2))
+        card._zPair = nil
+        card._zSlack, card._zSlackY = math.floor((b.h - wh) / 2), card._y
+        card._zLastRow = widget
+        return widget
+    end
+    local band = BandH(wh)
+    local asked = (height or 0) + (widget._zExtraH or 0)
+    local off
+    if asked > band + 4 then
+        -- the page asked for more room than the control takes: top-aligned
+        band = asked + SET.ROW_V
+        off = SET.ROW_V
+    else
+        off = math.floor((band - wh) / 2)
+    end
+    local b = AddBand(card, card._y, band)
+    widget:SetPoint("TOPLEFT", card, "TOPLEFT", x, card._y - off)
+    card._y = card._y - band
+    card._zPair = halfable and { b = b, w = widget, x = x, wh = wh, y = card._y, nk = nk, nr = nr } or nil
+    card._zSlack, card._zSlackY = band - off - wh, card._y
+    card._zLastRow = widget
+    return widget
+end
+Layout._zSetRow = SetRow
+
 function Layout:Row(widget, height, indent)
+    if self.set then return SetRow(self, widget, height, indent) end
     local card = self.current
     local x = indent or UI.M.CONTROL_X
     widget:SetPoint("TOPLEFT", card, "TOPLEFT", x, card._y)
@@ -485,6 +642,7 @@ end
 -- A row as tall as the widget says it is, plus `gap` - for the pickers
 -- (UIF_Pickers) and anything else that knows its own height.
 function Layout:Add(widget, gap, indent)
+    if self.set then return SetRow(self, widget, (widget:GetHeight() or UI.M.ROW) - (widget._zExtraH or 0) + (gap or 8), indent) end
     local room = CardWidth(self.current) - (indent or UI.M.CONTROL_X) - UI.M.CONTROL_X
     if widget._zFit and (widget:GetWidth() or 0) > room + 0.5 then widget:_zFit(room) end
     -- (the fitted height is in GetHeight already; Row must not add it twice)
@@ -493,13 +651,26 @@ end
 
 -- The room a row has in the open card, from x (default the control inset).
 function Layout:Room(indent)
-    return CardWidth(self.current) - (indent or UI.M.CONTROL_X) - UI.M.CONTROL_X
+    local side = self.set and SET.SIDE or UI.M.CONTROL_X
+    return CardWidth(self.current) - (indent or side) - side
 end
 
 -- A row of widgets (buttons, mostly) that wraps onto a new line instead of
 -- running past the card's right edge.
 function Layout:Flow(widgets, gap, rowGap, indent)
     local card = self.current
+    if self.set then
+        -- one band, the row of buttons centred in it
+        local x = indent or SET.SIDE
+        local h = UI.Flow(card, widgets, x, card._y, self:Room(indent), gap or 8, rowGap or 6)
+        local band = BandH(h)
+        local off = math.floor((band - h) / 2)
+        UI.Flow(card, widgets, x, card._y - off, self:Room(indent), gap or 8, rowGap or 6)
+        AddBand(card, card._y, band)
+        card._y = card._y - band
+        card._zLastRow, card._zSlack, card._zSlackY, card._zPair = widgets[1], band - off - h, card._y, nil
+        return
+    end
     local x = indent or UI.M.CONTROL_X
     local h = UI.Flow(card, widgets, x, card._y, self:Room(indent), gap or 8, rowGap or 6)
     card._y = card._y - h - (rowGap or 6)
@@ -513,6 +684,40 @@ end
 -- for its cell wraps inside it (_zFit). Rows are as tall as their tallest.
 function Layout:Grid(widgets, cols, rowH, indent)
     local card = self.current
+    if self.set then
+        -- each line of the grid is a band; EllesmereUI's two-up gap
+        local x0 = indent or SET.SIDE
+        local room = self:Room(indent)
+        local GAP = 2 * SET.SIDE
+        local widest = 0
+        for _, w in ipairs(widgets) do widest = math.max(widest, w:GetWidth() or 0) end
+        cols = math.max(1, math.min(cols or 2, #widgets))
+        while cols > 1 and (room - GAP * (cols - 1)) / cols < widest do cols = cols - 1 end
+        local cell = math.floor((room - GAP * (cols - 1)) / cols)
+        local i = 1
+        while i <= #widgets do
+            local tall = 0
+            for c = 0, cols - 1 do
+                local w = widgets[i + c]
+                if not w then break end
+                if w._zFit and (w:GetWidth() or 0) > cell + 0.5 then w:_zFit(cell) end
+                tall = math.max(tall, w:GetHeight() or 0)
+            end
+            local band = BandH(tall)
+            for c = 0, cols - 1 do
+                local w = widgets[i + c]
+                if not w then break end
+                w:ClearAllPoints()
+                w:SetPoint("TOPLEFT", card, "TOPLEFT", x0 + c * (cell + GAP),
+                    card._y - math.floor((band - (w:GetHeight() or 0)) / 2))
+            end
+            AddBand(card, card._y, band)
+            card._y = card._y - band
+            i = i + cols
+        end
+        card._zPair = nil
+        return
+    end
     local x0 = indent or UI.M.CONTROL_X
     local room = self:Room(indent)
     local GAP = 12
@@ -543,13 +748,69 @@ end
 -- Options that only matter while a parent option is on: indented under
 -- it in a tidy grid (cols across, fewer when narrow) and dimmed while the
 -- parent is off (the parent's toggle rebuilds the page, which re-dims).
+-- why: what a dimmed one says on hover (UI.SetEnabled); a string, or the
+-- parent's label (a string without "Needs") to say 'Needs "<label>" turned
+-- on.'; nil = UI.WHY_DEFAULT.
 UI.M.CHILD_INDENT = UI.M.CHILD_INDENT or 20
-function Layout:Dependent(widgets, parentOn, cols, rowH)
-    self:Grid(widgets, cols or 2, rowH, UI.M.CONTROL_X + UI.M.CHILD_INDENT)
+function Layout.Why(why)
+    if type(why) ~= "string" or why == "" then return nil end
+    if why:find("^Needs ") or why:find("%.$") then return why end
+    return 'Needs "' .. why .. '" turned on.'
+end
+function Layout:Dependent(widgets, parentOn, cols, rowH, why)
+    self:Grid(widgets, cols or 2, rowH, (self.set and SET.SIDE or UI.M.CONTROL_X) + UI.M.CHILD_INDENT)
+    why = Layout.Why(why)
     for _, w in ipairs(widgets) do
-        if UI.SetEnabled then UI.SetEnabled(w, parentOn and true or false) end
+        if UI.SetEnabled then UI.SetEnabled(w, parentOn and true or false, why) end
     end
     return widgets
+end
+
+-- LESS COMMON (finish pass): rarely used rows folded away inside a card,
+-- behind one small button, so a long page shows what most players need.
+--   L:Fold(id, label, build, { changed = fn })
+-- build(L) adds the rows, in the card that is open. Open / closed is
+-- remembered per page in the window state (ZacUIDB.config.folds, like the
+-- remembered tab). It opens by itself when changed() says something inside
+-- is not at its default; the search index always builds what is inside,
+-- and a search jump that lands in a fold opens it (and keeps it open).
+function Layout:Fold(id, label, build, opts)
+    opts = opts or {}
+    local s = State()
+    s.folds = s.folds or {}
+    local key = tostring(self.pageId or "page") .. ":" .. tostring(id)
+    local open = s.folds[key]
+    if open == nil and opts.changed then
+        local ok, c = pcall(opts.changed)
+        if ok and c then open = true end
+    end
+    if self.live and ns._zFoldsOpen and not open then
+        s.folds[key] = true
+        open = true
+    end
+    -- the search index (not a live build) sees every row
+    if not self.live then open = true end
+    open = open and true or false
+    local function Toggle()
+        if not (self.live and self.current and UI.Button) then return end
+        local b = UI.Button(self.current, (open and "Hide less common: " or "Show less common: ") .. label, {
+            width = 120, height = self.set and 26 or 18, size = UI.F.SMALL,
+            tooltip = open and "Folds these rarely used settings away again."
+                or "Rarely used settings, folded away to keep this page short.",
+            onClick = function()
+                s.folds[key] = not open
+                if ns.RefreshConfig then ns.RefreshConfig() end
+            end })
+        b._zFoldKey = key
+        self:Row(b, 18 + 6)
+    end
+    if open then
+        build(self)
+        Toggle()
+    else
+        Toggle()
+    end
+    return open
 end
 
 -- A label and its value on one line (the value in a column at keyW), the
@@ -558,6 +819,41 @@ end
 function Layout:Pair(key, value, keyW, opts)
     opts = opts or {}
     local card = self.current
+    if self.set then
+        -- a band of its own; the key column a quarter wider (the type is)
+        local x = opts.indent or SET.SIDE
+        local room = self:Room(opts.indent)
+        keyW = math.floor((keyW or 120) * 1.25)
+        local size = opts.size or UI.F.LABEL
+        local k = UI.Font(card, size, { text = key, cat = "text", key = opts.keyColor or "gray" })
+        local kw = math.ceil(k:GetStringWidth() or 0)
+        local below = room - keyW < 140 or kw > keyW - 6
+        local vx = below and (x + 12) or (x + keyW)
+        local v = UI.Font(card, size, { text = value, cat = "text", key = opts.valueColor or "normal",
+            width = room - (vx - x) })
+        local h
+        if below then
+            if kw > room then k:SetWidth(room) k:SetJustifyH("LEFT") k:SetWordWrap(true) end
+            local kh = math.max(size, k:GetStringHeight() or size)
+            h = kh + 2 + math.max(size, v:GetStringHeight() or size)
+            local band = math.max(SET.ROW, h + 18)
+            local top = card._y - math.floor((band - h) / 2)
+            k:SetPoint("TOPLEFT", card, "TOPLEFT", x, top)
+            v:SetPoint("TOPLEFT", card, "TOPLEFT", vx, top - kh - 2)
+            AddBand(card, card._y, band)
+            card._y = card._y - band
+        else
+            h = math.max(size, k:GetStringHeight() or size, v:GetStringHeight() or size)
+            local band = math.max(SET.ROW, h + 18)
+            local top = card._y - math.floor((band - h) / 2)
+            k:SetPoint("TOPLEFT", card, "TOPLEFT", x, top)
+            v:SetPoint("TOPLEFT", card, "TOPLEFT", vx, top)
+            AddBand(card, card._y, band)
+            card._y = card._y - band
+        end
+        card._zPair = nil
+        return k, v
+    end
     local x = opts.indent or UI.M.CONTROL_X
     local room = self:Room(opts.indent)
     local size = opts.size or UI.F.LABEL
@@ -586,6 +882,46 @@ end
 function Layout:Labeled(label, control, labelW, opts)
     opts = opts or {}
     local card = self.current
+    if self.set then
+        -- the label on the left and the control after its column, centred in a band
+        local x = opts.indent or SET.SIDE
+        local room = self:Room(opts.indent)
+        local fs = UI.Font(card, opts.size or UI.F.LABEL, { text = label, cat = "text", key = opts.color or "normal" })
+        local lw = math.ceil(fs:GetStringWidth() or 0)
+        labelW = math.floor(math.max(labelW or 0, 0) * 1.25)
+        local minW = opts.minW or 120
+        local ch = control:GetHeight() or SET.DD_H
+        if lw + 8 <= labelW and room - labelW >= minW then
+            local cr = room - labelW
+            if (control:GetWidth() or 0) > cr + 0.5 then
+                if control._zFit then control:_zFit(cr) else control:SetWidth(cr) end
+            end
+            ch = math.max(ch, control:GetHeight() or ch)
+            local band = BandH(ch)
+            local top = card._y - math.floor((band - ch) / 2)
+            fs:SetPoint("LEFT", card, "TOPLEFT", x, top - ch / 2)
+            control:ClearAllPoints()
+            control:SetPoint("TOPLEFT", card, "TOPLEFT", x + labelW, top)
+            AddBand(card, card._y, band)
+            card._y = card._y - band
+        else
+            if lw > room then fs:SetWidth(room) fs:SetJustifyH("LEFT") fs:SetWordWrap(true) end
+            if (control:GetWidth() or 0) > room + 0.5 then
+                if control._zFit then control:_zFit(room) else control:SetWidth(room) end
+            end
+            local lh = math.max(12, fs:GetStringHeight() or 12)
+            local h = lh + 4 + (control:GetHeight() or ch)
+            local band = math.max(SET.ROW_CTL, h + 18)
+            local top = card._y - math.floor((band - h) / 2)
+            fs:SetPoint("TOPLEFT", card, "TOPLEFT", x, top)
+            control:ClearAllPoints()
+            control:SetPoint("TOPLEFT", card, "TOPLEFT", x, top - lh - 4)
+            AddBand(card, card._y, band)
+            card._y = card._y - band
+        end
+        card._zPair = nil
+        return fs
+    end
     local x = opts.indent or UI.M.CONTROL_X
     local room = self:Room(opts.indent)
     local fs = UI.Font(card, opts.size or UI.F.LABEL, { text = label, cat = "text", key = opts.color or "normal" })
@@ -623,9 +959,22 @@ end
 
 function Layout:Desc(text)
     local card = self.current
+    local follows = self.set and card._zSlackY == card._y and card._zBands and card._zBands[#card._zBands] or nil
+    -- (settings window: under a checkbox it lines up with the label)
+    local descX = UI.M.DESC_X
+    if self.set then
+        descX = SET.SIDE
+        local lr = follows and card._zLastRow
+        if lr and rawget(lr, "_zCheck") then descX = SET.SIDE + SET.CHECK + SET.CHECK_GAP end
+        -- (the second of a pair: under it, at the half)
+        if lr and lr.GetPoint then
+            local _, _, _, px = lr:GetPoint(1)
+            if type(px) == "number" and px > SET.SIDE + 1 then descX = descX - SET.SIDE + px end
+        end
+    end
     local fs = UI.Font(card, UI.F.DESC, {
         text = text, cat = "text", key = "gray",
-        width = math.max(120, CardWidth(card) - UI.M.DESC_X - 16),
+        width = math.max(120, CardWidth(card) - descX - (self.set and SET.SIDE or 16)),
     })
     -- SHORT HELP, THE REST ON HOVER. A description longer than about a
     -- line, written under a control, keeps its first sentence on the page
@@ -647,6 +996,26 @@ function Layout:Desc(text)
         CardHelp(card, text)
         fs:ClearAllPoints()
         fs:SetText(first)
+    end
+    if self.set then
+        -- in the band of the row it belongs to, 6 above that band's foot,
+        -- the band grown to hold it; on its own, a band of its own
+        local dh = math.max(12, math.ceil(fs:GetStringHeight() or 12))
+        if follows then
+            -- (from the band's foot: never into what the row drew)
+            local lift = 0
+            fs:SetPoint("TOPLEFT", card, "TOPLEFT", descX, card._y + lift)
+            local grow = dh - lift + SET.ROW_V
+            follows.h = follows.h + grow
+            card._y = card._y - grow
+        else
+            fs:SetPoint("TOPLEFT", card, "TOPLEFT", descX, card._y - SET.ROW_V)
+            local band = dh + 2 * SET.ROW_V
+            AddBand(card, card._y, band)
+            card._y = card._y - band
+        end
+        card._zSlack, card._zPair = nil, nil
+        return fs
     end
     -- tucked up under the row above (3 px), but never into what it drew
     local lift = 3
@@ -678,12 +1047,21 @@ function Layout:Notice(kind, text, where, moduleKey)
         text = text .. " Turn it on under " .. where .. "."
     end
     local card = self:Card(n.title)
+    local dx = self.set and SET.SIDE or UI.M.DESC_X
     local fs = UI.Font(card, UI.F.DESC, {
         text = text, cat = "text", key = n.key,
-        width = math.max(120, CardWidth(card) - UI.M.DESC_X - 16),
+        width = math.max(120, CardWidth(card) - dx - 16),
     })
-    fs:SetPoint("TOPLEFT", card, "TOPLEFT", UI.M.DESC_X, card._y + 3)
-    card._y = card._y - math.max(12, fs:GetStringHeight()) - 6
+    if self.set then
+        local dh = math.max(12, math.ceil(fs:GetStringHeight() or 12))
+        local band = math.max(SET.ROW, dh + 2 * SET.ROW_V)
+        fs:SetPoint("TOPLEFT", card, "TOPLEFT", dx, card._y - math.floor((band - dh) / 2))
+        AddBand(card, card._y, band)
+        card._y = card._y - band
+    else
+        fs:SetPoint("TOPLEFT", card, "TOPLEFT", UI.M.DESC_X, card._y + 3)
+        card._y = card._y - math.max(12, fs:GetStringHeight()) - 6
+    end
     if kind == "off" and moduleKey and UI.Button then
         local b = UI.Button(card, "Turn it on", { width = 110, onClick = function()
             if ns.EnableModuleLive then ns.EnableModuleLive(moduleKey)
@@ -727,13 +1105,73 @@ local function NewTabBar(parent)
     rule:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, -4)
     rule:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, -4)
     bar._zRule = rule
+    -- (settings window: EllesmereUI's dark band behind the tabs)
+    local band = bar:CreateTexture(nil, "BACKGROUND", nil, -6)
+    band._zui_own = true
+    band:SetTexture(ns.FLAT)
+    band:SetAllPoints(bar)
+    band:SetVertexColor(0, 0, 0, 0.2)
+    band:Hide()
+    bar._zBand = band
     return bar
 end
+
+-- ============================================================
+-- TABS ADDED FROM OUTSIDE THE PAGE (2026-11-07, feature cluster 1)
+-- ============================================================
+-- A feature that lives in a file of its own puts its cards on another
+-- page without that page knowing it: ns.AddPageTab(pageId, tabId, label,
+-- build). An existing tab of that id gets the cards built after its own;
+-- a new id becomes a tab of its own, seated in the standard order
+-- (General, Look, Text, Animation, Sound, Position, Advanced; anything
+-- else at the end). The builder gets the page's Layout and runs on every
+-- rebuild and once, unseen, for the search index, like any tab builder.
+-- A file that loads before this one makes the list itself (ns.PageTabs).
+local PAGE_TABS = ns.PageTabs or {}
+ns.PageTabs = PAGE_TABS
+local TAB_ORDER = { general = 1, look = 2, text = 3, anim = 4, sound = 5, pos = 6, adv = 7 }
+local function AddPageTab(pageId, tabId, label, build)
+    if type(pageId) ~= "string" or type(tabId) ~= "string" or type(build) ~= "function" then return false end
+    local list = PAGE_TABS[pageId]
+    if not list then list = {} PAGE_TABS[pageId] = list end
+    list[#list + 1] = { tab = tabId, label = label or tabId, build = build }
+    -- a page already read for the search is read again, with the new tab
+    if ns.ConfigSearch and ns.ConfigSearch.Invalidate then ns.ConfigSearch.Invalidate(pageId) end
+    return true
+end
+local function ExtendTabs(pageId, tabs)
+    local extras = pageId and PAGE_TABS[pageId]
+    if not (extras and #extras > 0) then return tabs end
+    local out = {}
+    for i, t in ipairs(tabs) do out[i] = t end
+    for _, e in ipairs(extras) do
+        local at
+        for i, t in ipairs(out) do if t.id == e.tab then at = i end end
+        if at then
+            local own, extra, copy = out[at].build, e.build, {}
+            for k, v in pairs(out[at]) do copy[k] = v end
+            copy.build = function(L)
+                if own then own(L) end
+                extra(L)
+            end
+            out[at] = copy
+        else
+            local rank, pos = TAB_ORDER[e.tab] or 99, #out + 1
+            for i, t in ipairs(out) do
+                if (TAB_ORDER[t.id] or 99) > rank then pos = i break end
+            end
+            table.insert(out, pos, { id = e.tab, label = e.label, build = e.build })
+        end
+    end
+    return out
+end
+ns.AddPageTab = AddPageTab
 
 function Layout:Tabs(tabs)
     local s = State()
     s.tabs = s.tabs or {}
     local pageId = self.pageId or "?"
+    tabs = ExtendTabs(pageId, tabs)
     local current = s.tabs[pageId]
     local active
     for _, t in ipairs(tabs) do
@@ -757,15 +1195,25 @@ function Layout:Tabs(tabs)
     end
 
     local bar = ns.UIPool and ns.UIPool.Make("TabBar", NewTabBar, self.parent) or NewTabBar(self.parent)
-    bar:SetPoint("TOPLEFT", self.parent, "TOPLEFT", UI.M.MARGIN, self.y)
-    bar:SetPoint("RIGHT", self.parent, "RIGHT", -UI.M.MARGIN, 0)
-    bar:SetHeight(UI.M.BUTTON_H)
+    -- (settings window: EllesmereUI's tab bar - 40 tall rows, the first tab
+    -- 36 in, labels + 30 wide, 6 apart; Config_Window pins it under the
+    -- page's title)
+    local set = self.set
+    local BH = set and SET.TABS or UI.M.BUTTON_H
+    bar:ClearAllPoints()
+    bar:SetPoint("TOPLEFT", self.parent, "TOPLEFT", set and 0 or UI.M.MARGIN, self.y)
+    bar:SetPoint("RIGHT", self.parent, "RIGHT", set and 0 or -UI.M.MARGIN, 0)
+    bar:SetHeight(BH)
+    bar._zSet = set
+    bar._zRule:SetShown(not set)
+    if bar._zBand then bar._zBand:SetShown(set and true or false) end
     -- THE ROW FITS THE PAGE. Every button is as wide as its label (measured,
     -- in the font it is drawn in) and never narrower, so no label is ever
     -- cut short; buttons that do not fit on a line go to the next one. The
     -- row count is fixed at build (the cards below are placed from it); a
     -- resize rebuilds the page, and until then only re-flows the buttons.
-    local GAP, MIN_W = 4, 56
+    local GAP, MIN_W = set and 6 or 4, set and 40 or 56
+    local X0 = set and 36 or 0
     local buttons, natural = {}, {}
     for i, t in ipairs(tabs) do
         local b = UI.Button(bar, t.label, { width = MIN_W, tab = true,
@@ -785,18 +1233,20 @@ function Layout:Tabs(tabs)
             b._zText:SetWordWrap(false)
         end
         local tw = b._zText and math.ceil(b._zText:GetStringWidth() or 0) or (#t.label * 7)
-        natural[i] = math.max(MIN_W, tw + 24)
+        natural[i] = math.max(MIN_W, tw + (set and 30 or 24))
+        if set then b:SetHeight(BH) b:_zPaint() end
         b:SetWidth(natural[i])
         buttons[i] = b
     end
     local function Avail()
         local w = bar:GetWidth()
         if not w or w < 200 then
-            w = (self.parent:GetWidth() or 0) - 2 * UI.M.MARGIN
+            w = (self.parent:GetWidth() or 0) - (set and 0 or 2 * UI.M.MARGIN)
         end
         if not w or w < 200 then w = 420 end
-        return w
+        return w - (set and 2 * X0 or 0)
     end
+    local RGAP = set and 0 or GAP
     local function Place(width)
         local n = #buttons
         if n == 0 then return 1 end
@@ -805,22 +1255,22 @@ function Layout:Tabs(tabs)
             local b, w = buttons[i], natural[i]
             if x > 0 and x + w > width + 0.5 then x, r = 0, r + 1 end
             b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -(r - 1) * (UI.M.BUTTON_H + GAP))
+            b:SetPoint("TOPLEFT", bar, "TOPLEFT", X0 + x, -(r - 1) * (BH + RGAP))
             x = x + w + GAP
         end
         return r
     end
     local rows = Place(Avail())
-    bar:SetHeight(rows * UI.M.BUTTON_H + (rows - 1) * GAP)
+    bar:SetHeight(rows * BH + (rows - 1) * RGAP)
     bar:SetScript("OnSizeChanged", function(_, w)
-        if w and w > 0 then Place(w) end
+        if w and w > 0 then Place(w - (set and 2 * X0 or 0)) end
     end)
     -- a rule under the row, so the tabs read as a header for what follows
     local rule = bar._zRule
     local a = ns.GetColor and ns.GetColor("ui", "border")
     if a then rule:SetVertexColor(a.r, a.g, a.b, 1) end
 
-    self.y = self.y - bar:GetHeight() - 12
+    self.y = self.y - bar:GetHeight() - (set and 0 or 12)
     self.tabBar, self.tabList = bar, tabs
 
     -- Each tab's frames are the run of children it added to the page, so
@@ -866,6 +1316,94 @@ local function AuditModules()
         Print("|cFFFF6666config:|r no sidebar home for: "
             .. table.concat(missing, ", ") .. " (add them to MODULE_GROUPS)")
     end
+end
+
+-- ============================================================
+-- PARTS ON AND OFF (the sidebar's power buttons)
+-- ============================================================
+-- A part is its addon (Zacui_Bars, Zacui_UnitFrames...): on means the
+-- game loads it, off means it does not - one switch, the AddOns list's,
+-- set from here for THIS character (a profile is a character's too).
+--   ns.PartState(addon)  "on" / "off" (loaded or not), "missing" (not in
+--                        the AddOns folder), and whether the next load
+--                        changes that (the second value: true = pending)
+--   ns.AskPart(addon, label, on)  the "Turn off and reload" question
+local function AddonApi()
+    local C = C_AddOns
+    return {
+        loaded = (C and C.IsAddOnLoaded) or IsAddOnLoaded,
+        info = (C and C.GetAddOnInfo) or GetAddOnInfo,
+        exists = C and C.DoesAddOnExist,
+        enable = (C and C.EnableAddOn) or EnableAddOn,
+        disable = (C and C.DisableAddOn) or DisableAddOn,
+        -- the new call takes (name, character), the old one (character, name)
+        state = (C and C.GetAddOnEnableState) and function(name, who) return C.GetAddOnEnableState(name, who) end
+            or (GetAddOnEnableState and function(name, who) return GetAddOnEnableState(who, name) end),
+    }
+end
+
+local function Me() return (UnitName and UnitName("player")) or nil end
+
+function ns.PartState(addon)
+    if type(addon) ~= "string" then return nil end
+    local A = AddonApi()
+    local okL, loaded = pcall(A.loaded or function() return false end, addon)
+    loaded = okL and loaded and true or false
+    local exists = loaded
+    if not exists then
+        if A.exists then
+            local ok, e = pcall(A.exists, addon)
+            exists = ok and e and true or false
+        elseif A.info then
+            local ok, name, _, _, _, reason = pcall(A.info, addon)
+            exists = ok and name ~= nil and reason ~= "MISSING"
+        end
+    end
+    if not exists then return "missing", false end
+    local next = loaded
+    if A.state then
+        local ok, st = pcall(A.state, addon, Me())
+        if ok and type(st) == "number" then next = st > 0 end
+    end
+    return loaded and "on" or "off", (next ~= loaded)
+end
+
+-- Turns the part on or off for the next load. The reload is asked for
+-- FIRST, inside the click (WoW Forever; UIF_Dialogs' ns.AskReload), then
+-- the AddOns list is written.
+function ns.SetPartEnabled(addon, on)
+    local A = AddonApi()
+    local fn = on and A.enable or A.disable
+    if not fn then return false end
+    return pcall(fn, addon, Me())
+end
+
+function ns.AskPart(addon, label, on)
+    if not (ns.AskReload and addon) then return end
+    label = label or addon
+    local text
+    if on then
+        text = label .. " turns on for this character after the reload."
+    else
+        text = label .. " turns off for this character. The game's own version comes back after the reload, "
+            .. "and its settings are kept. Turn it on again here any time."
+    end
+    ns.AskReload(text, {
+        title = (on and "Turn on " or "Turn off ") .. label,
+        acceptText = on and "Turn on and reload" or "Turn off and reload",
+        apply = function() ns.SetPartEnabled(addon, on) end,
+    })
+end
+
+-- A part that adds its own sidebar group when it loads (Class HUDs) keeps a
+-- row while it is off, so it can be turned on again from here: added once,
+-- at login, only when the part is in the AddOns folder and did not load.
+function ns.KeepPartRow(id, label, addon, afterId)
+    for _, item in ipairs(MENU) do if item.id == id then return end end
+    if ns.PartState(addon) ~= "off" then return end
+    local at = #MENU + 1
+    for i, item in ipairs(MENU) do if item.id == afterId then at = i + 1 break end end
+    table.insert(MENU, at, { id = id, label = label, addon = addon, keywords = addon:lower() })
 end
 
 -- shared with later ZacUI files

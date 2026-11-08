@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Meter|r
 ## Notes: ZacUI damage meter and threat windows. Replaces Details!.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -20,8 +20,15 @@ Meter_Combat.lua
 Meter_Parser.lua
 Meter_GameMeter.lua
 Meter_Windows.lua
+Meter_Win_Menus.lua
+Meter_Win_Frame.lua
 Meter_Threat.lua
 Meter_ThreatGlow.lua
 Meter_Info.lua
+Meter_Win_Breakdown.lua
+Meter_Win_Live.lua
 Meter_RaidSummary.lua
 Config_PagesMeter.lua
+# Drag to customise in the meter preview (ZacUI's UIF_PreviewDrag): the
+# header icons' order.
+Meter_PreviewDrag.lua

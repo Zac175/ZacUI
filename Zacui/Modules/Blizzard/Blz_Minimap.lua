@@ -214,7 +214,7 @@ local function PaintOutline(frame, key, size)
         if size then
             local w = math.max(0, math.min(4, size))
             t:SetShown(w > 0)
-            if w > 0 then
+            if w > 0 and not (ns.Pixel and ns.Pixel.SetEdgeSize(t, w)) then
                 if i <= 2 then t:SetHeight(w) else t:SetWidth(w) end
             end
         end
@@ -1217,12 +1217,14 @@ function PillEdge(frame)
         if side == "TOP" or side == "BOTTOM" then
             e:SetPoint(side .. "LEFT")
             e:SetPoint(side .. "RIGHT")
-            e:SetHeight(1)
         else
             e:SetPoint("TOP" .. side)
             e:SetPoint("BOTTOM" .. side)
-            e:SetWidth(1)
         end
+        -- one physical pixel under ZacUI's look (Core_Pixel, HD polish)
+        if ns.Pixel then ns.Pixel.Edge(e, side, frame)
+        elseif side == "TOP" or side == "BOTTOM" then e:SetHeight(1)
+        else e:SetWidth(1) end
         e:Hide()
         strips[#strips + 1] = e
     end
@@ -1265,7 +1267,7 @@ local function BuildPanel()
     UI.Fill(h, "ui", "headerBg")
     -- The house hairline under a title: accent, at 60%.
     local rule = Rule(h, "ui", "accent", 0.6)
-    rule:SetHeight(1)
+    if ns.Pixel then ns.Pixel.Edge(rule, "BOTTOM", h) else rule:SetHeight(1) end
     rule:SetPoint("BOTTOMLEFT")
     rule:SetPoint("BOTTOMRIGHT")
     h._zPaint = function(self)
@@ -1280,7 +1282,7 @@ local function BuildPanel()
     f:SetPoint("TOPRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)
     UI.Fill(f, "ui", "headerBg")
     local top = Rule(f, "ui", "border")
-    top:SetHeight(1)
+    if ns.Pixel then ns.Pixel.Edge(top, "TOP", f) else top:SetHeight(1) end
     top:SetPoint("TOPLEFT")
     top:SetPoint("TOPRIGHT")
     mm.clockSeg = CreateFrame("Frame", nil, f)
@@ -1294,9 +1296,9 @@ local function BuildPanel()
     mm.measure:SetAlpha(0)
     mm.measure:SetPoint("TOPLEFT", p, "TOPLEFT", 0, 0)
     mm.divL = Rule(f, "ui", "border", nil, "OVERLAY")
-    mm.divL:SetWidth(1)
     mm.divR = Rule(f, "ui", "border", nil, "OVERLAY")
-    mm.divR:SetWidth(1)
+    if ns.Pixel then ns.Pixel.Edge(mm.divL, "LEFT", f) ns.Pixel.Edge(mm.divR, "LEFT", f)
+    else mm.divL:SetWidth(1) mm.divR:SetWidth(1) end
     f._zPaint = function(self)
         UI.PaintBox(self)
         PaintRule(top)
@@ -1445,7 +1447,7 @@ local function CornerIcon(frame, icon, point, x, y, name, map)
         icon:ClearAllPoints()
         icon:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
         icon:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
-        if icon.SetTexCoord then icon:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+        if icon.SetTexCoord then ns.Look.CropIcon(icon, nil, nil, { border = false }) end
         SharpenIcon(icon)
     end
     if not frame._zRing then
@@ -1486,12 +1488,19 @@ Modules.minimap = function()
         f:HookScript("OnShow", function(fh) fh:Hide() end)
         if f.UnregisterAllEvents then f:UnregisterAllEvents() end
     end
-    Minimap:SetMaskTexture("Interface\\ChatFrame\\ChatFrameBackground")
+    -- THE LOOK (Core_Look, part "minimap"): ZacUI's square with the game's
+    -- ring hidden, or under Classic and the modern looks the round map
+    -- with the game's own ring kept. Resolved once here; every feature
+    -- (zoom, pills, coords, panel) is the same either way.
+    local mmSpec = (ns.Look and ns.Look.MinimapSpec and ns.Look.MinimapSpec("minimap"))
+        or { shape = "SQUARE", mask = "Interface\\ChatFrame\\ChatFrameBackground", chrome = "hide" }
+    Minimap:SetMaskTexture(mmSpec.mask)
     -- The shape addons ask about before placing their icons (LibDBIcon
     -- buttons, and the HereBeDragons pins Questie, GatherMate and TomTom
     -- draw). Without it they assume a circle and drop every icon that
     -- falls in the square's corners.
-    GetMinimapShape = function() return "SQUARE" end
+    local shape = mmSpec.shape or "SQUARE"
+    GetMinimapShape = function() return shape end
 
     if MinimapBackdrop then StripTextures(MinimapBackdrop) end
     -- Explicit appends, not a table literal: a nil global in a literal
@@ -1511,6 +1520,8 @@ Modules.minimap = function()
             and MinimapCluster.Tracking.Background)
         AddChrome(MiniMapMailBorder)
         AddChrome(MiniMapBattlefieldBorder)
+        -- the round looks keep the game's ring, compass and borders
+        if mmSpec.chrome == "keep" then return end
         for _, region in ipairs(chrome) do region:Hide() end
     end
     HideMinimapChrome()
@@ -1973,7 +1984,7 @@ Modules.minimap = function()
     -- re-hides of insecure art; no EditMode* frame is ever touched.
     local function ReassertMinimap()
         if not Minimap then return end
-        Minimap:SetMaskTexture("Interface\\ChatFrame\\ChatFrameBackground")
+        Minimap:SetMaskTexture(mmSpec.mask)
         HideMinimapChrome()
         Layout()
     end

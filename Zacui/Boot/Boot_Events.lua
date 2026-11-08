@@ -196,6 +196,12 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
             -- table (or an empty one) means no character on this account
             -- has run ZacUI; only then is the first-run welcome offered
             -- (UI/Tutorial, read at PLAYER_LOGIN).
+            -- "Reset ZacUI" leaves only its mark: that is a fresh install
+            -- too, and the setup opens on its own (Tutorial_Core)
+            if type(ZacUIDB) == "table" and ZacUIDB.resetOpenSetup and next(ZacUIDB, next(ZacUIDB)) == nil then
+                ZacUIDB = nil
+                ns.openSetupAfterReset = true
+            end
             ns.freshInstall = type(ZacUIDB) ~= "table" or next(ZacUIDB) == nil
             ZacUIDB = ZacUIDB or {}
             ZacUIDB.modules = ZacUIDB.modules or {}
@@ -209,6 +215,13 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
                 end
             end
             ZacUIDB.font    = ZacUIDB.font or { name = nil, delta = 0, outline = nil }
+            -- HD polish (2026-11-07): a FRESH install (nothing saved on this
+            -- account) starts on the ZacUI look's crisp condensed face. An
+            -- existing install keeps whatever it has, a hand-picked font or
+            -- "Blizzard default" alike; the Fonts page offers the face.
+            if ns.freshInstall and ZacUIDB.font.name == nil and ns.MEDIA_FONT_HD_NAME then
+                ZacUIDB.font.name = ns.MEDIA_FONT_HD_NAME
+            end
             ZacUIDB.insets  = ZacUIDB.insets or {}
             ZacUIDB.lines   = ZacUIDB.lines or {}
             -- TWO colour stores, both kept: `colors` is the 1.x flat
@@ -327,6 +340,9 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
                 "|cFFFF3333[ZacUI] OLD 'ReadycheckUI' ADDON DETECTED - delete the Interface\\\\AddOns\\\\ReadycheckUI folder and /reload.|r")
         end
 
+        -- the worn profile is in place now: the Look reads it once more
+        -- before anything is dressed (Core_Look)
+        if ns.Look and ns.Look.Relatch then ns.Look.Relatch() end
         ApplyAll()
         ApplyAllMovers()
         -- Catches a module that was added to the run order but never given
@@ -338,6 +354,9 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
         -- variables only exist after its own ADDON_LOADED, and load order
         -- between two addons is not ours to control.
         if ns.FirstRunImport then pcall(ns.FirstRunImport) end
+        -- SETUP2: what a part that is off this session left in the game's
+        -- settings goes back (nothing at all unless the CVar record holds any)
+        if ns.CVar and ns.CVar.AtLogin then pcall(ns.CVar.AtLogin) end
         local off = {}
         for _, m in ipairs(MODULE_ORDER) do
             if not ZacUIDB.modules[m] then off[#off + 1] = m end

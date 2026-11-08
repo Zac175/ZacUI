@@ -357,6 +357,14 @@ local function BuildModel(parent)
         self.zoom = max(0, min(self.maxZoom, self.zoom + delta * (MODELFRAME_ZOOM_STEP or 0.15)))
         if self.SetPortraitZoom then self:SetPortraitZoom(self.zoom) end
     end)
+    -- WoW Forever: the modern client loads the model after SetUnit and
+    -- resets the camera then; the framing goes back on once it is in
+    if _G.ZACUI_MODERN and m.HasScript and m:HasScript("OnModelLoaded") then
+        m:SetScript("OnModelLoaded", function(self)
+            self:SetRotation(self.rotation)
+            if self.SetPortraitZoom then self:SetPortraitZoom(self.zoom) end
+        end)
+    end
     m:SetScript("OnHide", StopDrag)
     m:RegisterEvent("UI_SCALE_CHANGED")
     m:RegisterEvent("DISPLAY_SIZE_CHANGED")
@@ -502,7 +510,9 @@ local HONOR_ROWS = {
 local function Num(v) return v and tostring(v) or DASH end
 
 local function HasHonorAPI()
-    return GetInspectHonorData and HasInspectHonorData and RequestInspectHonorData and true or false
+    -- (WoW Forever has none of the Classic honor calls)
+    return GetInspectHonorData and HasInspectHonorData and RequestInspectHonorData
+        and GetPVPRankInfo and UnitPVPRank and true or false
 end
 
 -- InspectHonorFrame_OnShow: ask the server once, draw when it answers.

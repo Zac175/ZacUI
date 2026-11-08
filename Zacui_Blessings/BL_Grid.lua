@@ -54,7 +54,7 @@ local function Cell(parent)
     c.icon = c:CreateTexture(nil, "ARTWORK")
     c.icon:SetPoint("TOPLEFT", 2, -2)
     c.icon:SetPoint("BOTTOMRIGHT", -2, 2)
-    c.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(c.icon)
     -- an empty cell: a faint dash, not a white square
     c.empty = c:CreateFontString(nil, "OVERLAY")
     -- (ZacUI's font, kept up when it changes)
@@ -185,11 +185,11 @@ function Grid.NewHeader(parent, width, preview)
                 h.icon:SetTexCoord(unpack(CLASS_ICON_TCOORDS[cls]))
             else
                 h.icon:SetTexture(D.CLASS_ICON[cls])
-                h.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                ZacUI.Look.CropIcon(h.icon)
             end
         else
             h.icon:SetTexture(Icon(465))
-            h.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            ZacUI.Look.CropIcon(h.icon)
         end
         header.cells[slot] = h
         if preview and ns.TagElement then ns.TagElement(h.count, "blgrid.count") ns.TagElement(h, "blgrid.count") end

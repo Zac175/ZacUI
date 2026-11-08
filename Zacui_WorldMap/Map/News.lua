@@ -7,6 +7,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local mod = ns:GetModule("worldmap")
 local Look, L = ns.Look, ns.L
 

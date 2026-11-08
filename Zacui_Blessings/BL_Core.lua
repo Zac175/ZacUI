@@ -434,6 +434,7 @@ function BL.ScanMe()
         for _, id in ipairs(ids) do
             if IsSpellKnown and IsSpellKnown(id) then
                 local start, duration = GetSpellCooldown(id)
+                if ns.Hidden(start, duration) then start, duration = 0, 0 end   -- (hidden on WoW Forever)
                 p.cd[i] = { start = start or 0, duration = duration or 0 }
             end
         end

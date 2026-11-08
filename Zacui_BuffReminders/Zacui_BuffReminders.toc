@@ -1,8 +1,9 @@
 ## Interface: 11509, 20506, 16001
+## AllowLoadGameType: vanilla, tbc, camelot
 ## Title: ZacUI |cff33ff99Buff Reminders|r
 ## Notes: ZacUI buff reminders: your class's group buffs (Battle Shout, Arcane Intellect, Fortitude, Mark of the Wild...) - a reminder when you or the group miss one, and a tracker of who needs it, with a click to cast.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -21,3 +22,5 @@ BR_Icon.lua
 BR_Tracker.lua
 BR_Import.lua
 BR_Config.lua
+# Drag to customise in the reminders preview (ZacUI's UIF_PreviewDrag).
+BR_PreviewDrag.lua

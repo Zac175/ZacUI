@@ -28,6 +28,9 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's quest log is inside the world map):
+-- this window stands down here, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_questlog") then return end
 
 -- shared state from earlier ZacUI files
 local GetColor = ns.GetColor

@@ -128,6 +128,11 @@ local function OnMerchantShow()
     if IsShiftKeyDown() then return end
     if d.repair and CanMerchantRepair() then
         local cost = GetRepairAllCost()
+        -- (overnight gap build 1108) the guild's repair funds first, when
+        -- ticked and the guild lets you draw that much; else your own gold
+        if d.repairGuild and cost and cost > 0 and QoL.GuildRepair and QoL.GuildRepair(cost, d.repairSummary) then
+            cost = 0
+        end
         if cost and cost > 0 and GetMoney() >= cost then
             RepairAllItems()
             if d.repairSummary then
@@ -141,6 +146,19 @@ local function OnMerchantShow()
         sellIterations, totalPrice = 0, 0
         sellTicker = C_Timer.NewTicker(0.2, SellJunkPass)
     end
+end
+
+-- Repair from the guild bank's funds: true when it did. The guild must let
+-- you repair from its bank (CanGuildBankRepair) and draw at least the cost
+-- today (GetGuildBankWithdrawMoney; -1 is no limit). TBC, Forever, Retail.
+function QoL.GuildRepair(cost, say)
+    if not (IsInGuild and IsInGuild()) then return false end
+    if type(CanGuildBankRepair) ~= "function" or not CanGuildBankRepair() then return false end
+    local left = type(GetGuildBankWithdrawMoney) == "function" and GetGuildBankWithdrawMoney() or 0
+    if left ~= -1 and (tonumber(left) or 0) < cost then return false end
+    RepairAllItems(true)
+    if say then Print("Repaired for " .. GetCoinText(cost) .. " from the guild bank.") end
+    return true
 end
 
 -- The merchant window's "Sell junk" button: the same pass, on demand,

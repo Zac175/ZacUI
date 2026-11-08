@@ -250,7 +250,14 @@ local function AuraMatches(unit, trig)
         for i = 1, 40 do
             local name, spellId
             if getData then
-                local a = getData(unit, i, filter)
+                local a
+                if _G.ZACUI_MODERN then
+                    -- (WoW Forever and Retail can refuse the read outright: as none)
+                    local ok, r = pcall(getData, unit, i, filter)
+                    a = ok and r or nil
+                else
+                    a = getData(unit, i, filter)
+                end
                 -- (WoW Forever hides auras in combat: read as none)
                 if not a or (ns.AuraHidden and ns.AuraHidden(a)) then break end
                 name, spellId = a.name, a.spellId
@@ -288,7 +295,7 @@ local function ScriptMatches(script, f, castID, castName)
         local npcId = f.npcId
         if npcId == nil then npcId = NP.NpcIdFromUnit(f.unit) end
         if npcId and trig.ids[npcId] then return true end
-        local nm = UnitName(f.unit)
+        local nm = NP.SafeName(f.unit)
         return (nm and trig.names[nm:lower()]) or false
     end
 end

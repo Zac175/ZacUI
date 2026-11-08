@@ -137,7 +137,7 @@ function NP.BuildHealth(f)
     local w = Col("windowBg")
     bg:SetColorTexture(w.r, w.g, w.b, 0.85)
     hb.bg = bg
-    AddPixelBorder(hb)
+    AddPixelBorder(hb, nil, nil, "nameplates")
 
     -- mouseover glow, the profile's hover_highlight (additive white)
     local hover = hb:CreateTexture(nil, "OVERLAY", nil, 2)
@@ -282,6 +282,15 @@ function NP.LayoutFrame(f)
     -- the level (left) and the health percent (right). It has to ride the
     -- bar frame, or the bar draws over it.
     local npos = cfg.namePos or (cfg.nameInside and "inside") or "above"
+    -- match pass (ZacUI's look): a name above the bar would sit under an
+    -- icon row over the plate (Readycheck's nameplate auras, or a centre
+    -- group of ZacUI's own debuff groups that reach above the bar), so it
+    -- goes inside the bar while such a row is on
+    f._npIconRow = nil
+    if npos == "above" and not f.isFriend and NP.MatchOn and NP.MatchOn() and NP.IconRowOver() then
+        npos = "inside"
+        f._npIconRow = true
+    end
     f._nameInside = (npos == "inside" and not f.nameOnly) and true or false
     f.name:SetParent(f._nameInside and f.health or f)
     f.name:SetDrawLayer("OVERLAY", 7)
@@ -298,7 +307,8 @@ function NP.LayoutFrame(f)
             "RIGHT", f.percent, "LEFT", -3, 0)
     else
         f.health:Show()
-        nameDef = SetDef(f, "name", "BOTTOM", f.health, "TOP", 0, 2 + overhang, "CENTER")
+        -- (match pass: 7 px over the bar, the reference's 4 + 3)
+        nameDef = SetDef(f, "name", "BOTTOM", f.health, "TOP", 0, ((NP.MatchOn and NP.MatchOn()) and 7 or 2) + overhang, "CENTER")
     end
 
     local ApplyNPFont = NP.ApplyNPFont
@@ -309,7 +319,7 @@ function NP.LayoutFrame(f)
     if pc then f.percent:SetTextColor(pc[1] or 1, pc[2] or 1, pc[3] or 1, pc[4] or 1) end
     -- the health percent inside the bar's right end, the level's spot is
     -- NP.MarkerLevel's (it moves while a marker sits at the left end)
-    NP.Place(f, f.percent, "percent", SetDef(f, "percent", "RIGHT", f.health, "RIGHT", -1, 0))
+    NP.Place(f, f.percent, "percent", SetDef(f, "percent", "RIGHT", f.health, "RIGHT", (NP.MatchOn and NP.MatchOn()) and -2 or -1, 0))
     f._levelX = nil
     local twoName = NP.Place(f, f.name, "name", nameDef)
     if not f._nameInside or not twoName then
@@ -428,6 +438,93 @@ function NP.SetTargetNeon(f, on)
     end
 end
 
+-- Is there an icon row over the plate's middle? Readycheck's nameplate
+-- auras (only while Readycheck is loaded and they are on) or a centre
+-- group of ZacUI's own debuff groups, read from their saved settings like
+-- the soft-target arrows do (NP_SoftTarget's AuraClearance): an enabled
+-- centre group whose icons reach above the bar's top (half a 20 px bar).
+-- Asked at layout time only.
+function NP.IconRowOver()
+    local function reaches(c)
+        if not (type(c) == "table" and c.enabled and type(c.groups) == "table") then return false end
+        for _, g in ipairs(c.groups) do
+            if g.enabled ~= false and (g.attach or "center") == "center" then
+                local half = ((tonumber(g.fontSize) or 11) + 2) / 2
+                if (tonumber(g.offsetY) or 0) + half > 10 then return true end
+            end
+        end
+        return false
+    end
+    local NPD = NP.Debuffs
+    local mine = NPD and NPD.Cfg and NPD.Cfg()
+    if reaches(mine) then return true end
+    local RC = _G.Readycheck
+    local NA = RC and RC.nameplateAuras
+    local c = NA and NA.cfg and NA.cfg()
+    return reaches(c)
+end
+
+-- The match pass's target cue (ZacUI's look, d.target.glow): a soft glow
+-- reaching d.target.glowSize (6) px out round the bar in glowColor (the
+-- reference's blue), drawn as ZacUI's own gradient strips - four sides
+-- fading outward and four corners - additive, made on the first target.
+local GLOW_DEF = { 0.41, 0.67, 1.0 }
+local function GlowGradient(t, orient, r, g, b, a, outerFirst)
+    local c0 = outerFirst and 0 or a
+    local c1 = outerFirst and a or 0
+    if CreateColor and t.SetGradient
+       and pcall(t.SetGradient, t, orient, CreateColor(r, g, b, c0), CreateColor(r, g, b, c1)) then
+        t:SetVertexColor(1, 1, 1, 1)
+        return
+    end
+    if t.SetGradientAlpha and pcall(t.SetGradientAlpha, t, orient, r, g, b, c0, r, g, b, c1) then return end
+    t:SetVertexColor(r, g, b, a * 0.5)
+end
+function NP.SetTargetGlow(f, on)
+    local hb = f.health
+    if f.nameOnly then on = false end
+    local gl = hb and hb.matchGlow
+    if not on then
+        if gl then for _, t in ipairs(gl) do t:Hide() end end
+        return
+    end
+    local d = DB()
+    local n = tonumber(d.target.glowSize) or 6
+    local c = d.target.glowColor or GLOW_DEF
+    local r, g, b, a = c[1] or c.r or 0.41, c[2] or c.g or 0.67, c[3] or c.b or 1, c[4] or c.a or 1
+    if not gl then
+        gl = {}
+        local host = f.tgtCue or hb
+        for i = 1, 8 do
+            local t = host:CreateTexture(nil, "BACKGROUND", nil, -7)
+            t:SetTexture([[Interface\Buttons\WHITE8X8]])
+            t:SetBlendMode("ADD")
+            gl[i] = t
+        end
+        hb.matchGlow = gl
+    end
+    local host = f.tgtCue or hb
+    local T, B, L, R, TL, TR, BL, BR = gl[1], gl[2], gl[3], gl[4], gl[5], gl[6], gl[7], gl[8]
+    for _, t in ipairs(gl) do t:ClearAllPoints() end
+    T:SetPoint("BOTTOMLEFT", host, "TOPLEFT", 0, 0); T:SetPoint("BOTTOMRIGHT", host, "TOPRIGHT", 0, 0); T:SetHeight(n)
+    B:SetPoint("TOPLEFT", host, "BOTTOMLEFT", 0, 0); B:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", 0, 0); B:SetHeight(n)
+    L:SetPoint("TOPRIGHT", host, "TOPLEFT", 0, 0); L:SetPoint("BOTTOMRIGHT", host, "BOTTOMLEFT", 0, 0); L:SetWidth(n)
+    R:SetPoint("TOPLEFT", host, "TOPRIGHT", 0, 0); R:SetPoint("BOTTOMLEFT", host, "BOTTOMRIGHT", 0, 0); R:SetWidth(n)
+    TL:SetPoint("BOTTOMRIGHT", host, "TOPLEFT", 0, 0); TR:SetPoint("BOTTOMLEFT", host, "TOPRIGHT", 0, 0)
+    BL:SetPoint("TOPRIGHT", host, "BOTTOMLEFT", 0, 0); BR:SetPoint("TOPLEFT", host, "BOTTOMRIGHT", 0, 0)
+    for i = 5, 8 do gl[i]:SetSize(n, n) end
+    -- sides fade outward; corners at half strength fading the same way
+    GlowGradient(T, "VERTICAL", r, g, b, a, false)
+    GlowGradient(B, "VERTICAL", r, g, b, a, true)
+    GlowGradient(L, "HORIZONTAL", r, g, b, a, true)
+    GlowGradient(R, "HORIZONTAL", r, g, b, a, false)
+    GlowGradient(TL, "VERTICAL", r, g, b, a * 0.5, false)
+    GlowGradient(TR, "VERTICAL", r, g, b, a * 0.5, false)
+    GlowGradient(BL, "VERTICAL", r, g, b, a * 0.5, true)
+    GlowGradient(BR, "VERTICAL", r, g, b, a * 0.5, true)
+    for _, t in ipairs(gl) do t:Show() end
+end
+
 function NP.SetHoverGlow(f, alpha)
     if f.health and f.health.hover then
         f.health.hover:SetAlpha(alpha or 0)
@@ -522,7 +619,7 @@ function NP.UpdateHealth(f)
         f._prioDead = hp <= 0
         if NP.PriorityCount then NP.PriorityCount() end
     end
-    NP.FillHealth(f, hp, hpMax, UnitGUID(f.unit))
+    NP.FillHealth(f, hp, hpMax, NP.SafeGUID(f.unit))
 end
 
 -- The bar and the percent from the numbers alone - the live plate above
@@ -574,7 +671,7 @@ end
 function NP.MarkerLevel(f)
     if not (f and f.level and f.raidIcon) then return end
     local marked = f.raidIcon:IsShown()
-    local x = (f._markerLevel and marked) and (f._markerLevel + 3) or 1
+    local x = (f._markerLevel and marked) and (f._markerLevel + 3) or ((NP.MatchOn and NP.MatchOn()) and 4 or 1)
     if f._levelX ~= x then
         f._levelX = x
         NP.Place(f, f.level, "level", NP.SetDef(f, "level", "LEFT", f.health, "LEFT", x, 0))
@@ -596,6 +693,7 @@ end
 -- read here, so the samples obey it too
 function NP.FillRaidMark(f, mark)
     if not DB().extras.raidMark then mark = nil end
+    if ns.IsSecret(mark) then mark = nil end   -- (WoW Forever can hide it: no mark)
     if mark and mark >= 1 and mark <= 8 then
         if f._markIdx ~= mark then
             f._markIdx = mark
@@ -620,7 +718,8 @@ end
 function NP.UpdateName(f)
     if not f.unit then return end
     local unit = f.unit
-    f.name:SetText(UnitName(unit) or "")
+    -- (WoW Forever: the surname as Core_Names says; elsewhere UnitName)
+    f.name:SetText((ns.UnitDisplayName and ns.UnitDisplayName(unit) or UnitName(unit)) or "")
     if NP.CheckPriority then NP.CheckPriority(f) end
 
     -- The marker is a full-size texture centred on the bar, sized in
@@ -724,9 +823,16 @@ local function ThreatColor(f, d, fk)
     elseif UnitDetailedThreatSituation then
         isTanking, status, threatPct =
             UnitDetailedThreatSituation("player", unit)
+        -- WoW Forever hides threat in combat (secret values): nothing to
+        -- compare, so no threat colour - the plate keeps its normal one
+        if (issecretvalue ~= nil and (issecretvalue(isTanking) or issecretvalue(status) or issecretvalue(threatPct))) then
+            threatPct, threatRead, threatTank, threatStatus = nil, false, nil, nil
+            return nil, false
+        end
         threatRead, threatTank, threatStatus = true, isTanking, status
     elseif UnitThreatSituation then
         status = UnitThreatSituation("player", unit)
+        if issecretvalue ~= nil and issecretvalue(status) then return nil, false end
         isTanking = status and status >= 2
     end
 

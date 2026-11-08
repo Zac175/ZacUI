@@ -29,6 +29,17 @@ local C = _G.C_Container
 -- the inventory view are the same code with a different list.
 local BACKPACK_BAGS = { 0, 1, 2, 3, 4 }
 local BANK_BAGS     = { -1, 5, 6, 7, 8, 9, 10, 11 }
+-- A client with a reagent bag (Retail: Enum.BagIndex.ReagentBag, and the
+-- game's own count of reagent bag slots above zero) carries it with the
+-- backpack. Read from the game's constants, as Blizzard's bag code does,
+-- so a Classic client (no reagent bag, bank bags from 5) is untouched.
+do
+    local IC = _G.Constants and _G.Constants.InventoryConstants
+    local rb = _G.Enum and _G.Enum.BagIndex and _G.Enum.BagIndex.ReagentBag
+    if type(rb) == "number" and IC and (tonumber(IC.NumReagentBagSlots) or 0) > 0 then
+        BACKPACK_BAGS[#BACKPACK_BAGS + 1] = rb
+    end
+end
 
 local BANK_CONTAINER = _G.BANK_CONTAINER or -1
 local NUM_BANKBAGSLOTS = _G.NUM_BANKBAGSLOTS or 7
@@ -704,6 +715,10 @@ end
 ns.Bags = {
     GoldRows = GoldRows,
     GoldTotal = GoldTotal,
+    -- (Bags_Alts: the footer's Alts list forgets a character by its key
+    -- and marks the total dirty)
+    GoldKey = GoldKey,
+    GoldChanged = GoldChanged,
     FromReadycheck = function() return ReadycheckLedger() ~= nil end,
     BACKPACK_BAGS = BACKPACK_BAGS,
     BANK_BAGS = BANK_BAGS,

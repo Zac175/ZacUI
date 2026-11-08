@@ -107,6 +107,15 @@ function UI.Confirm(opts)
     confirm.message:SetText(opts.text or "")
     confirm.accept:SetLabel(opts.acceptText or (ACCEPT or "Okay"))
     confirm._onCancel = opts.onCancel
+    -- noCancel: a notice with one button (Okay), centred
+    confirm.accept:ClearAllPoints()
+    if opts.noCancel then
+        confirm.cancel:Hide()
+        confirm.accept:SetPoint("BOTTOM", confirm, "BOTTOM", 0, 12)
+    else
+        confirm.cancel:Show()
+        confirm.accept:SetPoint("BOTTOMRIGHT", confirm, "BOTTOM", -5, 12)
+    end
     confirm._zDestructive = nil
     confirm.accept._zDestructive = opts.destructive or nil
     confirm.accept._zHot = nil
@@ -136,6 +145,187 @@ function UI.Confirm(opts)
     confirm:SetHeight(M.TITLEBAR + 14 + h + 46)
     UI.OpenWindow(confirm)
     return confirm
+end
+
+-- ============================================================
+-- RELOAD
+-- ============================================================
+-- ONE WAY TO ASK FOR A RELOAD. Every change that only takes hold after a
+-- reload asks with ns.AskReload(reason) - not a chat line the player
+-- misses, not a button of its own on each page:
+--
+--   ns.AskReload(reason)                    "Reload needed": reason, Reload now / Later
+--   ns.AskReload(reason, { apply = fn,      fn writes the change; it runs only on
+--       onCancel = fn, title = "..." })     Reload now, so Later leaves nothing half done
+--   ns.RequestReload()                      reload, no question (a click that says so)
+--
+-- THE RELOAD IS ASKED FOR FIRST. WoW Forever reloads only when the reload
+-- is asked for at the very start of a click: build 70425 turned down one
+-- asked for after the click had saved things. So Reload now asks for it
+-- first and runs the change's own writes (apply) after, still inside the
+-- same click; the client reloads once the click has finished, so those
+-- writes are what the reload saves. Era and TBC do not mind the order.
+local reload
+
+function ns.RequestReload()
+    if type(ReloadUI) == "function" then ReloadUI()
+    elseif C_UI and C_UI.Reload then C_UI.Reload() end
+end
+
+function UI.AskReload(reason, opts)
+    if type(reason) == "table" then opts, reason = reason, reason.text end
+    opts = opts or {}
+    if not reload then
+        reload = BuildBase("ZacUIReloadDialog", 320, 140, "Reload needed")
+        reload.message = UI.Font(reload, F.LABEL, { justify = "LEFT", width = 288 })
+        reload.message:SetPoint("TOPLEFT", 16, -(M.TITLEBAR + 14))
+        reload.accept = UI.Button(reload, "Reload now", { width = 100, height = 22 })
+        reload.accept:SetPoint("BOTTOMRIGHT", reload, "BOTTOM", -5, 12)
+        reload.accept:SetActive(true)
+        reload.later = UI.Button(reload, "Later", { width = 100, height = 22,
+            tooltip = "Keeps playing. The change waits for your next reload or login." })
+        reload.later:SetPoint("BOTTOMLEFT", reload, "BOTTOM", 5, 12)
+        reload.later:SetScript("OnClick", function() UI.CloseWindow(reload) end)
+        reload.accept:SetScript("OnClick", function()
+            -- the reload first (see above), then the change's own writes
+            local apply = reload._apply
+            reload._apply, reload._onCancel = nil, nil
+            ns.RequestReload()
+            if apply then
+                local ok, err = pcall(apply)
+                if not ok and ns.Print then ns.Print("reload: " .. tostring(err)) end
+            end
+            UI.CloseWindow(reload)
+        end)
+        -- Later, the X and Escape all land here: not reloading
+        reload:HookScript("OnHide", function()
+            local fn = reload._onCancel
+            reload._apply, reload._onCancel = nil, nil
+            if fn then fn() end
+        end)
+    end
+    reload.titleText:SetText(opts.title or "Reload needed")
+    reload.message:SetText(reason or "This change takes hold after a reload.")
+    reload.accept:SetWidth(100)   -- (a longer label widens it; the next question starts narrow)
+    reload.accept:SetLabel(opts.acceptText or "Reload now")
+    reload._apply, reload._onCancel = opts.apply, opts.onCancel
+    local h = math.max(40, reload.message:GetStringHeight() + 8)
+    reload:SetHeight(M.TITLEBAR + 14 + h + 46)
+    UI.OpenWindow(reload)
+    -- a question raised at login waits its turn with the login popups
+    -- (Core_Popups), so the next one does not land on top of it
+    if ns.Popups and ns.Popups.Hold then ns.Popups.Hold(reload) end
+    return reload
+end
+ns.AskReload = UI.AskReload
+
+-- ============================================================
+-- CALLOUT
+-- ============================================================
+-- A hint that points at the thing it is about (finish pass): a dark box
+-- with an accent edge, an accent arrow at the thing, the words, Okay.
+-- Anchored to the thing itself, so it moves with it and goes when it
+-- hides (not an answer: it may show again). One at a time - a second
+-- asked for while one is up waits its turn. Once-per-account bookkeeping
+-- is the caller's (ns.Hints.Callout, Tutorial_Hints).
+--   UI.Callout(target, { text, side = "BELOW"|"ABOVE"|"RIGHT"|"LEFT",
+--       width = 230, onOkay = fn, key = "..." })   -> the frame, or false
+--   UI.CalloutShown()                               -> the key up now
+local callout
+local calloutQueue = {}
+local CALLOUT_W, ARROW = 230, 12
+
+local function NextCallout()
+    local nxt = table.remove(calloutQueue, 1)
+    while nxt and not (nxt.target and nxt.target:IsVisible()) do nxt = table.remove(calloutQueue, 1) end
+    if nxt then UI.Callout(nxt.target, nxt.opts) end
+end
+
+local function BuildCallout()
+    local f = CreateFrame("Frame", "ZacUICallout", UIParent)
+    f:SetFrameStrata("FULLSCREEN_DIALOG")
+    f:SetFrameLevel(130)
+    f:EnableMouse(true)
+    f:SetClampedToScreen(true)
+    f:Hide()
+    UI.Fill(f, "ui", "windowBg", 0.97)
+    local a = GetColor("ui", "accent")
+    if ns.Pixel and ns.Pixel.Border then
+        f._zEdges = ns.Pixel.Border(f, a.r, a.g, a.b, 1, "BORDER")
+    else
+        UI.Border(f, "ui", "accent")
+    end
+    f.text = UI.Font(f, F.LABEL, { justify = "LEFT", width = CALLOUT_W - 24 })
+    f.text:SetPoint("TOPLEFT", 12, -12)
+    f.okay = UI.Button(f, "Okay", { width = 60, height = 18 })
+    f.okay:SetPoint("BOTTOMRIGHT", -12, 10)
+    local arrow = f:CreateTexture(nil, "OVERLAY")
+    arrow._zui_own = true
+    arrow:SetSize(ARROW, ARROW)
+    arrow:SetVertexColor(a.r, a.g, a.b, 1)
+    f.arrow = arrow
+    f.okay:SetScript("OnClick", function()
+        local fn = f._onOkay
+        f._onOkay, f._zAnswered = nil, true
+        f:Hide()
+        if fn then pcall(fn) end
+    end)
+    f:SetScript("OnHide", function()
+        f._key, f._target, f._onOkay = nil, nil, nil
+        -- the next one a breath later, never stacked on this one
+        if #calloutQueue > 0 and C_Timer and C_Timer.After then C_Timer.After(0.3, NextCallout) end
+    end)
+    callout = f
+    return f
+end
+
+function UI.CalloutShown() return callout and callout:IsShown() and callout._key or nil end
+
+function UI.Callout(target, opts)
+    opts = opts or {}
+    if not (target and target.IsVisible and target:IsVisible()) then return false end
+    if callout and callout:IsShown() then
+        if opts.key and callout._key == opts.key then return callout end
+        for _, q in ipairs(calloutQueue) do if opts.key and q.opts.key == opts.key then return false end end
+        calloutQueue[#calloutQueue + 1] = { target = target, opts = opts }
+        return false
+    end
+    local f = callout or BuildCallout()
+    local w = opts.width or CALLOUT_W
+    f.text:SetWidth(w - 24)
+    f.text:SetText(opts.text or "")
+    f:SetSize(w, 12 + math.ceil(f.text:GetStringHeight() or 12) + 8 + 18 + 10)
+    f._key, f._target, f._onOkay, f._zAnswered = opts.key, target, opts.onOkay, nil
+    local side, arrow = opts.side or "BELOW", f.arrow
+    f:ClearAllPoints()
+    arrow:ClearAllPoints()
+    if side == "ABOVE" then
+        f:SetPoint("BOTTOM", target, "TOP", 0, ARROW - 2)
+        arrow:SetTexture(ns.TEX_ARROW) arrow:SetTexCoord(0, 1, 0, 1)            -- points down
+        arrow:SetPoint("TOP", f, "BOTTOM", 0, 1)
+    elseif side == "RIGHT" then
+        f:SetPoint("LEFT", target, "RIGHT", ARROW - 2, 0)
+        arrow:SetTexture(ns.TEX_ARROWL) arrow:SetTexCoord(0, 1, 0, 1)           -- points left
+        arrow:SetPoint("RIGHT", f, "LEFT", 1, 0)
+    elseif side == "LEFT" then
+        f:SetPoint("RIGHT", target, "LEFT", -(ARROW - 2), 0)
+        arrow:SetTexture(ns.TEX_ARROWL) arrow:SetTexCoord(1, 0, 0, 1)           -- points right
+        arrow:SetPoint("LEFT", f, "RIGHT", -1, 0)
+    else
+        f:SetPoint("TOP", target, "BOTTOM", 0, -(ARROW - 2))
+        arrow:SetTexture(ns.TEX_ARROW) arrow:SetTexCoord(0, 1, 1, 0)            -- points up
+        arrow:SetPoint("BOTTOM", f, "TOP", 0, -1)
+    end
+    -- the thing goes away: so does its callout (not an answer)
+    if not target._zCalloutHooked and target.HookScript then
+        target._zCalloutHooked = true
+        target:HookScript("OnHide", function(self)
+            if callout and callout:IsShown() and callout._target == self then callout:Hide() end
+        end)
+    end
+    f:Show()
+    if ns.PopIn and not (ns.Motion and ns.Motion.Enabled and not ns.Motion.Enabled()) then pcall(ns.PopIn, f, 0.15) end
+    return f
 end
 
 -- ============================================================

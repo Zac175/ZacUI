@@ -3,5 +3,6 @@
 -- Credits page and no update notice is printed at login.
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 
 ns.MapChangelog = {}

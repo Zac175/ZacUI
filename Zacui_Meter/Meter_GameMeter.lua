@@ -37,7 +37,7 @@ if not Meter then return end
 
 -- only where there is no combat log (the flavor is fixed by now), and
 -- only on a client that has the game's meter to read
-if not (_G.ZACUI_IS_FOREVER or (ns.NoCombatLog and ns.NoCombatLog())) then return end
+if not (_G.ZACUI_MODERN or (ns.NoCombatLog and ns.NoCombatLog())) then return end
 if not (C_DamageMeter and (C_DamageMeter.GetCombatSessionFromID or C_DamageMeter.GetCombatSessionFromType)) then return end
 
 local GM = {}
@@ -59,6 +59,8 @@ local function Types()
         deaths    = E and E.Deaths or nil,
     }
 end
+
+GM.Types = Types       -- (Meter v2: the live view reads the same types)
 
 local function API() return C_DamageMeter end
 

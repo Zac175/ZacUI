@@ -77,6 +77,55 @@ function UI:Backdrop(frame, bg, border)
     frame:SetBackdropBorderColor(unpackc(border or C.border))
 end
 
+-- A WORLD frame's backdrop (a unit frame, a group button, a preview
+-- sample, a portrait): the flat box above, or under ZacUI's Classic look
+-- (Core_Look, part "unitframes") the game's own tooltip border round the
+-- frame's fill, untinted - the border colour setting is the ZacUI look's.
+-- This toolkit's windows (UI:Button, the Options window) keep UI:Backdrop:
+-- settings chrome never changes look. Resolved here, once per restyle.
+local function FrameLook()
+    local Z = ns.ZUI or _G.ZacUI
+    local L = Z and Z.Look
+    return L and L.For("unitframes") or nil
+end
+function UI:FrameBackdrop(frame, bg, border)
+    local look = FrameLook()
+    local edge = look and look.border and look.border.style == "edge" and look.border or nil
+    if not edge then
+        frame._zuiEdge = nil
+        -- HD polish (2026-11-07): under ZacUI's look the edge is exactly one
+        -- physical pixel (Core_Pixel), measured on every restyle; one unit
+        -- wherever ns.Pixel is off, exactly as before
+        local Z = ns.ZUI or _G.ZacUI
+        local one = Z and Z.Pixel and Z.Pixel.One(frame) or 1
+        if one ~= 1 then
+            frame:SetBackdrop({ bgFile = WHITE, edgeFile = WHITE, edgeSize = one })
+            frame:SetBackdropColor(unpackc(bg or C.panel))
+            frame:SetBackdropBorderColor(unpackc(border or C.border))
+            return
+        end
+        return self:Backdrop(frame, bg, border)
+    end
+    local h = frame.GetHeight and frame:GetHeight() or 0
+    local w = frame.GetWidth and frame:GetWidth() or 0
+    local size = edge.edgeSize or 16
+    local m = math.min(h > 0 and h or 9999, w > 0 and w or 9999)
+    if m < 9999 and m < size * 2 then size = math.max(4, math.floor(m / 2)) end
+    local inset = edge.inset or 4
+    if size < (edge.edgeSize or 16) then inset = math.max(1, math.floor(inset * size / (edge.edgeSize or 16))) end
+    frame:SetBackdrop({ bgFile = WHITE, edgeFile = edge.file, edgeSize = size,
+        insets = { left = inset, right = inset, top = inset, bottom = inset } })
+    frame:SetBackdropColor(unpackc(bg or C.panel))
+    frame._zuiEdge = true
+    frame:SetBackdropBorderColor(1, 1, 1, 1)
+end
+-- the colour a frame's border goes back to after a highlight (dispel,
+-- move mode): its setting, or the art's own white on a Classic edge
+function UI:FrameBorderColor(frame, border)
+    if frame._zuiEdge then return 1, 1, 1, 1 end
+    return unpackc(border or C.border)
+end
+
 -- ----------------------------------------------------------------------------
 -- Button
 -- ----------------------------------------------------------------------------
@@ -114,12 +163,14 @@ end
 function UI:CloseButton(parent, onClick)
     local b = CreateFrame("Button", nil, parent)
     b:SetSize(18, 18)
-    b.x = self:FS(b, 16)
+    -- ZacUI's own close icon (2026-11-07; it was an "x" in the font)
+    b.x = b:CreateTexture(nil, "ARTWORK")
+    b.x:SetSize(18, 18)
     b.x:SetPoint("CENTER")
-    b.x:SetText("x")
-    b.x:SetTextColor(unpackc(C.closeX))
-    b:SetScript("OnEnter", function(s) s.x:SetTextColor(unpackc(C.closeHover)) end)
-    b:SetScript("OnLeave", function(s) s.x:SetTextColor(unpackc(C.closeX)) end)
+    b.x:SetTexture("Interface\\AddOns\\ZacUI\\Media\\Icons\\close")
+    b.x:SetVertexColor(unpackc(C.closeX))
+    b:SetScript("OnEnter", function(s) s.x:SetVertexColor(unpackc(C.closeHover)) end)
+    b:SetScript("OnLeave", function(s) s.x:SetVertexColor(unpackc(C.closeX)) end)
     if onClick then b:SetScript("OnClick", onClick) end
     return b
 end

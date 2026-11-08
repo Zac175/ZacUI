@@ -400,7 +400,7 @@ function NP.FillExtras(f, isTarget, tn, r, g, b, showQuest)
     -- target arrows - never on a name-only plate: they anchor to the
     -- health bar, and a friendly showing just a name has no bar to flank
     local wantArrows = d.extras.targetArrows and isTarget
-        and not f.nameOnly
+        and not f.nameOnly and not (NP.StockLook and NP.StockLook())
     if wantArrows then TintArrows(f, ArrowColor(d)) end
     ShowArrows(f, wantArrows)
 

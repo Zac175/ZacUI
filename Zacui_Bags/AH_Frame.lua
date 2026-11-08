@@ -17,6 +17,7 @@ local ADDON_NAME = ...
 -- Zacui_Bags is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.AH then return end   -- (the auction house is off on this game version: AH_Core, Core_Flavor)
 
 -- shared state from earlier ZacUI files
 local AH = ns.AH
@@ -110,7 +111,7 @@ local function CreateList(parent, columns, opts)
             row.icon = row:CreateTexture(nil, "ARTWORK")
             row.icon:SetSize(ROW_H - 4, ROW_H - 4)
             row.icon:SetPoint("LEFT", 2, 0)
-            row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            ZacUI.Look.CropIcon(row.icon)
             SharpenIcon(row.icon)
         end
 

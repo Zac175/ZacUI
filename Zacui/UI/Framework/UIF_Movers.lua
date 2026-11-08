@@ -19,6 +19,18 @@
 --     still be grabbed
 -- The owner keeps its own storage: the kit only asks it for its numbers
 -- (spec.coords), to move (spec.nudge / dragStart / dragStop) and to reset.
+--
+-- EDIT MODE (Kit.edit, set by UIF_EditMode only while it is open; nil the
+-- rest of the time, and then every handle behaves exactly as above):
+--   * a drag is followed from the cursor by the kit itself instead of the
+--     engine's StartMoving, so it can be snapped (edit.snap) and held to
+--     one axis (Shift) live; an owner's own dragStart still runs, and its
+--     StartMoving call starts the kit's follow
+--   * right-click asks edit.menu first (the mover's menu), a click or a
+--     drag selects the box (edit.select), and every move, nudge and reset
+--     is reported (edit.changed) so it can be undone or cancelled
+--   * the keyboard frame stays up for the whole pass: arrow keys nudge
+--     the hovered box, else the selected one; edit.key sees keys first
 
 local ADDON_NAME, ns = ...
 
@@ -35,6 +47,8 @@ local math_floor, math_max, math_min, math_sqrt = math.floor, math.max, math.min
 -- THE HANDLE KIT
 -- ============================================================
 local Kit = {}
+Kit.edit = nil          -- Edit Mode's hooks while it is open (header above)
+Kit.selected = nil      -- the box picked in Edit Mode (arrow keys move it)
 local STEP, BIG_STEP = 1, 10
 local MIN_W, MIN_H = 24, 16
 Kit.MIN_W, Kit.MIN_H = MIN_W, MIN_H
@@ -56,6 +70,7 @@ Kit.POINT_NAME = POINT_NAME
 
 local function Round(v) return math_floor((tonumber(v) or 0) + 0.5) end
 Kit.Round = Round
+local function Hundredths(v) return math_floor((tonumber(v) or 0) * 100 + 0.5) / 100 end
 
 -- "Center  120, -45" (the point is left out when the owner has none)
 function Kit.Format(point, x, y)
@@ -86,7 +101,7 @@ local function Paint(h)
     local spec = Spec(h)
     if not spec then return end
     local locked = IsLocked(h)
-    local hover = rawget(h, "_zHover") or rawget(h, "_zDragging")
+    local hover = rawget(h, "_zHover") or rawget(h, "_zDragging") or (Kit.edit and Kit.selected == h)
     if spec.paint then
         spec.paint(h, { locked = locked, hover = hover and true or false })
     elseif h._zFill then
@@ -184,9 +199,66 @@ local function SayLocked(h)
 end
 Kit.SayLocked = SayLocked
 
+-- ------------------------------------------------------------
+-- THE KIT'S OWN DRAG (Edit Mode only): the box follows the cursor from
+-- where it was picked up, in UIParent units; Shift keeps it on the axis
+-- it has moved furthest along, and Edit Mode's snap gets the last word.
+-- Nothing happens until the cursor has actually moved, so picking a box
+-- up and putting it down again leaves it exactly where it was.
+-- ------------------------------------------------------------
+local function HandleScale(h)
+    local us = UIParent:GetEffectiveScale() or 1
+    local k = (h.GetEffectiveScale and h:GetEffectiveScale() or us) / (us > 0 and us or 1)
+    return k > 0 and k or 1
+end
+
+local function CursorUI()
+    local x, y = GetCursorPosition()
+    local s = UIParent:GetEffectiveScale() or 1
+    if s <= 0 then s = 1 end
+    return (x or 0) / s, (y or 0) / s
+end
+
+local function ManualStart(h)
+    local l, b, w, ht = h:GetRect()
+    if not (l and b and w and ht) then return end
+    local k = HandleScale(h)
+    local cx, cy = CursorUI()
+    rawset(h, "_zManual", { cx = cx, cy = cy, l = l * k, b = b * k, w = w * k, h = ht * k, k = k })
+    h:ClearAllPoints()
+    h:SetSize(w, ht)
+    h:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l, b)
+end
+
+local function ManualStep(h)
+    local st = rawget(h, "_zManual")
+    if not st then return end
+    local cx, cy = CursorUI()
+    local dx, dy = cx - st.cx, cy - st.cy
+    if not st.moved then
+        if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return end
+        st.moved = true
+    end
+    if IsShiftKeyDown() then
+        if math.abs(dx) >= math.abs(dy) then dy = 0 else dx = 0 end
+    end
+    local l, b = st.l + dx, st.b + dy
+    local edit = Kit.edit
+    if edit and edit.snap then l, b = edit.snap(h, l, b, st.w, st.h) end
+    h:ClearAllPoints()
+    h:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", l / st.k, b / st.k)
+end
+Kit.ManualStep = ManualStep
+
+local function Changed(h)
+    local edit = Kit.edit
+    if edit and edit.changed then edit.changed(h) end
+end
+
 -- live work while hovered or dragged: the owner's follow, then the readout
 local function Tick(self, elapsed)
     local spec = Spec(self)
+    if rawget(self, "_zDragging") and rawget(self, "_zManual") then ManualStep(self) end
     if rawget(self, "_zDragging") and spec and spec.onDrag then spec.onDrag(self) end
     self._zAcc = (self._zAcc or 1) + (elapsed or 0)
     if self._zAcc >= 0.05 then
@@ -212,6 +284,7 @@ function Kit.Nudge(h, dx, dy)
     spec.nudge(dx, dy, h)
     Kit.Refresh(h)
     Kit.UpdateReadout(h)
+    Changed(h)
     return true
 end
 
@@ -222,6 +295,7 @@ function Kit.Reset(h)
     spec.reset(h)
     Kit.Refresh(h)
     Kit.UpdateReadout(h)
+    Changed(h)
     return true
 end
 
@@ -234,7 +308,13 @@ if keyFrame.SetPropagateKeyboardInput then keyFrame:SetPropagateKeyboardInput(tr
 local ARROWS = { LEFT = { -1, 0 }, RIGHT = { 1, 0 }, UP = { 0, 1 }, DOWN = { 0, -1 } }
 keyFrame:SetScript("OnKeyDown", function(self, key)
     if InCombatLockdown() then return end
+    local edit = Kit.edit
+    if edit and edit.key and edit.key(key) then
+        if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(false) end
+        return
+    end
     local h = self.target
+    if not h and edit and Kit.selected and Kit.selected:IsShown() then h = Kit.selected end
     local dir = ARROWS[key]
     if not (h and dir and h:IsShown() and Spec(h) and Spec(h).nudge) then
         if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(true) end
@@ -245,6 +325,28 @@ keyFrame:SetScript("OnKeyDown", function(self, key)
     if self.SetPropagateKeyboardInput then self:SetPropagateKeyboardInput(false) end
 end)
 Kit.keyFrame = keyFrame
+
+-- Edit Mode keeps the keyboard frame up for its whole pass (arrow keys for
+-- the selected box, its own keys through edit.key); off puts it back to
+-- "only while a box is hovered"
+function Kit.EditKeys(on)
+    if InCombatLockdown() then return end
+    if keyFrame.SetPropagateKeyboardInput then keyFrame:SetPropagateKeyboardInput(true) end
+    if on then
+        keyFrame:Show()
+    else
+        keyFrame.target = nil
+        keyFrame:Hide()
+    end
+end
+
+-- the box picked in Edit Mode (nil clears); repaints the old and the new
+function Kit.Select(h)
+    local old = Kit.selected
+    Kit.selected = h
+    if old and old ~= h and Spec(old) then Paint(old) end
+    if h and Spec(h) then Paint(h) end
+end
 
 local function Hover(h, on)
     rawset(h, "_zHover", on and true or nil)
@@ -262,10 +364,17 @@ local function Hover(h, on)
                 GameTooltip:AddLine("Holds secure buttons: it can move once combat ends.", 1, 0.3, 0.3, true)
             else
                 GameTooltip:AddLine("Drag to move.", 0.8, 0.8, 0.8, true)
+                if Kit.edit then
+                    GameTooltip:AddLine("Shift keeps one direction; Alt places it without snapping.", 0.8, 0.8, 0.8, true)
+                end
                 if spec.nudge then
                     GameTooltip:AddLine("Arrow keys or mouse wheel nudge (Shift: 10, Ctrl + wheel: sideways).", 0.8, 0.8, 0.8, true)
                 end
-                if spec.reset then GameTooltip:AddLine("Right-click: back to its default spot.", 0.8, 0.8, 0.8, true) end
+                if Kit.edit and Kit.edit.menu then
+                    GameTooltip:AddLine("Right-click: attach, match size, its settings, reset.", 0.8, 0.8, 0.8, true)
+                elseif spec.reset then
+                    GameTooltip:AddLine("Right-click: back to its default spot.", 0.8, 0.8, 0.8, true)
+                end
             end
             if spec.hint then GameTooltip:AddLine(spec.hint, 0.8, 0.8, 0.8, true) end
             GameTooltip:Show()
@@ -273,7 +382,7 @@ local function Hover(h, on)
     else
         if keyFrame.target == h then
             keyFrame.target = nil
-            keyFrame:Hide()
+            if not Kit.edit then keyFrame:Hide() end
         end
         if GameTooltip and GameTooltip.IsOwned and GameTooltip:IsOwned(h) then GameTooltip:Hide() end
     end
@@ -313,7 +422,8 @@ function Kit.Dress(h, spec)
     end
     if not rawget(h, "_zBordered") and AddPixelBorder then
         rawset(h, "_zBordered", true)
-        AddPixelBorder(h, "accent", 0.9)
+        -- an editing overlay never changes look: the pixel strips, always
+        AddPixelBorder(h, "accent", 0.9, "pixel")
     end
     local F = UI and UI.F or {}
     if not h._zLabel then
@@ -329,7 +439,20 @@ function Kit.Dress(h, spec)
         rawset(self, "_zDragging", true)
         rawset(self, "_zDragged", true)
         if GameTooltip and GameTooltip.IsOwned and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
-        if s.dragStart then s.dragStart(self) else self:StartMoving() end
+        local edit = Kit.edit
+        if edit then
+            -- the kit follows the cursor itself; an owner's dragStart still
+            -- runs, and the StartMoving it calls starts that follow
+            if edit.select then edit.select(self) end
+            if s.dragStart then
+                rawset(self, "StartMoving", ManualStart)
+                local ok, err = pcall(s.dragStart, self)
+                rawset(self, "StartMoving", nil)
+                if not ok and geterrorhandler then geterrorhandler()(err) end
+            else
+                ManualStart(self)
+            end
+        elseif s.dragStart then s.dragStart(self) else self:StartMoving() end
         Paint(self)
         Watch(self)
     end)
@@ -337,19 +460,28 @@ function Kit.Dress(h, spec)
         if not rawget(self, "_zDragging") then return end
         rawset(self, "_zDragging", nil)
         self:StopMovingOrSizing()
+        if rawget(self, "_zManual") then
+            ManualStep(self)
+            rawset(self, "_zManual", nil)
+            local edit = Kit.edit
+            if edit and edit.dropped then edit.dropped(self) end
+        end
         local s = Spec(self)
         if s.onDrag then s.onDrag(self) end
         if s.dragStop then s.dragStop(self) end
         Kit.Refresh(self)
         Watch(self)
+        Changed(self)
     end)
     h:SetScript("OnMouseDown", function(self) rawset(self, "_zDragged", nil) end)
     h:SetScript("OnMouseUp", function(self, button)
         local s = Spec(self)
+        local edit = Kit.edit
         if button == "RightButton" then
-            Kit.Reset(self)
-        elseif s.click and not rawget(self, "_zDragged") then
-            s.click(self, button)
+            if not (edit and edit.menu and edit.menu(self)) then Kit.Reset(self) end
+        elseif not rawget(self, "_zDragged") then
+            if edit and edit.select then edit.select(self) end
+            if s.click then s.click(self, button) end
         end
         rawset(self, "_zDragged", nil)
     end)
@@ -362,6 +494,8 @@ function Kit.Dress(h, spec)
             rawset(self, "_zDragging", nil)
             self:StopMovingOrSizing()
         end
+        rawset(self, "_zManual", nil)
+        if Kit.selected == self then Kit.selected = nil end
         if rawget(self, "_zHover") then Hover(self, false) end
         self:SetScript("OnUpdate", nil)
     end)
@@ -402,6 +536,11 @@ local pending = {}      -- [key] = "apply" | "reset": waits for combat to end
 --   reset()                           put the frame at its own default
 --   secure           true: holds secure buttons (locked in combat)
 --   own              true: ours, never skipped as client-managed
+--   size = { get = fn() -> w, h, set = fn(w, h) }   its size can be set
+--                    (Edit Mode's Match width / height; either may be nil)
+--   page, tab        the settings page (menu id) and tab that style it
+--                    (Edit Mode's "Open its settings"; else guessed by key)
+--   off              fn() -> reason string when it is switched off, nil on
 -- Registering the same key again updates it in place (no second row).
 local function RegisterMover(key, label, getFrame, defPoint, defX, defY, reflow, opts)
     local m = MOVERS[key]
@@ -416,6 +555,7 @@ local function RegisterMover(key, label, getFrame, defPoint, defX, defY, reflow,
     if opts then
         m.get, m.set, m.reset = opts.get, opts.set, opts.reset
         m.secure, m.own = opts.secure, opts.own
+        m.size, m.page, m.tab, m.off = opts.size, opts.page, opts.tab, opts.off
     end
     local p = moverProxies[key]
     if p and p:IsShown() then Kit.Refresh(p) end
@@ -457,7 +597,7 @@ end
 -- PERF: both are cheap queries; this runs inside the
 -- UIParent_UpdateTopFramePositions reflow hook, so the guard stays flat.
 local moverSkipNoted = {}
-local function MoverBlocked(key, f)
+local function MoverBlocked(key, f, quiet)
     if not f then return false end
     local m = MOVERS[key]
     if m and m.own then return false end
@@ -470,7 +610,7 @@ local function MoverBlocked(key, f)
     protected = protected and explicit
     local editMode = f.system ~= nil
     if not (protected or editMode) then return false end
-    if not moverSkipNoted[key] then
+    if not quiet and not moverSkipNoted[key] then
         moverSkipNoted[key] = true
         Print((m and m.label or key)
             .. (editMode and " is managed by Edit Mode on this build - move/scale it there (Esc > Edit Mode)."
@@ -541,6 +681,9 @@ local function ApplyMover(key)
         return
     end
     SetFramePos(f, pos.point, pos.x, pos.y)
+    -- frames attached to this one follow it (UIF_EditSession; one table
+    -- read when nothing is attached)
+    if ns.MoverMoved then ns.MoverMoved(key) end
 end
 
 -- the frame back at its default spot, live
@@ -702,7 +845,11 @@ local function NewProxy(key)
             local m = M()
             if not m then return end
             local point, x, y = PosFromProxy(self, m)
-            WritePos(m, point, Round(x), Round(y))
+            -- snapped onto another frame's edge in Edit Mode: kept to the
+            -- hundredth, so it stays exactly on it; else whole units
+            local R = rawget(self, "_zSnapped") and Hundredths or Round
+            rawset(self, "_zSnapped", nil)
+            WritePos(m, point, R(x), R(y))
             ApplyMover(key)
             FitProxy(self)
         end,
@@ -789,7 +936,87 @@ local function OffScreen(key)
     return l + w < 4 or b + h < 4 or l > sw - 4 or b > sh - 4
 end
 
+-- ------------------------------------------------------------
+-- FOR EDIT MODE'S SESSION (UIF_EditSession): a mover's spot of record as a
+-- copy, put back from one, and moved by a whole-screen delta. The record
+-- stays exactly what it always was (ZacUIDB.movers[key] = { point, x, y },
+-- or the owner's own get / set), so everything else that reads it - the
+-- preview drags, the HUDs, profiles - reads the same numbers.
+-- ------------------------------------------------------------
+local function CopyPos(p)
+    if type(p) ~= "table" then return false end
+    return { point = p.point, x = p.x, y = p.y }
+end
+
+-- where the frame is now, in its own convention (the saved spot, else
+-- read off the frame)
+local function FrameSpot(m)
+    local saved = SavedPos(m)
+    if saved then return saved.point or "CENTER", saved.x or 0, saved.y or 0 end
+    local f = m.getFrame()
+    local point = m.defPoint or "CENTER"
+    local l, b, w, h = FrameRect(f)
+    if not l then return point, m.defX or 0, m.defY or 0 end
+    local pp = POINTS[point] or POINTS.CENTER
+    local ux, uy = UIPoint(point)
+    local k = ScaleOf(f)
+    return point, (l + w * pp[1] - ux) / k, (b + h * pp[2] - uy) / k
+end
+
+local function RefitProxy(key)
+    local p = moverProxies[key]
+    if p and p:IsShown() and not rawget(p, "_zDragging") then
+        FitProxy(p)
+        Kit.Refresh(p)
+    end
+end
+
+local function MoverSnapshot(key)
+    local m = MOVERS[key]
+    if not m then return nil end
+    return CopyPos(SavedPos(m))
+end
+
+-- false / nil = nothing saved: the frame goes back to its default
+local function MoverRestore(key, snap)
+    local m = MOVERS[key]
+    if not m then return end
+    if type(snap) == "table" and snap.point then
+        WritePos(m, snap.point, snap.x, snap.y)
+        ApplyMover(key)
+    else
+        WritePos(m, nil)
+        PlaceDefault(m)
+    end
+    RefitProxy(key)
+end
+
+-- moved by dx, dy UIParent units (a frame it is attached to moved); kept
+-- to the hundredth so a follow never drifts
+local function MoverShift(key, dx, dy)
+    local m = MOVERS[key]
+    local f = m and m.getFrame()
+    if not f or MoverBlocked(key, f) then return false end
+    if InCombatLockdown() and IsSecure(m, f) then return false end
+    local point, x, y = FrameSpot(m)
+    local k = ScaleOf(f)
+    WritePos(m, point, Hundredths(x + dx / k), Hundredths(y + dy / k))
+    ApplyMover(key)
+    RefitProxy(key)
+    return true
+end
+
+-- the frame's box in UIParent units, whether or not it is shown
+local function MoverRect(key)
+    local m = MOVERS[key]
+    return FrameRect(m and m.getFrame())
+end
+
 -- shared with later ZacUI files
+ns.MoverSnapshot = MoverSnapshot
+ns.MoverRestore = MoverRestore
+ns.MoverShift = MoverShift
+ns.MoverRect = MoverRect
 ns.MoverKit = Kit
 ns.ApplyAllMovers = ApplyAllMovers
 ns.HideMover = HideMover

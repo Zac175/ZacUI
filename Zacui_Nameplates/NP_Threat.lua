@@ -171,6 +171,7 @@ local nextGuid, nextAt, nextPct, nextName
 
 local function Better(u, unit, bestPct)
     local isTanking, status, pct = UnitDetailedThreatSituation(u, unit)
+    if issecretvalue ~= nil and (issecretvalue(isTanking) or issecretvalue(status) or issecretvalue(pct)) then return end
     if status ~= nil and not isTanking and pct and pct > bestPct then return pct end
 end
 
@@ -248,6 +249,11 @@ function NP.UpdateThreat(f, have, isTanking, status, pct)
 
     if not have then
         isTanking, status, pct = UnitDetailedThreatSituation("player", unit)
+    end
+    -- hidden (WoW Forever): no threat bar
+    if issecretvalue ~= nil and (issecretvalue(isTanking) or issecretvalue(status) or issecretvalue(pct)) then
+        tb:Hide()
+        return
     end
     if status == nil then
         -- fighting, but we are not on its list: nothing to measure

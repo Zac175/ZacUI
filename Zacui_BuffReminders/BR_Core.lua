@@ -612,6 +612,8 @@ function BR.InSpellRange(spell, unit)
     end
     if UnitInRange then
         local inR, checked = UnitInRange(unit)
+        -- (WoW Forever hands the range back hidden: unknown)
+        if ns.Hidden(inR, checked) then return true, false end
         if checked then return inR and true or false, true end
     end
     return true, false
@@ -643,6 +645,7 @@ function BR.ScanReminder(def)
                 local inR, checked
                 if def.port and UnitInRange then inR, checked = UnitInRange(unit)
                 else inR, checked = BR.InSpellRange(single, unit) end
+                if ns.Hidden(inR, checked) then inR, checked = true, false end   -- (WoW Forever)
                 if checked and not inR then
                     outOfRange = outOfRange + 1
                     if wantNames then

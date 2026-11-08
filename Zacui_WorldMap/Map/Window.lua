@@ -9,6 +9,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local mod = ns:GetModule("worldmap")
 local L = ns.L
 
@@ -332,7 +333,11 @@ function mod:SetupWindow(worldMap)
 	-- own code, opening the map, does the rest
 	local function Keep(cvar, value)
 		local ok, now = pcall(GetCVar, cvar)
-		if ok and now ~= nil and now ~= value then pcall(SetCVar, cvar, value) end
+		if ok and now ~= nil and now ~= value then
+			-- SETUP2: through ZacUI's CVar record when it is there (put back on uninstall)
+			local CV = _G.ZacUI and _G.ZacUI.CVar
+			if CV then CV.Set(cvar, value, "Zacui_WorldMap") else pcall(SetCVar, cvar, value) end
+		end
 	end
 	if map.HandleUserActionMaximizeSelf then
 		hooksecurefunc(map, "HandleUserActionMaximizeSelf", function() Keep("miniWorldMap", "0") end)

@@ -21,11 +21,17 @@ local M = [[Interface\AddOns\ZacUI\Media\]]
 local FONT_MAIN    = M .. [[Fonts\RedHatDisplay-SemiBold.ttf]]
 local FONT_HEAVY   = M .. [[Fonts\BarlowSemiCondensed-Black.ttf]]
 local FONT_NARROW  = M .. [[Fonts\RobotoCondensed-Bold.ttf]]
+-- HD polish (2026-11-07): a medium-weight condensed display face, crisp
+-- outlined at 9-13 px (OFL, Media\Fonts\OFL-BarlowSemiCondensed.txt).
+-- The ZacUI look's font for a fresh install (Boot_Events); offered to
+-- everyone else, never put over a font picked by hand.
+local FONT_HD      = M .. [[Fonts\BarlowSemiCondensed-SemiBold.ttf]]
 
 ns.MEDIA_FONTS = {
     { name = "Red Hat Display",             path = FONT_MAIN },
     { name = "Barlow Semi Condensed Black", path = FONT_HEAVY },
     { name = "Roboto Condensed Bold",       path = FONT_NARROW },
+    { name = "Barlow Semi Condensed",       path = FONT_HD },
 }
 ns.MEDIA_BARS = {
     { name = "ZacUI Flat",         path = M .. [[Textures\bar_flat]] },
@@ -37,6 +43,7 @@ ns.MEDIA_BARS = {
     { name = "ZacUI Hover Arrows", path = M .. [[Textures\bar_hover_arrows]] },
 }
 ns.MEDIA_FONT_MAIN, ns.MEDIA_FONT_HEAVY, ns.MEDIA_FONT_NARROW = FONT_MAIN, FONT_HEAVY, FONT_NARROW
+ns.MEDIA_FONT_HD, ns.MEDIA_FONT_HD_NAME = FONT_HD, "Barlow Semi Condensed"
 ns.MEDIA_TEX_CHEVRON = M .. [[Textures\target_chevron]]
 
 -- names saved by earlier ZacUI versions -> what replaced them

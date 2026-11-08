@@ -152,7 +152,10 @@ function Threat.SizeChanged(win)
     if not win.threatRows then return end
     local d = Meter.DB()
     local pitch = math.max(1, d.rowHeight + (d.rowGap or 1))
-    win.threatFit = floor(win.frame:GetHeight() / pitch)
+    -- the window's body (under the header since Meter v2; the whole
+    -- window without one)
+    local body = win.rowframe or win.frame
+    win.threatFit = floor((body:GetHeight() or 0) / pitch)
     for i = 1, max(win.threatFit, #win.threatRows) do
         local row = win.threatRows[i] or (i <= win.threatFit and CreateThreatRow(win, i)) or nil
         if row then
@@ -160,8 +163,8 @@ function Threat.SizeChanged(win)
             if Meter.SettleRow then Meter.SettleRow(row) end
             row:ClearAllPoints()
             -- 1px inset each side, exactly the plugin's anchor math
-            row:SetPoint("TOPLEFT", win.frame, "TOPLEFT", 1, y)
-            row:SetPoint("TOPRIGHT", win.frame, "TOPRIGHT", -1, y)
+            row:SetPoint("TOPLEFT", body, "TOPLEFT", 1, y)
+            row:SetPoint("TOPRIGHT", body, "TOPRIGHT", -1, y)
             row:SetHeight(d.rowHeight)
             if i > win.threatFit then row:Hide() end
         end
@@ -241,12 +244,12 @@ local function GatherCandidates()
     AddCandidate("target")
     AddCandidate("softenemy")
     if UnitExists("softenemy") and C_NamePlate and C_NamePlate.GetNamePlates then
-        local guid = UnitGUID("softenemy")
+        local guid = ns.SafeGUID("softenemy")   -- (nil while WoW Forever hides it)
         if guid then
             for _, plate in ipairs(C_NamePlate.GetNamePlates()) do
                 local u = plate.namePlateUnitToken
                     or (plate.UnitFrame and plate.UnitFrame.unit)
-                if u and UnitGUID(u) == guid then
+                if u and ns.SafeGUID(u) == guid then
                     AddCandidate(u)
                     break
                 end
@@ -260,6 +263,8 @@ end
 local function ReadThreat(unit, target)
     local isTanking, status, threatPct, rawPct, threatValue =
         UnitDetailedThreatSituation(unit, target)
+    -- WoW Forever hides threat in a fight (secret values): no reading
+    if ns.Hidden(isTanking, status, threatPct, rawPct, threatValue) then return nil end
     if threatValue then threatValue = floor(threatValue / 100) end
     return isTanking, status, threatPct, rawPct, threatValue
 end
@@ -603,17 +608,18 @@ end
 local function TryMob(u)
     if not (UnitExists(u) and UnitCanAttack("player", u)) then return nil end
     local isTanking, status, pct, raw, value = UnitDetailedThreatSituation("player", u)
+    if ns.Hidden(isTanking, status, pct, raw, value) then return nil end   -- (WoW Forever)
     if pct then return u, isTanking, status, pct, raw, value end
     return nil
 end
 
 local function SoftPlate()
     if not (UnitExists("softenemy") and C_NamePlate and C_NamePlate.GetNamePlates) then return nil end
-    local guid = UnitGUID("softenemy")
+    local guid = ns.SafeGUID("softenemy")
     if not guid then return nil end
     for _, plate in ipairs(C_NamePlate.GetNamePlates()) do
         local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
-        if u and UnitGUID(u) == guid then return u end
+        if u and ns.SafeGUID(u) == guid then return u end
     end
     return nil
 end
@@ -672,6 +678,7 @@ local function ScanOne(u, mob)
     if not UnitAffectingCombat(u) then return false end
     stat.scanQueries = stat.scanQueries + 1
     local isTanking, _, _, _, value = UnitDetailedThreatSituation(u, mob)
+    if ns.Hidden(isTanking, value) then return false end   -- (WoW Forever)
     if isTanking then return true, value end
     return false
 end
@@ -706,7 +713,7 @@ local function TankOf(mob, guid, now)
     local u = tankOf[guid]
     if type(u) == "string" then
         local isTanking, _, _, _, value = UnitDetailedThreatSituation(u, mob)
-        if isTanking and value then return u, value end
+        if not ns.Hidden(isTanking, value) and isTanking and value then return u, value end
         tankOf[guid] = LOST              -- it lost the mob: search again
         u = LOST
     end
@@ -784,7 +791,7 @@ local function Read(now)
     r.pullIn, r.headroom = nil, nil
     local unit, isTanking, status, pct, raw, value = FindMob()
     if not unit then return r end
-    local guid = UnitGUID(unit)
+    local guid = ns.SafeGUID(unit)
     if not guid then return r end
     -- the quiet start runs from the pull, or from when this mob joined
     if not seenAt[guid] then seenAt[guid] = now end

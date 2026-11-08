@@ -47,6 +47,31 @@ local function Report(err)
     if h then h(err) end
 end
 
+-- UnitGUID, or nil while WoW Forever hides it (an enemy's in a fight comes
+-- back as a secret value: no keying, comparing or splitting it). On the
+-- other clients exactly UnitGUID (read at call time).
+function ns.SafeGUID(unit)
+    local g = _G.UnitGUID(unit)
+    if issecretvalue ~= nil and issecretvalue(g) then return nil end
+    return g
+end
+
+-- The spell whose cooldown is the global cooldown: Blizzard's dummy 61304;
+-- on WoW Forever 29515 when that client does not know 61304. Always 61304
+-- on the other clients.
+local gcdSpell
+function ns.GCDSpell()
+    if gcdSpell then return gcdSpell end
+    local id = 61304
+    if _G.ZACUI_MODERN and C_Spell and C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, 61304)
+        if ok and not info then id = 29515 end
+        if not ok then return id end   -- (ask again later)
+    end
+    gcdSpell = id
+    return id
+end
+
 -- Runs every fn in a keyed listener table, isolated.
 local function Notify(listeners, ...)
     for _, fn in pairs(listeners) do
@@ -188,11 +213,17 @@ local function CLEURebuild()
     cleuBySub, cleuAll = bySub, all
     -- no combat log for addons on WoW Forever (registering it is an
     -- error), and none under the override's Forever either (Core_Flavor)
-    if _G.ZACUI_IS_FOREVER or (ns.NoCombatLog and ns.NoCombatLog()) then any = false end
+    if _G.ZACUI_MODERN or (ns.NoCombatLog and ns.NoCombatLog()) then any = false end
+    -- (on Forever even UNregistering it is forbidden, so only undo what
+    -- was done: the frame never touches the event there at all)
     if any then
-        cleuFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    else
+        if not cleuFrame._zOn then
+            cleuFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+            cleuFrame._zOn = true
+        end
+    elseif cleuFrame._zOn then
         cleuFrame:UnregisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+        cleuFrame._zOn = nil
     end
 end
 
@@ -258,12 +289,74 @@ local function Plain(v)
     return v
 end
 
-local function SwingDispatch(hand, dur)
+local function SwingDispatch(hand, dur, durObj)
     local now = GetTime()
     for _, fn in pairs(swingReg) do
-        local ok, err = pcall(fn, hand, now, dur)
+        local ok, err = pcall(fn, hand, now, dur, durObj)
         if not ok then Report(err) end
     end
+end
+
+-- When the game hides both the swing time and your attack speed (WoW
+-- Forever often does, even out of combat), the swing time is learned
+-- from your own swings instead: the gap between two swings of the same
+-- hand (plain GetTime() maths, never a hidden value). A faster gap is
+-- taken at once (Flurry, Enrage); a slower one once two in a row agree,
+-- so a swing held up out of range doesn't stretch the bar. Before any
+-- gap is known the weapon's own speed off its tooltip stands in.
+local SLOT_OF = { mh = 16, oh = 17, ranged = 18 }
+local lastSwingAt, learned, pendingSlow = {}, {}, {}
+local function WeaponSpeed(hand)
+    local TI = C_TooltipInfo
+    if not (TI and TI.GetInventoryItem) then return nil end
+    local ok, data = pcall(TI.GetInventoryItem, "player", SLOT_OF[hand])
+    if not ok or type(data) ~= "table" or type(data.lines) ~= "table" then return nil end
+    local word = _G.SPEED or "Speed"
+    for _, line in ipairs(data.lines) do
+        for _, txt in ipairs({ line.rightText, line.leftText }) do
+            if type(txt) == "string" and not (issecretvalue ~= nil and issecretvalue(txt)) then
+                local n = txt:match("^" .. word .. "%s+(%d+[%.,]%d+)")
+                if n then
+                    n = tonumber((n:gsub(",", ".")))
+                    if n and n > 0 then return n end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function LearnedSwing(hand, now)
+    local last = lastSwingAt[hand]
+    lastSwingAt[hand] = now
+    if last then
+        local gap = now - last
+        if gap > 0.5 and gap < 6 then
+            local cur = learned[hand]
+            if not cur or gap <= cur * 1.05 then
+                learned[hand], pendingSlow[hand] = gap, nil
+            elseif pendingSlow[hand] and math.abs(gap - pendingSlow[hand]) <= gap * 0.05 then
+                learned[hand], pendingSlow[hand] = gap, nil
+            else
+                pendingSlow[hand] = gap
+            end
+        end
+    end
+    if not learned[hand] then learned[hand] = WeaponSpeed(hand) end
+    return learned[hand]
+end
+
+-- (2026-11-07) A swing time the game hands over hidden still times a bar
+-- exactly: a duration object (C_DurationUtil, Forever's API docs) started
+-- now with that hidden length, which a StatusBar runs on the game's own
+-- clock (HUD.TimedSwing). nil where the client has no such object.
+local function SwingDuration(secretDur)
+    local DU = C_DurationUtil
+    if not (DU and DU.CreateDuration) then return nil end
+    local ok, d = pcall(DU.CreateDuration)
+    if not (ok and d and d.SetTimeFromStart) then return nil end
+    if not pcall(d.SetTimeFromStart, d, GetTime(), secretDur, 1) then return nil end
+    return d
 end
 
 local function OnSwingEvent(_, event, a1, a2)
@@ -280,7 +373,14 @@ local function OnSwingEvent(_, event, a1, a2)
                 dur = Plain(hand == "oh" and oh or mh)
             end
         end
-        SwingDispatch(hand, dur)
+        local now = GetTime()
+        if type(dur) == "number" and dur > 0 then
+            lastSwingAt[hand], learned[hand], pendingSlow[hand] = now, dur, nil
+        else
+            dur = LearnedSwing(hand, now)
+        end
+        local durObj = issecretvalue ~= nil and issecretvalue(a1) and SwingDuration(a1) or nil
+        SwingDispatch(hand, dur, durObj)
     elseif event == "UNIT_COMBAT" then
         -- (unit, action, ...): a hit on you that you parried
         if a1 == "player" and Plain(a2) == "PARRY" then SwingDispatch("parry", nil) end
@@ -442,6 +542,9 @@ ns.PlayerAuras = Auras
 local GetBuffData = C_UnitAuras and C_UnitAuras.GetBuffDataByIndex
 local GetDebuffData = C_UnitAuras and C_UnitAuras.GetDebuffDataByIndex
 local UnitBuff, UnitDebuff = UnitBuff, UnitDebuff
+-- (WoW Forever can refuse an aura read outright: "Auras cannot be accessed
+-- when secret while tainted" - read under pcall there, as no more auras)
+local foreverClient = _G.ZACUI_MODERN and true or false   -- (Forever or Retail)
 local aDirty, aVersion = true, 0
 local aBuffs, aDebuffs = {}, {}
 local aBuffById, aBuffByName, aDebuffById, aDebuffByName = {}, {}, {}, {}
@@ -475,7 +578,13 @@ local function ReadList(getData, unitAura)
     for i = 1, 40 do
         local e
         if getData then
-            local a = getData("player", i)
+            local a
+            if foreverClient then
+                local ok, r = pcall(getData, "player", i)
+                a = ok and r or nil
+            else
+                a = getData("player", i)
+            end
             if not a then break end
             -- WoW Forever may hide an aura in combat (secret values: no
             -- compare, no table key): it is left out, the rest still read
@@ -701,7 +810,7 @@ local function OPButton()
     end
     if lit and not opLit.lit then
         opLit.at = GetTime()
-        opLit.guid = UnitExists("target") and UnitGUID("target") or nil
+        opLit.guid = UnitExists("target") and ns.SafeGUID("target") or nil
     elseif not lit then
         opLit.at, opLit.guid = nil, nil
     end
@@ -724,7 +833,7 @@ local function LeftFromButton(guid)
     if not opLit.at then return 0 end
     if not guid then
         if not (UnitExists("target") and UnitCanAttack("player", "target")) then return 0 end
-        guid = UnitGUID("target")
+        guid = ns.SafeGUID("target")
     end
     if opLit.guid and guid ~= opLit.guid then return 0 end
     local left = opLit.at + OP_WINDOW - GetTime()
@@ -736,7 +845,7 @@ function Overpower.Left(guid)
     if opNoLog then return LeftFromButton(guid) end
     if not guid then
         if not (UnitExists("target") and UnitCanAttack("player", "target")) then return 0 end
-        guid = UnitGUID("target")
+        guid = ns.SafeGUID("target")
         if not guid then return 0 end
     end
     local t = mByGUID[guid]
@@ -769,7 +878,7 @@ end
 opFrame:SetScript("OnEvent", function(_, event, unit, _, spellId)
     if event == "UNIT_SPELLCAST_SUCCEEDED" then
         if opIds and (opIds[spellId] or (opName and GetSpellInfo(spellId) == opName)) then
-            local g = UnitExists("target") and UnitGUID("target")
+            local g = UnitExists("target") and ns.SafeGUID("target")
             if g then opSpent[g] = GetTime() end
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
@@ -784,7 +893,7 @@ opFrame:SetScript("OnEvent", function(_, event, unit, _, spellId)
     elseif event == "PLAYER_LOGIN" then
         opFrame:UnregisterEvent("PLAYER_LOGIN")
         if select(2, UnitClass("player")) ~= "WARRIOR" then return end   -- warriors only
-        opNoLog = (_G.ZACUI_IS_FOREVER or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
+        opNoLog = (_G.ZACUI_MODERN or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
         OPResolve()
         opFrame:RegisterEvent("SPELLS_CHANGED")
         opFrame:RegisterEvent("PLAYER_REGEN_DISABLED")

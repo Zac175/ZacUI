@@ -6,6 +6,29 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+-- (ZacUI: not on this game version, Core.lua. Nothing loads; only the
+-- globals the game itself calls by name stay - the AddOns-list entry the
+-- .toc names, and the key bindings - and they say why.)
+if ns.flavorOff then
+	local function Why()
+		local Z = _G.ZacUI
+		return (Z and Z.FeatureOffNote and Z.FeatureOffNote("worldmap")) or "off on this game version"
+	end
+	local function Say()
+		local Z = _G.ZacUI
+		if Z and Z.Print then Z.Print("World map: " .. Why()) end
+	end
+	_G.ZacuiWorldMap_OnAddonCompartmentClick = Say
+	_G.ZacuiWorldMap_OnAddonCompartmentEnter = function(_, owner)
+		GameTooltip:SetOwner(owner, "ANCHOR_LEFT")
+		GameTooltip:AddLine("ZacUI Map")
+		GameTooltip:AddLine(Why(), nil, nil, nil, true)
+		GameTooltip:Show()
+	end
+	_G.ZacuiWorldMap_OnAddonCompartmentLeave = function() GameTooltip:Hide() end
+	_G.ZacuiWorldMap_Binding = Say
+	return
+end
 local mod = ns:GetModule("worldmap")
 local L = ns.L
 

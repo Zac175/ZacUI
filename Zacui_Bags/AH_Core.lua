@@ -22,6 +22,11 @@ local ADDON_NAME = ...
 -- Zacui_Bags is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's
+-- auction house speaks C_AuctionHouse, which this price memory does not
+-- yet): the feature stands down here, before it publishes ns.AH, and
+-- AH_Frame returns at once without it.
+if ns.FeatureOn and not ns.FeatureOn("auction") then return end
 
 -- shared state from earlier ZacUI files
 local Print = ns.Print

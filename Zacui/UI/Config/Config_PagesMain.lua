@@ -178,7 +178,9 @@ end
 ns.CorePageKit = Kit
 
 local function Reload()
-    if type(ReloadUI) == "function" then
+    if ns.RequestReload then
+        ns.RequestReload()
+    elseif type(ReloadUI) == "function" then
         ReloadUI()
     elseif C_UI and C_UI.Reload then
         C_UI.Reload()
@@ -202,6 +204,33 @@ local function Rescan()
 end
 
 -- ============================================================
+-- THE LOOK (Core_Look): what the world wears, and the way to the Style
+-- page where it is chosen (Config_Style: the cards, the per-part lists,
+-- the reload-gated apply)
+-- ============================================================
+
+local function LookCard(L)
+    local Look = ns.Look
+    if not Look then return end
+    -- the look is chosen on Appearance > Style (Config_Style); here, one
+    -- line saying what the world wears and the way there
+    local card = L:Card("Look")
+    local uni = Look.LiveUniform and Look.LiveUniform()
+    local l = Look.Get(uni or Look.Active())
+    L:Desc(uni and ("The world wears the " .. (l and l.name or uni) .. " look.")
+        or "Your parts wear a mix of looks.")
+    local b = UI.Button(card, "Open Style", { width = 120, onClick = function()
+        if ns.OpenConfig then ns.OpenConfig("style") end
+    end })
+    L:Flow({ b }, 8, 6)
+    L:EndCard()
+    return card
+end
+ns.LookCard = LookCard
+-- (a pending look is dropped with the window: Config_Window's OnHide
+-- calls Look.Discard; the confirm is the only way it is kept)
+
+-- ============================================================
 -- GENERAL
 -- ============================================================
 RegisterPage("General", function(L)
@@ -212,6 +241,10 @@ RegisterPage("General", function(L)
 
     -- the tour and quick setup (UI/Tutorial)
     if ns.TutorialCard then ns.TutorialCard(L) end
+    -- the Look: ZacUI's flat art or the game's Classic one (Core_Look)
+    LookCard(L)
+    -- SETUP2: run the setup, reset the one-time hints, uninstall (Tutorial_Setup2)
+    if ns.SetupCard then ns.SetupCard(L) end
 
     local on = 0
     for _, m in ipairs(MODULE_ORDER) do
@@ -242,6 +275,9 @@ RegisterPage("General", function(L)
         L:Desc("One line in chat, once a session. Update with the CurseForge app.")
         L:EndCard()
     end
+
+    -- this window: its opacity and what it does in a fight (Config_Window)
+    if ns.ConfigWindowCard then ns.ConfigWindowCard(L) end
 
     L:Card("Quick actions")
     local bar = L.current
@@ -274,7 +310,7 @@ RegisterPage("General", function(L)
         { "/zacui inset <Frame> l r t b", "nudge a panel background that sits wrong" },
         { "/zacui line <Frame> <y>",      "move a panel's header hairline" },
         { "/zacui status",    "list every module and its state" },
-        { "/zacui flavor",    "what runs on this game version (era, tbc, forever, auto to test)" },
+        { "/zacui flavor",    "what runs on this game version (era, tbc, forever, retail, auto to test)" },
         { "/zacui version",   "your version and the newest one seen in your guild and group" },
         { "/zacui reset",     "back to shipped defaults" },
     }) do
@@ -293,7 +329,8 @@ RegisterPage("General", function(L)
     }) do
         local fs = UI.Font(L.current, F.SMALL, { text = line, cat = "text", key = "gold" })
         fs:SetPoint("TOPLEFT", L.current, "TOPLEFT", M.DESC_X, L.current._y)
-        L.current._y = L.current._y - 15
+        -- (a line as tall as the type: the settings window's is larger)
+        L.current._y = L.current._y - math.max(15, math.ceil(fs:GetStringHeight() or 12) + 3)
     end
     L:Gap(4)
     L:EndCard()
@@ -309,19 +346,22 @@ RegisterPage("General", function(L)
                 acceptText = "Reset everything",
                 destructive = true,
                 onAccept = function()
+                    -- the reload FIRST, then the writes, inside the click
+                    -- (WoW Forever; UIF_Dialogs' ns.AskReload)
+                    Reload()
                     ZacUIDB.modules = {}
                     for m, v in pairs(ns.DEFAULT_MODULES) do ZacUIDB.modules[m] = v end
                     ZacUIDB.insets, ZacUIDB.lines = {}, {}
                     ZacUIDB.colors, ZacUIDB.palette = {}, {}
                     ZacUIDB.movers, ZacUIDB.tooltipPos = {}, nil
                     ZacUIDB.font = { name = nil, delta = 0, outline = nil }
+                    ZacUIDB.look = nil
                     ZacUIDB.config = nil
                     -- "Everything" includes the first-run bookkeeping, or
                     -- a reset would silently keep declining the import
                     -- offer forever.
                     ZacUIDB.importPrompted, ZacUIDB.importedFrom = nil, nil
                     Print("Settings reset - reloading.")
-                    Reload()
                 end,
             })
         end })
@@ -360,7 +400,7 @@ RegisterPage("Modules", function(L, item)
             if checks[m.key] then checks[m.key]:SetChecked(state) end
         end
         if not state then
-            Print("Turned off - /reload to restore the stock look.")
+            ns.AskReload("Turned off. The game's own look comes back after a reload.")
         end
     end
     local allOn = UI.Button(bar, "Enable all", { width = 100,
@@ -390,7 +430,7 @@ RegisterPage("Modules", function(L, item)
                     EnableModuleLive(m.key)
                 else
                     ZacUIDB.modules[m.key] = false
-                    Print(m.label .. " off - /reload to restore the stock look.")
+                    ns.AskReload(m.label .. " is off. The game's own look comes back after a reload.")
                 end
             end)
         checks[m.key] = cb
@@ -478,8 +518,9 @@ RegisterPage("Movers", function(L)
             onClick = function() ResetMover(mv.key) end })
         reset:SetPoint("LEFT", move, "RIGHT", 8, 0)
         if managed then
-            move:SetDisabled(true)
-            reset:SetDisabled(true)
+            -- (the game's own Edit Mode places it on this client)
+            move:SetDisabled(true, "Placed by the game's Edit Mode on this game version.")
+            reset:SetDisabled(true, "Placed by the game's Edit Mode on this game version.")
             local tag = UI.Font(row, F.SMALL, { text = "Edit Mode",
                 cat = "text", key = "orange" })
             tag:SetPoint("LEFT", reset, "RIGHT", 8, 0)
@@ -728,8 +769,8 @@ RegisterPage("Tooltips", function(L)
             format = function(v) return v .. " px" end })
         local sy = Kit.Slider(L, "Above the cursor", TipCfgOf, "cursorY", { min = -60, max = 60, step = 1,
             format = function(v) return v .. " px" end })
-        UI.SetEnabled(sx, follow)
-        UI.SetEnabled(sy, follow)
+        UI.SetEnabled(sx, follow, 'Needs "Follow the cursor instead" turned on.')
+        UI.SetEnabled(sy, follow, 'Needs "Follow the cursor instead" turned on.')
         L:EndCard()
     end
 
@@ -787,12 +828,21 @@ local DEBUFF_FAKE = {
     { icon = "Interface\\Icons\\Spell_Frost_FrostNova", left = 6, tint = { 0.2, 0.6, 1 } },
 }
 local ENCHANT_FAKE = { icon = "Interface\\Icons\\INV_Stone_02", left = 1700 }
+-- the hours-long one is a world buff (Rallying Cry); TBC has none that
+-- work at its level (Core_Flavor), so a flask stands in there. (Asked when
+-- the preview is built: this file loads before the game version is fixed.)
+local BUFF_FAKE_TBC3 = { icon = "Interface\\Icons\\INV_Potion_62", left = 6900 }
+local BUFF_FAKE_ERA3 = BUFF_FAKE[3]
+local function VersionBuffFake()
+    BUFF_FAKE[3] = (ns.Flavor and ns.Flavor() == "tbc") and BUFF_FAKE_TBC3 or BUFF_FAKE_ERA3
+end
 
 local function BuffCfg() return ns.BuffLook and ns.BuffLook.Cfg() or {} end
 -- the state the Buffs page's state editor was on, across rebuilds
 local AURA_STATE_PICK = {}
 
 local function BuildBuffPreview(canvas, P)
+    VersionBuffFake()
     local BL = ns.BuffLook
     local st = P.store
     st.buffs, st.debuffs = {}, {}
@@ -921,7 +971,7 @@ RegisterPage("Buffs", function(L)
                 ZacUIDB.buffsAlwaysExpanded = v and true or false
                 if ns.ApplyBuffConsolidation then ns.ApplyBuffConsolidation() end
                 if not v then
-                    Print("Consolidated buffs come back after a /reload.")
+                    ns.AskReload("Consolidated buffs come back after a reload.")
                 end
             end)
         L:Row(expand, 17)
@@ -1014,10 +1064,17 @@ RegisterPage("Buffs", function(L)
         Kit.Font(L, "Time font", BuffCfg, "timerFont", BL.TimerDefaults(),
             { sample = "29m  4m  12", maxSize = 24 })
         Kit.Choice(L, "Where it sits", BuffCfg, "timerPos", {
-            { text = "On the icon's bottom edge", value = "edge" },
+            { text = "Bottom edge", value = "edge" },
+            { text = "Centred on the icon", value = "center" },
             { text = "Under the icon", value = "below" },
+            { text = "Top edge", value = "top" },
             { text = "Inside the icon, at the bottom", value = "inside" },
-            { text = "In the middle of the icon", value = "center" },
+        }, nil, { after = Restyle })
+        -- HD polish: the dark sweep as the time runs out (ZacUI look)
+        Kit.Choice(L, "Dark sweep as it runs out", BuffCfg, "swipe", {
+            { text = "Short buffs and debuffs (5 minutes or less)", value = "short" },
+            { text = "Every buff and debuff", value = "all" },
+            { text = "Off", value = "off" },
         }, nil, { after = Restyle })
         Kit.Slider(L, "Nudge across", BuffCfg, "timerX", { min = -15, max = 15, step = 1,
             format = function(v) return v .. " px" end })
@@ -1291,7 +1348,7 @@ RegisterPage("Bags", function(L)
                     EnableModuleLive("inventory")
                 else
                     ZacUIDB.modules.inventory = false
-                    Print("Combined bag off - /reload to get Blizzard's bags back.")
+                    ns.AskReload("The combined bag is off. The game's own bags come back after a reload.")
                 end
             end)
         L:Row(cb, 17)
@@ -1778,7 +1835,7 @@ RegisterPage("Auction", function(L)
                     EnableModuleLive("auctionhouse")
                 else
                     ZacUIDB.modules.auctionhouse = false
-                    Print("Auction tabs off - /reload to remove them.")
+                    ns.AskReload("The auction tabs are off. They leave the auction house after a reload.")
                 end
             end)
         L:Row(cb, 17)
@@ -1992,7 +2049,7 @@ local function BuildChatPreview(canvas, P)
         st.chips[#st.chips + 1] = b
     end
     st.items = {}
-    for _, it in ipairs(C.ITEMS) do
+    local function ItemPlate(it)
         local b = CL.Plate(content)
         b._label:ClearAllPoints()
         b._label:SetPoint("RIGHT", b, "RIGHT", -6, 0)
@@ -2003,7 +2060,21 @@ local function BuildChatPreview(canvas, P)
         rule:SetPoint("BOTTOMLEFT", 0, 5)
         b._rule = rule
         b._it = it
-        st.items[#st.items + 1] = b
+        return b
+    end
+    for _, it in ipairs(C.ITEMS) do st.items[#st.items + 1] = ItemPlate(it) end
+    -- the bar's list can change later (another addon's block docked or
+    -- undocked, Chat_LDB): the sample follows it on the next update
+    st.SyncItems = function()
+        local byId = {}
+        for _, b in ipairs(st.items) do byId[b._it.id] = b b:Hide() end
+        local list = {}
+        for _, it in ipairs(C.ITEMS) do
+            local b = byId[it.id] or ItemPlate(it)
+            b._it = it
+            list[#list + 1] = b
+        end
+        st.items = list
     end
     -- the edit box
     local eb = CreateFrame("EditBox", nil, canvas)
@@ -2029,6 +2100,13 @@ local function UpdateChatPreview(canvas, P)
     local C = ns.Chat
     local CL = C.Look
     local st, d = P.store, C.DB()
+    if st.SyncItems then
+        local stale = #st.items ~= #C.ITEMS
+        if not stale then
+            for i, b in ipairs(st.items) do if b._it ~= C.ITEMS[i] then stale = true break end end
+        end
+        if stale then st.SyncItems() end
+    end
     local mode = P.mode or "reading"
     local W, H = ChatSize()
     local PAD, GAP = CL.PAD, CL.GAP
@@ -2048,7 +2126,9 @@ local function UpdateChatPreview(canvas, P)
         if k >= 1 then
             local line = CHAT_LINES[i]
             CL.StyleBlizzText(fs, d.messageFont, true)
-            fs:SetText(line[1])
+            -- (short channel names, names in colour, time stamps: Chat_Lines)
+            local CLn = ns.ChatLines
+            fs:SetText((CLn and CLn.PreviewOn() and CLn.Preview(line[1])) or line[1])
             fs:SetTextColor(ChatTypeRGB(line[2], line[3]))
             fs:ClearAllPoints()
             fs:SetWidth(W - 2 * PAD - 4)
@@ -2117,8 +2197,10 @@ local function UpdateChatPreview(canvas, P)
     end
     local rx, leftmost = -2, nil
     local g = ns.GetColor("text", "gray")
-    for i = #st.items, 1, -1 do
-        local b = st.items[i]
+    -- (in the saved order, as the real bar: d.barOrder)
+    local ordered = (C.OrderedItems and C.OrderedItems(st.items)) or st.items
+    for i = #ordered, 1, -1 do
+        local b = ordered[i]
         local on = d.items[b._it.id] and true or false
         b:SetShown(on)
         if on then
@@ -2304,9 +2386,13 @@ RegisterPage("Chat", function(L)
             clock   = "Realm time, or local time if Blizzard's clock is set to it. The minimap has one too, so this starts off.",
         }
         for _, it in ipairs(C.ITEMS) do
-            Check(d.items, it.id, it.label, ITEM_DESC[it.id])
+            -- (other addons' blocks have their own card below)
+            if not it.ldb then Check(d.items, it.id, it.label, ITEM_DESC[it.id]) end
         end
         L:EndCard()
+
+        -- other addons' LibDataBroker blocks on the bar (Chat_LDB.lua)
+        if ns.ChatLDB and ns.ChatLDB.Card then ns.ChatLDB.Card(L) end
 
         L:Card("Tabs")
         Check(d, "tabs", "Style the chat tabs",
@@ -2753,7 +2839,7 @@ RegisterPage("LootRoll", function(L)
         local on = LRCfg()[key]
         if defaultOn then on = on ~= false else on = on and true or false end
         local cb = UI.Checkbox(L.current, label, on, function(v)
-            if defaultOn then LRSet(key, (not v) and false or nil)
+            if defaultOn then if v then LRSet(key, nil) else LRSet(key, false) end
             else LRSet(key, v and true or nil) end
         end, { tooltip = tip })
         L:Row(cb, 17)
@@ -2825,7 +2911,7 @@ RegisterPage("LootRoll", function(L)
             formatGet = fmtGet, formatSet = fmtSet, formatDefaults = LR.TIME_DEFAULT,
             formatKinds = { time = true },
             formatSample = function(spec) return ns.FormatTime(32, spec, LR.TIME_DEFAULT) end }))
-        if not LRCfg().showTime and UI.SetEnabled then UI.SetEnabled(g, false) end
+        if not LRCfg().showTime and UI.SetEnabled then UI.SetEnabled(g, false, 'Needs "Show the time left" turned on.') end
         L:Desc("Switch it on under General first.")
         L:EndCard()
 

@@ -21,6 +21,10 @@ local LABELS = {
     player = "Player", target = "Target", targettarget = "Target of Target",
     pet = "Pet", party = "Party", raid = "Raid",
 }
+-- the single frames only some games have (the focus pair: Focus.lua)
+if ns.WithExtraKeys then
+    KEYS = ns.WithExtraKeys(KEYS, LABELS, function(e) return e.moveDialog end)
+end
 
 -- ---- grid + snapping ------------------------------------------------------
 local grid

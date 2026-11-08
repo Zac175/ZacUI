@@ -36,6 +36,17 @@ local function NPRefresh()
     if NP then NP.RefreshAll() end
 end
 
+-- Copy to the other side (finish pass): the sections and their keys
+-- (NP_Core's enemy / friendly tables); a side takes only the keys it has
+local NP_SECTIONS = {
+    { label = "Sizes", hint = "bar and cast bar", keys = { "width", "height", "combatWidth", "combatHeight",
+        "castWidth", "castHeight" } },
+    { label = "Texts", hint = "sizes, fonts, colours, places", keys = { "castTextSize", "nameSize", "namePos",
+        "nameJustify", "levelShow", "levelSize", "percent", "percentSize", "nameFont", "levelFont", "percentFont",
+        "castFont", "nameColor", "percentColor", "nameClassColor", "anchors" } },
+    { label = "Raid marker", hint = "where and how big", keys = { "markerPos", "markerSize", "markerX", "markerY" } },
+}
+
 -- the words people type that are not on the page
 do
     local extra = " font fonts typeface outline shadow colour color colours texture textures "
@@ -805,7 +816,7 @@ local function CrosshairSection(L)
     local tgtBtn = UI.Button(add, "Add my target", { width = 100,
         tooltip = "Adds whatever you have targeted right now.",
         onClick = function()
-            local n = UnitExists("target") and UnitName("target")
+            local n = UnitExists("target") and ns.Nameplates.SafeName("target")
             if not n then Print("no target.") return end
             AddName(n)
         end })
@@ -1242,20 +1253,23 @@ RegisterPage("Nameplates", function(L)
         BindColor(L, d.castbar, "normal", "Cast")
         BindColor(L, d.castbar, "channel", "Channel")
         BindColor(L, d.castbar, "uninterruptible", "Can't be interrupted")
-        BindColor(L, d.castbar, "interrupted", "Interrupted flash")
-        BindCheck(L, d.castbar, "spark", "Spark on the moving edge",
-            "A bright line where the cast bar is filling.")
+        -- LESS COMMON (finish pass, L:Fold): the interrupted flash and the spark
+        L:Fold("np.castbar", "interrupted flash, spark", function(L)
+            BindColor(L, d.castbar, "interrupted", "Interrupted flash")
+            BindCheck(L, d.castbar, "spark", "Spark on the moving edge",
+                "A bright line where the cast bar is filling.")
+        end, { changed = function() return d.castbar.spark == false end })
         L:EndCard()
 
         L:Card("Target highlight")
         local c1 = BindColor(L, d.target, "color", "Glow colour")
         local s1 = BindSlider(L, d.target, "alpha", "Glow opacity", PctOpts(0.8, { min = 10, max = 100, step = 5 }))
         local s2 = BindSlider(L, d.target, "neonHeight", "Glow height", { min = 4, max = 30, format = PX })
-        for _, w in ipairs({ c1, s1, s2 }) do UI.SetEnabled(w, d.target.highlight) end
+        for _, w in ipairs({ c1, s1, s2 }) do UI.SetEnabled(w, d.target.highlight, 'Needs "Highlight your target" turned on.') end
         local c2 = BindColor(L, d.target, "hoverColor", "Mouseover glow colour")
         local s3 = BindSlider(L, d.target, "hoverAlpha", "Mouseover glow strength", PctOpts(0.2, { min = 5, max = 60, step = 5 }))
-        UI.SetEnabled(c2, d.target.hover)
-        UI.SetEnabled(s3, d.target.hover)
+        UI.SetEnabled(c2, d.target.hover, 'Needs "Mouseover glow" turned on.')
+        UI.SetEnabled(s3, d.target.hover, 'Needs "Mouseover glow" turned on.')
         BindSlider(L, d.target, "scale", "Target plate size", PctOpts(1, { min = 100, max = 150, step = 5,
             desc = "Your target's plate grows to this size; 100% turns the size change off." }))
         BindSlider(L, d.target, "nonTargetAlpha", "Faded plate opacity", PctOpts(1, { min = 10, max = 100, step = 5,
@@ -1352,7 +1366,7 @@ RegisterPage("Nameplates", function(L)
                     return
                 end
                 d.npcColors[id] = d.npcColors[id] or { 1, 1, 1 }
-                d.npcNames[id] = UnitName("target")
+                d.npcNames[id] = ns.Nameplates.SafeName("target")
                 NPRefresh()
                 RefreshConfig()
             end })
@@ -1446,6 +1460,25 @@ RegisterPage("Nameplates", function(L)
                 onSelect = function(v) ZacUIDB.config.npTextSide = v RefreshConfig() end })
         end, { width = 200 })
         L:Add(sideDD, 10)
+        -- APPLY TO THE OTHER SIDE (finish pass, UI.ApplyToAll): these
+        -- plates' sizes, texts or raid marker onto the other side's
+        if UI.ApplyToAll then
+            local other = en and "friendly" or "enemy"
+            local otherName = en and "friendly plates" or "enemy plates"
+            local copy = UI.ApplyToAll(L.current, {
+                text = "Copy to " .. otherName .. "...", width = 150, title = "Copy to " .. otherName,
+                tooltip = "Copies these plates' sizes, texts or raid marker onto the " .. otherName .. ", after you confirm.",
+                what = function() return en and "Enemy plates" or "Friendly plates" end,
+                source = function() return d[side] end,
+                targets = function() return { { label = otherName, tbl = d[other] } } end,
+                onto = function() return "the " .. otherName end,
+                sections = NP_SECTIONS, allLabel = "All three", allWord = "sizes, texts and raid marker",
+                onDone = function()
+                    NPRefresh()
+                    RefreshConfig()
+                end })
+            L:Row(copy, M.BUTTON_H + 6)
+        end
         L:Desc("Every text below: its font, colour and spot on these plates.")
         L:EndCard()
 

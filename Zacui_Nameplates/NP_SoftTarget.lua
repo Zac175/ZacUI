@@ -233,7 +233,7 @@ local function SamplePlatePositions()
     local ws = WorldFrame:GetEffectiveScale()
     for _, u in ipairs(ST._order) do
         local plate = C_NamePlate.GetNamePlateForUnit(u)
-        local g = UnitGUID(u)
+        local g = NP.SafeGUID(u)   -- (nil while WoW Forever hides it: no key, no compare)
         if plate and g then
             local ok, px, py = pcall(plate.GetCenter, plate)
             if not ok then
@@ -330,7 +330,7 @@ local function NextUnit()
     for pass = 1, 2 do
         for _, u in ipairs(ST._order) do
             if EligibleNext(u) then
-                local g = UnitGUID(u)
+                local g = NP.SafeGUID(u)
                 if pass == 2 or not (g and ST._outCone[g]) then
                     local ri = g and RecentIndex(g, now)
                     if ri then
@@ -391,20 +391,20 @@ local function NextUnit()
         ST._pendGUID, ST._pendN = nil, nil
     end
     ST._pickToken = pick
-    ST._pickGUID = pick and UnitGUID(pick) or nil
+    ST._pickGUID = pick and NP.SafeGUID(pick) or nil
     return pick
 end
 
 local function NoteTargetVisit()
     if not (UnitExists("target") and UnitCanAttack("player", "target")) then return end
-    local g = UnitGUID("target")
+    local g = NP.SafeGUID("target")
     if not g then return end
     local now = GetTime()
     local prior = ST._visits[g]
     if prior and (now - prior) <= VISIT_WINDOW then
         for _, u in ipairs(ST._order) do
             if EligibleNext(u) then
-                local ug = UnitGUID(u)
+                local ug = NP.SafeGUID(u)
                 if ug and not ST._visits[ug] then ST._outCone[ug] = now end
             end
         end
@@ -652,7 +652,7 @@ function UpdateMarker()
             if nextPlate and s.nextSkull then
                 -- Skull the pick once per mob (GUID-gated; SetRaidTarget
                 -- is unprotected - it just no-ops without permission).
-                local g = UnitGUID(u)
+                local g = NP.SafeGUID(u)
                 if g and g ~= ST._lastSkullGUID then
                     ST._lastSkullGUID = g
                     pcall(SetRaidTarget, u, 8)
@@ -711,7 +711,8 @@ local normalizedOnce = false
 local function SetCVarIfChanged(name, val)
     local ok, cur = pcall(GetCVar, name)
     if ok and cur ~= nil and tostring(cur) == tostring(val) then return end
-    pcall(SetCVar, name, val)
+    -- SETUP2: through ns.CVar (recorded; put back when the plates are off)
+    if ns.CVar then ns.CVar.Set(name, val, "nameplates") else pcall(SetCVar, name, val) end
 end
 
 local function ApplySoftCVars()
@@ -806,6 +807,9 @@ local function LabSet(name, val)
         local cur = LabGet(name)
         if cur ~= nil then ST._labOrig[name] = cur end
     end
+    -- SETUP2: recorded like every other write (the lab's own LabRestore
+    -- hands the values back itself, so that one stays a plain write)
+    if ns.CVar then return ns.CVar.Set(name, val, "nameplates") end
     local ok = pcall(SetCVar, name, val)
     return ok
 end

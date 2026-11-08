@@ -548,4 +548,59 @@ Modules.panels = function()
         }})
         SkinScrollFrame("KeyBindingFrameScrollFrame")
     end)
+
+    -- WoW FOREVER'S MODERN WINDOWS (2026-11-07). Forever ships the modern
+    -- professions window, flight map, group finder and talents page in
+    -- place of the Classic ones ZacUI rebuilds, so none of ZacUI's own
+    -- windows attach to them. Until each gets its own, they get the
+    -- treatment every skinned Blizzard window gets: the frame art,
+    -- portrait and title bar art away for ZacUI's dark panel and title,
+    -- ZacUI's scroll bars; their buttons, boxes and tabs are the
+    -- classifier's as everywhere. Modern clients only, Forever and Retail
+    -- (the Classic clients do not have these windows, or not in this shape).
+    if _G.ZACUI_MODERN then
+        -- side tabs of the modern shape (LargeSideTabButtonTemplate) down a
+        -- window's edge: the flat look the social window's got (Blz_Windows)
+        local function SideTabs(frame)
+            if not ns.SkinSideTab then return end
+            for _, child in ipairs({ frame:GetChildren() }) do
+                if child.SelectedTexture and child.Icon and child.Background then ns.SkinSideTab(child) end
+            end
+        end
+        local function SkinModern(frame)
+            if not frame or frame._zModernSkin then return end
+            frame._zModernSkin = true
+            SkinPanel(frame)
+            SkinAllScrollBarsUnder(frame, 0)
+            SideTabs(frame)
+            -- lists made on first open get their bars then
+            frame:HookScript("OnShow", function()
+                SkinAllScrollBarsUnder(frame, 0)
+                SideTabs(frame)
+            end)
+        end
+        ns.SkinModernWindow = SkinModern
+        -- Found by name whenever any addon loads, not by addon name: Forever's
+        -- own windows do not always come from the addon the Mainline
+        -- sources put them in (its professions book is ProfessionsFrame
+        -- with a BookPage, from an addon of its own). PlayerSpellsFrame is
+        -- Win_Spellbook's, which calls ns.SkinModernWindow itself.
+        -- (not PVEFrame on Forever: its group finder is the vanilla-style
+        -- LFGParentFrame, ZacUI's own window - Win_LFG. On Retail the group
+        -- finder IS PVEFrame, Blizzard_GroupFinder_Mainline, and Win_LFG
+        -- stands down there, so it takes this skin: Core_Flavor, win_lfg)
+        local NAMES = { "ProfessionsFrame", "ProfessionsBookFrame", "FlightMapFrame",
+                        "LegacySystemFrame", "PetStableFrame" }
+        if _G.ZACUI_IS_RETAIL then NAMES[#NAMES + 1] = "PVEFrame" end
+        local function SkinAll()
+            for _, name in ipairs(NAMES) do
+                local f = _G[name]
+                if type(f) == "table" and f.GetObjectType then SkinModern(f) end
+            end
+        end
+        SkinAll()
+        local watch = CreateFrame("Frame")
+        watch:RegisterEvent("ADDON_LOADED")
+        watch:SetScript("OnEvent", SkinAll)
+    end
 end

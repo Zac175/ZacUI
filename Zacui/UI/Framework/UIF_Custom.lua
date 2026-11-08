@@ -679,6 +679,9 @@ local function EachStrip(strips, fn)
     else for _, side in ipairs(SIDES) do if strips[side] then fn(strips[side], side) end end end
 end
 local function PlaceRing(frame, strips, size, out)
+    -- (HD polish: the size is in physical pixels under ZacUI's look,
+    -- Core_Pixel; units everywhere else)
+    if ns.Pixel and ns.Pixel.On() and size > 0 then size = math.floor(size + 0.5) * ns.Pixel.One(frame) end
     local o = out and size or 0
     local tp, bt, lf, rt = strips.top, strips.bottom, strips.left, strips.right
     if not (tp and bt and lf and rt) then return end
@@ -734,7 +737,7 @@ function ns.ApplyChrome(frame, spec, def, parts)
             if size ~= nil then
                 if size <= 0 then t:Hide() else
                     t:Show()
-                    if parts.border then
+                    if parts.border and not (ns.Pixel and ns.Pixel.SetEdgeSize(t, size)) then
                         if side == "top" or side == "bottom" then t:SetHeight(size) elseif side then t:SetWidth(size) end
                     end
                 end
@@ -793,10 +796,12 @@ end
 -- that have a value are applied.
 function ns.StateValue(states, name, field, defaults)
     local s = type(states) == "table" and states[name]
-    local v = type(s) == "table" and s[field] or nil
+    -- (a saved `false`, "Grey it out: No", is a value too: no and/or here)
+    local v
+    if type(s) == "table" then v = s[field] end
     if v == nil and type(defaults) == "table" then
         local d = defaults[name]
-        v = type(d) == "table" and d[field] or nil
+        if type(d) == "table" then v = d[field] end
     end
     return v
 end
@@ -866,6 +871,13 @@ local function Comma(n)
 end
 
 function ns.FormatNumber(v, spec, def)
+    -- (Core_Numbers) a style name instead of a spec, and a value the
+    -- client hides (WoW Forever in combat), go to the shared formatter;
+    -- a plain number with a spec reads exactly as it always did
+    local Num = ns.Numbers
+    if Num and (type(spec) == "string" or (v ~= nil and Num.Hidden(v))) then
+        return Num.Format(v, type(spec) == "string" and spec or "short", type(def) == "number" and def or nil)
+    end
     v = tonumber(v) or 0
     local s = type(spec) == "table" and spec or EMPTY
     local d = type(def) == "table" and def or EMPTY

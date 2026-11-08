@@ -235,6 +235,8 @@ local function OnPage(pageId, step)
     local avail = step.available
     step.available = function()
         if not (ns.FindMenuItem and ns.FindMenuItem(pageId)) then return false end
+        -- (no page where this game version does not run it: Core_Flavor)
+        if ns.FeatureOffForPage and ns.FeatureOffForPage(pageId) then return false end
         return (not avail) or avail()
     end
     return step
@@ -301,7 +303,9 @@ local function BuildSteps()
           target = function() return Seen(live.tabs) and live.tabs or nil end }),
         OnSample({ id = "preview", place = "left",
           title = "A live preview",
-          body = "Pages that change how something looks show a sample of it, updated as you change settings.",
+          body = "Pages that change how something looks show a sample of it, updated as you change settings. "
+              .. "On many of them you can drag the sample's pieces to move, resize or reorder them - "
+              .. "right-click a piece for more, Ctrl+Z undoes.",
           available = function() return (ns.ConfigPreview or ns.Preview) ~= nil end,
           target = function()
               local f = PreviewFrame()

@@ -85,7 +85,7 @@ local function Bind(L, kind, key, label, desc, opts)
         })
         L:Row(widget, 40)
     end
-    if opts.enabled ~= nil then UI.SetEnabled(widget, opts.enabled) end
+    if opts.enabled ~= nil then UI.SetEnabled(widget, opts.enabled, opts.why) end
     if desc then L:Desc(desc) end
     return widget
 end
@@ -121,7 +121,7 @@ local function BindColor(L, key, label, desc, theme, opts)
             LookSoon()
         end })
     L:Add(p, 6)
-    if opts.enabled ~= nil then UI.SetEnabled(p, opts.enabled) end
+    if opts.enabled ~= nil then UI.SetEnabled(p, opts.enabled, opts.why) end
     if desc then L:Desc(desc) end
     return p
 end
@@ -528,6 +528,8 @@ local function UpdateMapPreview(canvas, P)
     if Fr and Fr.StyleStrip and strip.player then
         Fr.StyleStrip(strip)
         strip.player:SetText(Fr.CoordText("Player", 0.524, 0.381))
+        -- the zone keeps clear of a wide position text, as on the map
+        if Fr.KeepZoneClear then Fr.KeepZoneClear(strip) end
         strip.cursor:SetText(Fr.CoordText("Cursor", 0.61, 0.442))
         local zone = ""
         if db.zoneLevels then
@@ -911,7 +913,8 @@ RegisterPage("Maps", function(L)
         local sw = UI.Swatch(swatchRow, "map", "reveal", function()
             if ns.MapsReveal then ns.MapsReveal.Repaint() end
         end)
-        sw:SetPoint("LEFT", 100, 0)
+        -- (clear of its label at any type size)
+        sw:SetPoint("LEFT", math.max(100, math.ceil(label:GetStringWidth() or 0) + 10), 0)
         L:Row(swatchRow, 26)
         L:Desc("Also on the Colours page, and it travels with your profile.")
         Bind(L, "slider", "tintAlpha", "Tint strength", nil, With(Pct(1), {
@@ -996,7 +999,7 @@ RegisterPage("Maps", function(L)
             defaults = { size = 9, outline = "outline", shadow = false },
             minSize = 6, maxSize = 20, sample = "Zaccw  Lumi" })
         L:Add(nf, 8)
-        UI.SetEnabled(nf, nameOn)
+        UI.SetEnabled(nf, nameOn, 'Needs "Names under the dots" turned on.')
         ModeDropdown(L, "dotNameColorMode", "Colour", "One colour", true)
         BindColor(L, "dotNameColor", "The one colour", nil, { "text", "normal" },
             { alpha = false, enabled = nameOn and db.dotNameColorMode == "custom" })
@@ -1191,7 +1194,10 @@ RegisterPage("Maps", function(L)
             opts.enabled = { type = "toggle", name = "The seamless map", order = 0, width = "full",
                 desc = "Off: Blizzard's own map comes back after a /reload.",
                 get = function() return mod.db.enabled end,
-                set = function(_, v) mod.db.enabled = v Print("the world map part " .. (v and "on" or "off") .. " after a /reload.") end }
+                set = function(_, v)
+                    mod.db.enabled = v
+                    ns.AskReload("The seamless map is " .. (v and "on" or "off") .. " after a reload.")
+                end }
             if ns.RenderAceOptions then
                 local stats = ns.RenderAceOptions(S, { type = "group", args = opts }, cardW, RefreshConfig)
                 if stats.skipped > 0 then L:Desc(stats.skipped .. " setting(s) this page cannot draw yet.") end

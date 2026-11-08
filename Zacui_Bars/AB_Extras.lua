@@ -111,7 +111,7 @@ local function PetUpdate()
         end
         local start, duration, enable = GetPetActionCooldown(i)
         CooldownSet(AB.Region(btn, "cooldown", "Cooldown"), start, duration, enable)
-        Hotkey(btn.zHotkey, GetBindingKey("BONUSACTIONBUTTON" .. i), cfg.hideHotkey)
+        Hotkey(btn.zHotkey, GetBindingKey("BONUSACTIONBUTTON" .. i), cfg.hideHotkey and not AB.keyMode)
     end
 end
 
@@ -137,6 +137,7 @@ local function CreatePetBar()
         btn:SetAttribute("action", i)
         btn.commandName = "BONUSACTIONBUTTON" .. i      -- Quick Keybind Mode binds this
         btn.zHotkey = AB.Region(btn, "HotKey", "HotKey")
+        if AB.KitCapture then AB.KitCapture(btn) end      -- (a game look's kit: AB_Core)
         SkinSecureIcon(btn)
         local cd = AB.Region(btn, "cooldown", "Cooldown")
         if cd and cd.SetDrawEdge then cd:SetDrawEdge(false) end
@@ -204,7 +205,7 @@ local function StanceUpdate()
             btn:SetChecked(isActive and true or false)
             local start, duration, enable = GetShapeshiftFormCooldown(i)
             CooldownSet(AB.Region(btn, "cooldown", "Cooldown"), start, duration, enable)
-            Hotkey(btn.zHotkey, GetBindingKey("SHAPESHIFTBUTTON" .. i), cfg.hideHotkey)
+            Hotkey(btn.zHotkey, GetBindingKey("SHAPESHIFTBUTTON" .. i), cfg.hideHotkey and not AB.keyMode)
         end
     end
 end
@@ -221,6 +222,7 @@ local function CreateStanceBar()
         btn:SetScript("OnEvent", nil)
         btn.commandName = "SHAPESHIFTBUTTON" .. i       -- Quick Keybind Mode binds this
         btn.zHotkey = AB.Region(btn, "HotKey", "HotKey")
+        if AB.KitCapture then AB.KitCapture(btn) end      -- (a game look's kit: AB_Core)
         SkinSecureIcon(btn)
         local cd = AB.Region(btn, "cooldown", "Cooldown")
         if cd and cd.SetDrawEdge then cd:SetDrawEdge(false) end
@@ -276,6 +278,29 @@ local function ApplyStance(profile)
 end
 AB.RegisterApplier(ApplyStance)
 
+-- THE PET AND STANCE KEYS, taken again whenever the keys change (AB.
+-- ReassignBindings runs this after UPDATE_BINDINGS, out of combat - it
+-- queues itself for after the fight). Before, they were only taken when
+-- the bars were applied, so a key moved off a pet or stance button kept
+-- firing that button, over whatever it had been bound to, until the next
+-- loading screen. Same keys, same buttons as ApplyPet / ApplyStance.
+function AB.RebindSmallBars()
+    if InCombatLockdown() then return end
+    if pet then
+        ClearOverrideBindings(pet)
+        if pet.cfg and pet.cfg.enabled then
+            for i = 1, 10 do OverrideKeys(pet, "BONUSACTIONBUTTON" .. i, "ZacUIPetButton" .. i) end
+        end
+    end
+    if stance then
+        ClearOverrideBindings(stance)
+        local num = stance.appliedForms or 0
+        if stance.cfg and stance.cfg.enabled and num > 0 then
+            for i = 1, num do OverrideKeys(stance, "SHAPESHIFTBUTTON" .. i, "ZacUIStanceButton" .. i) end
+        end
+    end
+end
+
 -- ============================================================
 -- BAG BAR
 -- ============================================================
@@ -292,6 +317,21 @@ local function BagButtons(cfg)
         if _G[name] then list[#list + 1] = _G[name] end
     end
     return list
+end
+
+-- the client's own bag buttons and micro menu, read just before ZacUI
+-- puts Blizzard's bars away (AB.HideBlizzard): the spots a never-placed
+-- bag bar / micro menu takes (AB.SeatFromStock)
+function AB.CaptureStockSpots()
+    AB._stock = AB._stock or {}
+    local p = AB.Profile and AB.Profile()
+    local bags = BagButtons((p and p.bagbar) or {})
+    local l, b, r, t = AB.StockRect(bags)
+    if l then AB._stock.bagbar = { l, b, r, t } end
+    local list = {}
+    for _, name in ipairs(AB.MICRO_BUTTONS or {}) do if _G[name] then list[#list + 1] = _G[name] end end
+    l, b, r, t = AB.StockRect(list)
+    if l then AB._stock.micro = { l, b, r, t } end
 end
 
 local function ApplyBagBar(profile)
@@ -325,6 +365,11 @@ local function ApplyBagBar(profile)
         SmallBarCommon(bagbar, cfg, bagbar.buttons, 37, 0, cfg.initial)
         return
     end
+    -- a bar never placed (a fresh install): where the client's own bag
+    -- buttons sit now, before they are taken (AB.SeatFromStock)
+    if cfg.point == nil and AB.SeatFromStock then
+        AB.SeatFromStock(cfg, BagButtons(cfg), 37, "bagbar")
+    end
     for i, b in ipairs(BagButtons(cfg)) do
         if not b.zHome then
             local pts = {}
@@ -342,6 +387,15 @@ local function ApplyBagBar(profile)
     if KeyRingButton and cfg.keyring and not cfg.onebag then
         KeyRingButton:SetSize(18, 37)
     end
+    -- a game look: each bag slot at the client's own size (the backpack
+    -- bigger than the bag slots, the slot art never stretched); the row
+    -- stays centred on its line (LayoutButtons chains side middles)
+    if AB.Kit and AB.Kit() ~= "zacui" then
+        for _, b in ipairs(bagbar.buttons) do
+            local hm = b.zHome
+            if hm and hm.w and hm.w > 0 and hm.h and hm.h > 0 and b ~= KeyRingButton then b:SetSize(hm.w, hm.h) end
+        end
+    end
 end
 AB.RegisterApplier(ApplyBagBar)
 
@@ -354,6 +408,32 @@ local MICRO_BUTTONS = {
     "QuestLogMicroButton", "SocialsMicroButton", "WorldMapMicroButton",
     "MainMenuMicroButton", "HelpMicroButton",
 }
+-- WoW Forever's micro menu (2026-11-07; Blizzard_MicroMenu/Camelot):
+-- professions, the Legacy system, guild, the group finder, collections,
+-- the adventure guide and the store sit beside the ones above. Taken in
+-- Blizzard's own order on that client only (Classic's list stays as it
+-- is), each only when the client has it.
+if _G.ZACUI_IS_FOREVER then
+    MICRO_BUTTONS = {
+        "CharacterMicroButton", "ProfessionMicroButton", "SpellbookMicroButton", "TalentMicroButton",
+        "LegacyMicroButton", "QuestLogMicroButton", "SocialsMicroButton", "GuildMicroButton",
+        "LFDMicroButton", "WorldMapMicroButton", "CollectionsMicroButton", "EJMicroButton",
+        "HelpMicroButton", "StoreMicroButton", "MainMenuMicroButton",
+    }
+end
+-- Retail's (2026-11-07; Blizzard_MicroMenu/Mainline/MainMenuBarMicroButtons.xml
+-- on the live branch): the spellbook and talents are one PlayerSpells
+-- button, achievements and housing have buttons of their own, and there
+-- is no world map or socials button (the map is a key, friends are in
+-- the Guild & Communities window). Each only when the client has it.
+if _G.ZACUI_IS_RETAIL then
+    MICRO_BUTTONS = {
+        "CharacterMicroButton", "ProfessionMicroButton", "PlayerSpellsMicroButton", "AchievementMicroButton",
+        "QuestLogMicroButton", "HousingMicroButton", "GuildMicroButton", "LFDMicroButton",
+        "CollectionsMicroButton", "EJMicroButton", "HelpMicroButton", "StoreMicroButton", "MainMenuMicroButton",
+    }
+end
+AB.MICRO_BUTTONS = MICRO_BUTTONS
 -- Lays a row (or column) of micro buttons out on `header`: shared by
 -- the live menu and the preview's look-alikes. Micro buttons are 32 wide
 -- and 40 tall; LayoutButtons sizes square, so it sizes by width and the
@@ -413,13 +493,27 @@ local function ApplyMicro(profile)
         SmallBarCommon(micro, cfg, {}, 32, 0, cfg.initial)
         return
     end
+    if cfg.point == nil and not micro.owned and AB.SeatFromStock then
+        AB.SeatFromStock(cfg, micro.buttons, 32, "micro", 40)
+    end
+    -- (a game look keeps each button's own art: the game's micro menu)
+    local stockArt = AB.Kit and AB.Kit() ~= "zacui"
     for _, b in ipairs(micro.buttons) do
         b:SetParent(micro)
         b:SetFrameLevel(micro:GetFrameLevel() + 1)
-        if ns.HideRegions then ns.HideRegions(b:GetName(), { "Border", "Flash" }) end
-        if b.Background then b.Background:SetAlpha(0) end
-        if b.PushedBackground then b.PushedBackground:SetAlpha(0) end
+        if not stockArt then
+            if ns.HideRegions then ns.HideRegions(b:GetName(), { "Border", "Flash" }) end
+            if b.Background then b.Background:SetAlpha(0) end
+            if b.PushedBackground then b.PushedBackground:SetAlpha(0) end
+        end
         b:Show()
+    end
+    -- Forever: Blizzard's menu frame keeps its bar art (BorderArt and
+    -- BackgroundArt) around a grid the buttons have left; away with it
+    local mm = _G.MicroMenu
+    if mm then
+        if type(rawget(mm, "BorderArt")) == "table" then mm.BorderArt:SetAlpha(0) end
+        if type(rawget(mm, "BackgroundArt")) == "table" then mm.BackgroundArt:SetAlpha(0) end
     end
     micro.owned = true
     if UpdateMicroButtonsParent then pcall(UpdateMicroButtonsParent, micro) end
@@ -441,6 +535,41 @@ local function ApplyStatus(profile)
         status.content:SetFrameLevel(status:GetFrameLevel() + 1)
     end
     status.cfg = cfg
+    -- A GAME LOOK'S SEAT (2026-11-08): with ZacUI's strip off, the game's
+    -- own XP / reputation bars sit on top of bar 1's chrome at its width, as
+    -- the game's main bar carries them (nothing saved; ZacUI's look and a
+    -- strip of ZacUI's own are never moved)
+    local seatOn, seatFrame, seatFramed
+    if not cfg.enabled and mgr and cfg.kitSeat ~= false and AB.Kit and AB.Kit() ~= "zacui" then
+        local b1 = AB.actionBars and AB.actionBars[1]
+        seatFrame, seatFramed = AB.KitGridFrame(b1)
+        seatOn = seatFrame ~= nil and b1:IsShown()
+    end
+    if seatOn then
+        local w = seatFrame:GetWidth()
+        local lift = seatFramed and (6 * ((AB.actionBars[1].cfg and AB.actionBars[1].cfg.buttonSize or AB.BUTTON) / 45)) or 0
+        status:ClearAllPoints()
+        status:SetPoint("TOPLEFT", seatFrame, "TOPLEFT", 0, lift + 14 + 1)
+        status:SetScale(1)
+        status.content:ClearAllPoints()
+        status.content:SetPoint("TOPLEFT", status, "TOPLEFT", 0, 0)
+        status.content:SetSize(w, 14)
+        mgr:SetParent(status.content)
+        mgr:ClearAllPoints()
+        mgr:SetPoint("BOTTOMLEFT", status.content, "BOTTOMLEFT", 0, 0)
+        mgr:SetWidth(w)
+        for _, key in ipairs({ "MainStatusTrackingBarContainer", "SecondaryStatusTrackingBarContainer" }) do
+            local c = rawget(mgr, key)
+            if type(c) == "table" and c.SetWidth then c:SetWidth(w) end
+        end
+        mgr:Show()
+        status.owned = true
+        status:SetAlpha(1)
+        status:Show()
+        UnregisterStateDriver(status, "visibility")
+        AB.RegisterFade(status, { fade = false, alpha = 1 })
+        return
+    end
     if not cfg.enabled or not mgr then
         UnregisterStateDriver(status, "visibility")
         status:Hide()

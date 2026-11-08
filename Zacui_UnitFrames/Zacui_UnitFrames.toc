@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Unit frames|r
 ## Notes: ZacUI's unit frames: player, target, pet, party and raid frames with incoming heals. The addon that used to be ZacUF.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Unit Frames
 ## Dependencies: Zacui
@@ -49,6 +49,11 @@ Heal.lua
 
 # --- Frame building blocks + frames ---
 Elements.lua
+# The optional portrait (off by default); wraps Elements.lua's constructors, so it loads right after it
+Portrait.lua
+# The game looks' frame art on the single frames (Classic WoW UI, Blizzard
+# style, WoW Forever); after Portrait.lua, whose StyleElements it wraps
+Kit.lua
 Glows.lua
 Units.lua
 Groups.lua
@@ -56,10 +61,27 @@ Mock.lua
 Blizzard.lua
 ShoutAlert.lua
 LowHealth.lua
+# Feature cluster 2 (2026-11-07): the frames only some games have - the
+# focus pair and the boss frames (TBC / Forever / Retail; nothing on Era).
+# Extras first (their common ground); before Preview / Options /
+# MoveDialog, which list them.
+Extras.lua
+Focus.lua
+Boss.lua
+# Feature cluster 2, group C: the tank frames beside the raid and the
+# party members' targets beside the party (every game; off by default)
+Tanks.lua
+PartyTargets.lua
 
 # --- The settings preview's sample frames (built by the code above) ---
 Preview.lua
+# Feature cluster 3 (2026-11-07): your missing buffs on the party / raid
+# cells, off by default. After Preview (it dresses the samples too).
+MissingBuffs.lua
 
 # --- In-game configuration window + the ZacUI config page ---
 Options.lua
+# Drag to customise in the frames preview (ZacUI's UIF_PreviewDrag): the
+# pieces of the sample frame. After Options (it wraps that page's preview).
+PreviewDrag.lua
 MoveDialog.lua

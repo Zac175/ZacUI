@@ -73,7 +73,7 @@ function S.New(parent, name)
         local t = f:CreateTexture(nil, "OVERLAY")
         t._zui_own = true
         t:SetTexture(PACK[i])
-        t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(t)
         t:SetSize(30, 30)
         t:Hide()
         f.pack[i] = t
@@ -152,6 +152,40 @@ S.SCENES = {
           debuffs = true, x = 95, y = 8 },
     },
 }
+-- Another game version's plates (Core_Flavor): its own mobs instead of
+-- Classic Era's Naxxramas ones, and on Forever what the plates show there
+-- in a fight - no threat colour or threat strip (Forever hides threat in
+-- combat, NP_Health / NP_Threat), and casts in the plain cast colour with
+-- no cast target (the spell and its target are hidden).
+do
+    local fl = ns.Flavor and ns.Flavor() or "era"
+    local NAMES = ({
+        tbc = { ["Deathknight Captain"] = { "Phantom Guardsman", 72 }, ["Skeletal Smith"] = { "Spectral Retainer", 71 },
+                ["Deathknight Cavalier"] = { "Phantom Guardsman", 72 }, ["Necro Knight"] = { "Spectral Retainer", 71 },
+                ["Plagued Gargoyle"] = { "Arcane Anomaly", 71 }, ["Grand Widow Faerlina"] = { "Moroes", -1 } },
+        forever = { ["Deathknight Captain"] = { "Onyxian Warder", 62 }, ["Skeletal Smith"] = { "Onyxian Whelp", 60 },
+                ["Deathknight Cavalier"] = { "Onyxian Warder", 62 }, ["Necro Knight"] = { "Onyxian Warder", 62 },
+                ["Plagued Gargoyle"] = { "Onyxian Whelp", 60 }, ["Grand Widow Faerlina"] = { "Onyxia", -1 } },
+        -- (Retail: a training dummy's company, the same hidden-threat rules)
+        retail = { ["Deathknight Captain"] = { "Raider's Training Dummy", 80 }, ["Skeletal Smith"] = { "Training Dummy", 80 },
+                ["Deathknight Cavalier"] = { "Raider's Training Dummy", 80 }, ["Necro Knight"] = { "Training Dummy", 80 },
+                ["Plagued Gargoyle"] = { "Dungeoneer's Training Dummy", 80 }, ["Grand Widow Faerlina"] = { "Raider's Training Dummy", -1 } },
+    })[fl]
+    if NAMES then
+        for _, list in pairs(S.SCENES) do
+            for _, sc in ipairs(list) do
+                local n = sc.name and NAMES[sc.name]
+                if n then sc.name, sc.level = n[1], n[2] end
+                if ns.MODERN_FLAVORS and ns.MODERN_FLAVORS[fl] and not sc.friend then
+                    sc.threat = nil
+                    if sc.facts then sc.facts.status, sc.facts.pct, sc.facts.tanking = nil, nil, nil end
+                    if sc.cast then sc.cast.tn, sc.cast.tclass, sc.cast.uninterruptible = nil, nil, nil end
+                end
+            end
+        end
+    end
+end
+
 -- the on-screen plate: the target, with everything on
 S.SHOWCASE = S.SCENES.target[1]
 

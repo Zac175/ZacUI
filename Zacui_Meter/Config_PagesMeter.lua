@@ -45,7 +45,11 @@ if ns.AddMenuKeywords then
         .. "class colors font fonts texture textures row height spacing gap border background "
         .. "title bar toolbar icon icons spec number format abbreviation percent rank "
         .. "animation animations fade preview test mode example size width position move lock "
-        .. "death deaths recap killing blow overkill interrupt dispel")
+        .. "death deaths recap killing blow overkill interrupt dispel "
+        .. "header clock window windows new close add breakdown abilities spells targets pin pinned "
+        .. "snap snapping scale grow enemy enemies segment fight fights sync "
+        .. "flat gloss shine outline dim dimmer edge highlight crisp polish "
+        .. "blizzard game meter built-in builtin stock edit mode classic columns hits crit")
 end
 
 -- the state the Look tab's state editor was on, across rebuilds
@@ -76,6 +80,43 @@ local function BindCheck(L, tbl, key, label, desc, after)
     L:Row(w, 17)
     if desc then L:Desc(desc) end
     return w
+end
+
+-- a checkbox over a key whose nil is `dflt` (Meter v2's per-window
+-- options: nothing is written until it is clicked)
+local function BindCheckD(L, tbl, key, label, desc, dflt, after)
+    local cur = tbl[key]
+    if cur == nil then cur = dflt end
+    local w = UI.Checkbox(L.current, label, cur and true or false,
+        function(v)
+            tbl[key] = v and true or false
+            if after then after(v) else MeterRefresh() end
+        end)
+    L:Row(w, 17)
+    if desc then L:Desc(desc) end
+    return w
+end
+
+-- the live window showing saved window `w` (nil while it is closed)
+local function LiveWindow(w)
+    local Meter = ns.Meter
+    for _, win in ipairs(Meter and Meter.windowFrames or {}) do
+        if win.settings == w then return win end
+    end
+end
+
+-- look.breakdown.<key> (Meter v2; the table is made on the first write)
+local function BDGet(key)
+    local Meter = ns.Meter
+    local BD = Meter and Meter.Breakdown
+    if BD and BD.Opt then return BD.Opt(key) end
+    local b = Look().breakdown
+    if type(b) == "table" then return b[key] end
+end
+local function BDSet(key, v)
+    local d = Look()
+    if type(d.breakdown) ~= "table" then d.breakdown = {} end
+    d.breakdown[key] = v
 end
 
 local function BindSlider(L, tbl, key, label, opts)
@@ -181,6 +222,28 @@ local function Me()
     return name or "You", class or "WARRIOR"
 end
 
+-- (each game version's own boss: Core_Flavor)
+local SAMPLE_MOB = ({ tbc = "Gruul the Dragonkiller", forever = "Onyxia", retail = "Raider's Training Dummy" })[ns.Flavor and ns.Flavor() or "era"] or "Ragnaros"
+
+-- your abilities in the sample fight, for the Breakdown mode (Meter v2):
+-- id, the name it falls back to, its share of your damage, hits, crits
+local SAMPLE_SPELLS = {
+    WARRIOR = { { 23894, "Bloodthirst", 0.31, 22, 9 }, { 1680, "Whirlwind", 0.22, 14, 5 }, { 1, "Melee", 0.24, 96, 31 },
+        { 11567, "Heroic Strike", 0.13, 30, 10 }, { 20662, "Execute", 0.10, 6, 3 } },
+    MAGE = { { 10181, "Frostbolt", 0.62, 48, 12 }, { 10199, "Fire Blast", 0.21, 14, 4 }, { 10230, "Frost Nova", 0.17, 9, 2 } },
+    ROGUE = { { 11294, "Sinister Strike", 0.42, 40, 14 }, { 1, "Melee", 0.38, 120, 38 }, { 11300, "Eviscerate", 0.20, 9, 4 } },
+    WARLOCK = { { 11661, "Shadow Bolt", 0.70, 38, 9 }, { 11713, "Curse of Agony", 0.18, 12, 0 }, { 11672, "Corruption", 0.12, 14, 0 } },
+    HUNTER = { { 2, "Auto Shot", 0.48, 70, 21 }, { 20904, "Aimed Shot", 0.30, 9, 4 }, { 14290, "Multi-Shot", 0.22, 14, 5 } },
+}
+local function SampleSpells(class, total)
+    local out = {}
+    for _, e in ipairs(SAMPLE_SPELLS[class or ""] or SAMPLE_SPELLS.WARRIOR) do
+        local t = math.floor(total * e[3] + 0.5)
+        out[e[1]] = { id = e[1], name = e[2], total = t, counter = e[4], c_amt = e[5], targets = { [SAMPLE_MOB] = t } }
+    end
+    return out
+end
+
 local ActorMeta = { __index = { ActivityTime = function(self) return self.act or 180 end } }
 local function Actor(name, class, spec, total, isSelf)
     return setmetatable({ name = name, class = class, spec = spec, total = total, grupo = true,
@@ -199,6 +262,10 @@ local function FakeFight()
         Actor("Tovren", "WARRIOR", 71, 276900), Actor("Nyssa", "ROGUE", 259, 248300),
         Actor("Mirel", "WARLOCK", 267, 233100), Actor("Sefa", "MAGE", 64, 190400),
     }
+    -- your row's breakdown: its abilities and its two targets
+    local mine = dmg[3]
+    mine.spells = SampleSpells(myClass, mine.total)
+    mine.targets = { [SAMPLE_MOB] = math.floor(mine.total * 0.86), ["Flamewaker Elite"] = math.floor(mine.total * 0.14) }
     local heal = {
         Actor("Elunara", "DRUID", 105, 251900), Actor("Ghaldor", "PRIEST", 257, 233400),
         Actor("Lightfang", "PALADIN", 65, 214700), Actor("Rokka", "SHAMAN", 264, 198200),
@@ -211,6 +278,17 @@ local function FakeFight()
 end
 
 -- the threat list on a boss: the tank, you closing on it, the raid behind
+-- the sample fight as the game's meter hands a session out (Meter v2's
+-- Live mode): its sources in order, the fields the live view reads
+local function LiveSession(fight)
+    local out = {}
+    for _, a in ipairs(fight.damage.actors) do
+        out[#out + 1] = { name = a.name, totalAmount = a.total, amountPerSecond = math.floor(a.total / 184),
+            classFilename = a.class, isLocalPlayer = a.isSelf and true or false }
+    end
+    return { combatSources = out }
+end
+
 local function FakeThreat()
     local me, myClass = Me()
     return {
@@ -262,6 +340,10 @@ local function FillMeter(P)
     local model = ModelWindow(threat)
     local w = math.max(100, tonumber(model.w) or 226)
     local h = math.max(50, tonumber(model.h) or 200)
+    -- the Header mode: a wide window, so the whole title shows
+    if P.mode == "header" then w = math.max(w, 340) end
+    -- a breakdown open from the Breakdown mode goes with any other mode
+    if Meter.Breakdown and P.mode ~= "breakdown" and win.bd then Meter.Breakdown.Close(win) end
     if win.settings.w ~= w or win.settings.h ~= h then
         SettleAll(win.rows)
         SettleAll(win.threatRows)
@@ -286,7 +368,19 @@ local function FillMeter(P)
         for _, list in pairs({ st.fight.damage.actors, st.fight.heal.actors }) do
             for _, a in ipairs(list) do a.displayName = nil end
         end
+        -- the Header mode names a past fight in the title, the way a
+        -- window on one does ("Damage Done  -  #3 Ragnaros (3:04)")
+        win.sampleSegment = (P.mode == "header") and ("#3 " .. SAMPLE_MOB) or nil
+        -- the Live mode (Forever / Retail): the window painted by the live
+        -- view (Meter_Win_Live) from a made-up session of the game's meter
+        win.liveSample = (P.mode == "live" and Meter.Live) and LiveSession(st.fight) or nil
+        local BD = Meter.Breakdown
         Meter.FillPreviewWindow(win, st.fight, P.mode == "healing" and "heal_done" or "damage_done")
+        -- the Breakdown mode: your row (the third) opened as bars
+        if BD and P.mode == "breakdown" then
+            local me = st.fight.damage.actors[3]
+            if not (win.bd and win.bd.name == me.name) then BD.Open(win, me) else BD.Style(win) BD.Refresh(win) end
+        end
     end
 end
 
@@ -298,6 +392,49 @@ local function SummarySig()
         parts[#parts + 1] = type(c) == "table" and format("%.3f/%.3f/%.3f", c.r or c[1] or 0, c.g or c[2] or 0, c.b or c[3] or 0) or "-"
     end
     return table.concat(parts, ",")
+end
+
+-- (each game version's own boss: Core_Flavor)
+-- Forever gives addons no combat log: the meter fills from the game's own
+-- meter when a fight ends, and keeps no hits before a death
+local function NoLog() return ns.NoCombatLog and ns.NoCombatLog() and true or false end
+
+-- The raid summary's example night as this game version's summary would
+-- show it (the summary's own example is a Classic Era Naxxramas night):
+-- TBC's is Karazhan; Forever's is Onyxia's Lair from the game's meter,
+-- so no "what hit you", no death causes and no hits a minute.
+local KARA = { "Attumen the Huntsman", "Moroes", "Maiden of Virtue", "Opera Event", "The Curator",
+    "Terestian Illhoof", "Shade of Aran", "Netherspite", "Chess Event", "Prince Malchezaar", "Nightbane" }
+local function VersionDemo(s)
+    local fl = ns.Flavor and ns.Flavor() or "era"
+    if fl == "era" then return s end
+    if fl == "tbc" then
+        s.raid, s.instanceID = "Karazhan", 532
+        local old = s.bosses
+        s.bosses = {}
+        for i, name in ipairs(KARA) do
+            local b = old[i]
+            if b then b.name = name b.killed = true s.bosses[#s.bosses + 1] = b end
+        end
+        -- only the swings: the Naxxramas spells are not on TBC
+        for who, t in pairs(s.taken) do s.taken[who] = { [1] = t[1] } end
+        for _, d in ipairs(s.myDeaths) do
+            d.where, d.src, d.spell = "Prince Malchezaar", "Prince Malchezaar", 1
+            for _, e in ipairs(d.before or {}) do if e.dmg then e.src = "Prince Malchezaar" end end
+        end
+        return s
+    end
+    -- (Forever: Onyxia's Lair; Retail: its raids are not listed yet, so the
+    -- example night is one boss from the game's meter)
+    if fl == "retail" then s.raid, s.instanceID = "A Retail raid", 0 else s.raid, s.instanceID = "Onyxia's Lair", 249 end
+    local b = s.bosses[1]
+    if b then b.name, b.killed = (fl == "retail") and "The last boss" or "Onyxia", true end
+    s.bosses = { b }
+    s.taken, s.myDeaths = {}, {}
+    for _, p in pairs(s.players) do
+        for _, sp in pairs(p.spells or {}) do sp.n, sp.c = nil, nil end
+    end
+    return s
 end
 
 local function BuildPreview(canvas, P)
@@ -341,6 +478,16 @@ local function BuildPreview(canvas, P)
         st.glowOpts = { instant = true }
         st.openerOpts = { instant = true, opener = true }
     end
+    -- Forever: the numbers come from the game's own meter when the fight
+    -- ends (Meter_GameMeter), so the sample is the window after a fight
+    if NoLog() then
+        st.foreverNote = UI.Font(canvas, F.SMALL, { text = (ns.Meter and ns.Meter.Live)
+            and "After the fight: filled from the game's meter (Live: in a fight)"
+            or "After the fight: Forever fills the meter when it ends",
+            cat = "text", key = "gray" })
+        st.foreverNote:SetPoint("TOP", st.win.frame, "BOTTOM", 0, -2)
+        st.foreverNote:Hide()
+    end
     -- a death row's tooltip and its recap, drawn by the meter's own code
     -- from its sample death (Meter.SampleDeath)
     if Meter.NewTipSample then
@@ -365,7 +512,6 @@ local glowSample = 92
 -- the glow at each of its levels, and the alert lines in the middle
 local GLOW_MODES = { glowWarn = true, glow = true, glowPulled = true }
 local LINE_MODES = { opener = true, pullWarn = true, stop = true, aggro = true }
-local SAMPLE_MOB = "Ragnaros"
 
 -- the glow mode a threat belongs to (the slider picks it)
 local function GlowModeFor(v)
@@ -395,6 +541,7 @@ end
 
 local function UpdatePreview(canvas, P)
     local st, Meter = P.store, ns.Meter
+    if st.foreverNote then st.foreverNote:Hide() end
     local RS = Meter.RaidSummary
     local G = ns.ThreatGlow
     -- the death samples step aside for every other mode
@@ -459,7 +606,11 @@ local function UpdatePreview(canvas, P)
         elseif st.recap then
             if st.tip then st.tip:Hide() end
             st.recapHost:Show()
-            st.recap:SetDeath(Meter.SampleDeath(who), who)
+            if NoLog() and st.recap.SetNote and Meter.FOREVER_DEATH_NOTE then
+                st.recap:SetNote(who, format("%s died 1 time", who), Meter.FOREVER_DEATH_NOTE)
+            else
+                st.recap:SetDeath(Meter.SampleDeath(who), who)
+            end
             if P.Resize then P.Resize(RECAP_W + 10, RECAP_H + 10) end
         end
         return
@@ -468,7 +619,7 @@ local function UpdatePreview(canvas, P)
         st.win.frame:Hide()
         st.sumHost:Show()
         if RS and RS.Fill and RS.DemoSession then
-            st.demo = st.demo or RS.DemoSession()
+            st.demo = st.demo or VersionDemo(RS.DemoSession())
             st.target = st.target or RS.NewTarget(st.sumChild, nil, SUM_W)
             local sig = SummarySig()
             if st.sumSig ~= sig then
@@ -496,6 +647,16 @@ local function UpdatePreview(canvas, P)
     st.sumHost:Hide()
     st.win.frame:Show()
     FillMeter(P)
+    -- Forever: what the window shows once the fight is over
+    if st.foreverNote then
+        st.foreverNote:SetShown(P.mode == "damage" or P.mode == "healing")
+        if P.mode == "live" then
+            st.foreverNote:SetText("In a fight: live from the game's own meter")
+            st.foreverNote:Show()
+        elseif Meter.Live then
+            st.foreverNote:SetText("After the fight: filled from the game's meter (Live: in a fight)")
+        end
+    end
     -- the canvas is the window (the strip scales it)
     if P.Resize then
         local f = st.win.frame
@@ -503,7 +664,8 @@ local function UpdatePreview(canvas, P)
     end
 end
 
-local DISPLAY_LABEL = { damage = "Damage Done", healing = "Healing Done", threat = "Threat" }
+local DISPLAY_LABEL = { damage = "Damage Done", healing = "Healing Done", threat = "Threat",
+    breakdown = "Damage Done", header = "Damage Done", live = "Damage Done" }
 
 local function ReplayPreview(canvas, P)
     local st, G = P.store, ns.ThreatGlow
@@ -571,6 +733,37 @@ local function Tab_general(L)
     local Meter = ns.Meter
     local d = Look()
 
+    -- (2026-11-08, Zac: "in forever and retail isnt there a blizzard made
+    -- damage meter? ... make sure the damage meters use those options by
+    -- default") WoW Forever and Retail only: whose damage windows these are
+    local GW = Meter.Win
+    local gameMeter = GW and GW.GameMeterAvailable and GW.GameMeterAvailable()
+    if gameMeter then
+        L:Card("Damage windows")
+        local items = { { "look", "As the look decides" }, { "game", "The game's own meter" }, { "zacui", "ZacUI's meter" } }
+        Drop(L, "Damage windows", items, function()
+            local v = d.gameMeter
+            if v == nil then return "look" end
+            return v and "game" or "zacui"
+        end, function(v)
+            if v == "look" then d.gameMeter = nil else d.gameMeter = (v == "game") end
+            if Meter.RestyleAll then Meter.RestyleAll() end
+            if ns.SettingsChanged then ns.SettingsChanged("meter.gameMeter") end
+            ns.RefreshConfig()
+        end, 220)
+        local uses = Meter.UsesGameMeter and Meter.UsesGameMeter()
+        L:Desc((uses and "In use now: the game's own damage meter, with its own look and options (set up in the game's "
+            .. "Edit Mode). ZacUI keeps its threat window." or "In use now: ZacUI's damage windows. They read the game's "
+            .. "own meter for their numbers, as this client gives addons no combat log.")
+            .. " As the look decides: the game's meter under WoW Forever and Blizzard style, ZacUI's under ZacUI and Classic.")
+        if uses and GW.OpenGameMeterOptions then
+            local open = UI.Button(L.current, "Open the game's meter options", { width = 220,
+                onClick = function() GW.OpenGameMeterOptions() end })
+            L:Row(open, 26)
+        end
+        L:EndCard()
+    end
+
     L:Card("Windows")
     L:Desc("Window 1 is your threat window (bottom center), window 2 the "
         .. "current-fight damage window (bottom right, locked), window 3 "
@@ -579,10 +772,63 @@ local function Tab_general(L)
         .. "anywhere on the rows and resize from the bottom-right corner; "
         .. "the hover toolbar's first icon also locks and unlocks. Mouse "
         .. "wheel over any window scrolls the list.")
-    for i, w in ipairs(d.windows) do
-        BindCheck(L, w, "open", "Show window " .. i .. " (" .. (w.display == "threat" and "threat" or "meter") .. ")")
+    -- (Meter v2) every window opens and closes at once; a meter window
+    -- picks its mode and fight here as its header's menus do
+    local Win = Meter.Win
+    local modes = {}
+    for _, key in ipairs(Meter.DISPLAY_ORDER or {}) do
+        local disp = Meter.DISPLAYS[key]
+        if disp then modes[#modes + 1] = { key, disp.label } end
     end
-    L:Desc("Opening or closing a window takes a /reload to settle. Locking, size and place are on the Position tab.")
+    for i, w in ipairs(d.windows) do
+        local shown = BindCheck(L, w, "open", "Show window " .. i .. " (" .. (w.display == "threat" and "threat" or "meter") .. ")", nil,
+            function(v) if Win and Win.SetOpen then Win.SetOpen(i, v) else MeterRefresh() end end)
+        if Win and Win.GameOwns and Win.GameOwns(w) then
+            UI.SetEnabled(shown, false, "The game's own damage meter is in use (Damage windows, above).")
+        end
+        if w.display ~= "threat" and #modes > 0 then
+            Drop(L, "Window " .. i .. " shows", modes, function() return w.display end, function(v)
+                local live = LiveWindow(w)
+                if live then live:SetDisplay(v) else w.display = v end
+                MeterRefresh()
+            end, 200)
+            Drop(L, "Window " .. i .. "'s fight", { { 0, "Current fight" }, { -1, "Overall" } },
+                function() return (w.segment == -1) and -1 or 0 end, function(v)
+                    local live = LiveWindow(w)
+                    if live then live:SetSegment(v) else w.segment = v end
+                    MeterRefresh()
+                end, 200)
+        end
+        if i > 1 and Win then
+            local close = UI.Button(L.current, "Close window " .. i, { width = 140,
+                onClick = function()
+                    local live = LiveWindow(w)
+                    if live then live:Close()
+                    else
+                        table.remove(d.windows, i)
+                        if ns.SettingsChanged then ns.SettingsChanged("meter.windows") end
+                    end
+                    ns.RefreshConfig()
+                end })
+            L:Row(close, 26)
+        end
+    end
+    if Win then
+        local add = UI.Button(L.current, "Add a window", { width = 140,
+            onClick = function()
+                local from
+                for _, win in ipairs(Meter.windowFrames) do if win.id == 1 then from = win end end
+                Win.Add(from or Meter.windowFrames[1])
+                ns.RefreshConfig()
+            end })
+        L:Row(add, 26)
+        if #d.windows >= (Win.MAX or 5) then UI.SetEnabled(add, false, format("%d windows is the most there can be.", Win.MAX or 5)) end
+        L:Desc(format("Up to %d windows, each with its own mode and fight. They open and close at once; "
+            .. "the + and x in a window's header do the same. Locking, size, scale and place are on the "
+            .. "Position tab.", Win.MAX or 5))
+    else
+        L:Desc("Opening or closing a window takes a /reload to settle. Locking, size and place are on the Position tab.")
+    end
     L:EndCard()
 
     -- when every meter window shows (look.visibility; nothing saved = always)
@@ -610,6 +856,8 @@ local function Tab_general(L)
     BindCheck(L, d, "overallClearNewBoss", "Reset overall on a new raid boss",
         "The overall segment wipes when you pull a raid boss you have "
         .. "not seen this session.")
+    BindCheck(L, d, "confirmReset", "Ask before the reset icon wipes the data",
+        "The reset icon in a window's header (and the Reset meter data key) ask first.")
     L:EndCard()
 
     L:Card("Threat")
@@ -639,7 +887,7 @@ local function Tab_general(L)
     -- on unless switched off (nil = on; browsing writes nothing)
     local function OnCheck(key, label, desc)
         local w = UI.Checkbox(L.current, label, t[key] ~= false, function(v)
-            t[key] = (not v) and false or nil
+            if v then t[key] = nil else t[key] = false end
             ThreatOptions()
         end)
         L:Row(w, 17)
@@ -689,7 +937,7 @@ local function Tab_general(L)
                 value = tonumber(t.openerAt) or GD.openerAt,
                 format = function(v) return format("%ds", v) end,
                 onChange = function(v) t.openerAt = v GlowOptions() end }),
-        }, opOn, 1)
+        }, opOn, 1, nil, "Warn me about a weak tank opener")
         local pw = UI.Checkbox(L.current, "Warn me a few seconds before I pull", G.PullWarnOn(), function(v)
             t.pullWarn = v and true or false
             GlowOptions()
@@ -730,7 +978,7 @@ local function Tab_general(L)
             GlowSlider("glowWidth", "Edge width", 20, 300, 5, Px),
             GlowColor("glowColor", "Warning colour"),
             GlowColor("glowRedColor", "Danger colour"),
-        }, on, 2)
+        }, on, 2, nil, "Glow round the screen as I near a pull")
         -- not a setting: the threat the preview's Threat glow is drawn at
         local pv = UI.Slider(L.current, { width = 200, min = 50, max = 100, step = 1,
             label = "Preview the glow at", value = glowSample,
@@ -771,6 +1019,14 @@ local function Tab_general(L)
 
     L:Card("Report")
     BindSlider(L, d, "reportLines", "Lines to paste", { min = 1, max = 10 })
+    if Meter.Breakdown then
+        local w = UI.Slider(L.current, { width = 200, min = 0, max = 15, step = 1,
+            label = "Lines from a breakdown", value = tonumber(BDGet("reportLines")) or 0,
+            format = function(v) return v < 1 and "Same as above" or tostring(v) end,
+            onChange = function(v) BDSet("reportLines", v >= 1 and v or nil) MeterRefresh() end })
+        L:Row(w, 40)
+        L:Desc("The report icon on a window with a breakdown open pastes its abilities (\"1. Bloodthirst 123.4K (31.2%)\").")
+    end
     L:EndCard()
 end
 
@@ -788,6 +1044,18 @@ local function Tab_look(L)
         "Also set by Appearance > Fonts & Textures when the meter is ticked there.")
     BindSlider(L, d, "barAlpha", "Bar opacity", { min = 0.1, max = 1, step = 0.05,
         format = function(v) return format("%d%%", v * 100 + 0.5) end })
+    -- (2026-11-07 polish) the flat fill, and the light and shade option
+    BindCheck(L, d, "barFlat", "Flat bars when no texture is picked",
+        "A clean flat fill (the polished look). Off: the faded bar the meter wore before.", function() MeterRefresh() end)
+    BindCheck(L, d, "rowGloss", "Light and shade on the bars",
+        "A soft light along the top of each bar and a shade along the bottom.")
+    -- (Meter v2) your own row, and which way the list grows
+    Drop(L, "Your own row", { { "follow", "Takes the last row when it is off the list" },
+        { "pin", "Pinned at the edge, with a line" }, { "off", "Only where it ranks" } },
+        function() return d.pinSelf or "follow" end, function(v) d.pinSelf = v MeterRefresh() end, 280,
+        "Pinned, your row stays in sight however far the list is scrolled.")
+    Drop(L, "The list grows", { { "down", "Down from the header" }, { "up", "Up from the bottom (the header at the bottom)" } },
+        function() return d.grow or "down" end, function(v) d.grow = v MeterRefresh() end, 280)
     L:EndCard()
 
     L:Card("Bar colours")
@@ -795,11 +1063,17 @@ local function Tab_look(L)
         function() return d.barColorMode end,
         function(v) d.barColorMode = v ns.RefreshConfig() end)
     local custom = BindColor(L, d, "barColor", "Bar colour", Meter.LOOK_DEFAULTS.barColor, true)
-    UI.SetEnabled(custom, d.barColorMode == "custom")
+    UI.SetEnabled(custom, d.barColorMode == "custom", 'Needs "Bars are coloured by" set to one colour for everyone.')
     BindCheck(L, d, "useSelfColor", "Colour my own bar", "Your bar wears its own colour instead of your class colour.",
         function() ns.RefreshConfig() end)
     local selfc = BindColor(L, d, "selfColor", "My bar's colour", Meter.LOOK_DEFAULTS.selfColor, true)
-    UI.SetEnabled(selfc, d.useSelfColor and true or false)
+    UI.SetEnabled(selfc, d.useSelfColor and true or false, 'Needs "Colour my own bar" turned on.')
+    local ss = Drop(L, "How my own row stands out", { { "color", "Its own bar colour (above)" },
+        { "edge", "Class colour, with a light edge round it" } },
+        function() return d.selfStyle or "color" end, function(v) d.selfStyle = v MeterRefresh() ns.RefreshConfig() end, 280)
+    UI.SetEnabled(ss, d.useSelfColor and true or false, 'Needs "Colour my own bar" turned on.')
+    UI.SetEnabled(selfc, (d.useSelfColor and d.selfStyle ~= "edge") and true or false,
+        d.useSelfColor and "Not used while your row stands out by a light edge." or 'Needs "Colour my own bar" turned on.')
     L:EndCard()
 
     -- per-state looks (look.states: your row, the leader's row)
@@ -827,8 +1101,8 @@ local function Tab_look(L)
     local bc = BindColor(L, d, "rowBorderColor", "Border colour", Meter.LOOK_DEFAULTS.rowBorderColor, true)
     local bs = BindSlider(L, d, "rowBorderSize", "Border thickness", { min = 1, max = 4, format = Px,
         desc = "1 px is one screen pixel, the thinnest line there is." })
-    UI.SetEnabled(bc, d.rowBorder ~= false)
-    UI.SetEnabled(bs, d.rowBorder ~= false)
+    UI.SetEnabled(bc, d.rowBorder ~= false, 'Needs "Show a border round each row" turned on.')
+    UI.SetEnabled(bs, d.rowBorder ~= false, 'Needs "Show a border round each row" turned on.')
     L:EndCard()
 
     L:Card("Icons")
@@ -842,28 +1116,23 @@ local function Tab_look(L)
             return format("%+d px", v)
         end,
         desc = "Next to the row height: below zero leaves a margin round the icon." })
-    UI.SetEnabled(spec, d.showIcons ~= false)
-    UI.SetEnabled(size, d.showIcons ~= false)
-    local dmf = BindCheck(L, d, "dmfIcon", "Mark who has the Darkmoon Faire damage buff",
-        "In a raid, a small Darkmoon Faire icon after the name of everyone with Sayge's Dark Fortune of "
-        .. "Damage (+10% damage), so you can see who has it. Checked every 15 seconds.",
-        function(v) if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end ns.RefreshConfig() end)
-    local ob = BindCheck(L, d, "dmfOnlyBuffed", "Only while I have my world buffs on",
-        "Rallying Cry, Warchief's Blessing, Zandalar, Songflower or a Dire Maul buff.",
-        function() if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end MeterRefresh() end)
-    UI.SetEnabled(ob, d.dmfIcon ~= false)
-    -- not asked on TBC (no world-buff raiding there): dimmed, and the
-    -- tooltip says so
-    if Meter.DMF_WORLD_BUFFS == false then
-        UI.SetEnabled(ob, false)
-        if UI.Tooltip then UI.Tooltip(ob, "Only while I have my world buffs on", "Not used on "
-            .. (ns.FlavorName and ns.FlavorName() or "this game") .. ": the mark shows in any raid.") end
-    end
-    -- Classic Era's world buffs: dimmed where the mark is off (Core_Flavor;
-    -- the note at the top of the page says why)
-    if Meter.DMF_ON == false then
-        UI.SetEnabled(dmf, false)
-        UI.SetEnabled(ob, false)
+    UI.SetEnabled(spec, d.showIcons ~= false, 'Needs "Show an icon on each row" turned on.')
+    UI.SetEnabled(size, d.showIcons ~= false, 'Needs "Show an icon on each row" turned on.')
+    -- the Darkmoon Faire mark is not there where it does not load
+    -- (Core_Flavor, meter_dmf), and "only with my world buffs" not where
+    -- the version is not raided on Classic Era's world buffs (TBC): left
+    -- out, not dimmed (General > Game versions says why)
+    if Meter.DMF_ON ~= false then
+        BindCheck(L, d, "dmfIcon", "Mark who has the Darkmoon Faire damage buff",
+            "In a raid, a small Darkmoon Faire icon after the name of everyone with Sayge's Dark Fortune of "
+            .. "Damage (+10% damage), so you can see who has it. Checked every 15 seconds.",
+            function(v) if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end ns.RefreshConfig() end)
+        if Meter.DMF_WORLD_BUFFS ~= false then
+            local ob = BindCheck(L, d, "dmfOnlyBuffed", "Only while I have my world buffs on",
+                "Rallying Cry, Warchief's Blessing, Zandalar, Songflower or a Dire Maul buff.",
+                function() if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end MeterRefresh() end)
+            UI.SetEnabled(ob, d.dmfIcon ~= false, 'Needs "Mark who has the Darkmoon Faire damage buff" turned on.')
+        end
     end
     L:EndCard()
 
@@ -872,37 +1141,81 @@ local function Tab_look(L)
         function() ns.RefreshConfig() end)
     local bgc = Color(L, "Background colour", function() return Meter.WinBgColor(d) end,
         function(r, g, b, a) d.bgColor = { r = r, g = g, b = b, a = a or 1 } end, true)
-    UI.SetEnabled(bgc, d.bgShown and true or false)
+    UI.SetEnabled(bgc, d.bgShown and true or false, 'Needs "Fill the window background" turned on.')
     BindCheck(L, d, "winBorder", "Border round the window", nil, function() ns.RefreshConfig() end)
     local wbc = BindColor(L, d, "winBorderColor", "Window border colour", Meter.LOOK_DEFAULTS.winBorderColor, true)
     local wbs = BindSlider(L, d, "winBorderSize", "Window border thickness", { min = 1, max = 6, format = Px })
-    UI.SetEnabled(wbc, d.winBorder and true or false)
-    UI.SetEnabled(wbs, d.winBorder and true or false)
+    UI.SetEnabled(wbc, d.winBorder and true or false, 'Needs "Border round the window" turned on.')
+    UI.SetEnabled(wbs, d.winBorder and true or false, 'Needs "Border round the window" turned on.')
     L:EndCard()
 
-    L:Card("Title bar")
-    BindCheck(L, d, "titleBar", "Show a title bar", "A strip on top of each window naming what it shows. "
-        .. "It sits above the rows, so the window keeps its size; the toolbar moves into it.",
-        function() ns.RefreshConfig() end)
-    local on = d.titleBar and true or false
-    local th = BindSlider(L, d, "titleHeight", "Title bar height", { min = 12, max = 30, format = Px })
-    local tt = Texture(L, "Title bar texture", "titleTexture", ns.FLAT or "Interface\\Buttons\\WHITE8X8",
+    -- (Meter v2) the header: the bar with the mode, the clock and the
+    -- icons; the old floating toolbar; or nothing
+    L:Card("Header")
+    local HM = Meter.HeaderMode and Meter.HeaderMode(d) or "bar"
+    Drop(L, "Header", { { "bar", "A bar: the mode, the fight clock and the icons" },
+        { "hover", "No bar: the icons float above the window on hover" }, { "none", "Nothing (right-click for the menus)" } },
+        function() return Meter.HeaderMode and Meter.HeaderMode(d) or d.headerMode end,
+        function(v) d.headerMode = v MeterRefresh() ns.RefreshConfig() end, 300,
+        "The bar sits inside the window: the + opens another window, then reset, mode, fight, report and "
+        .. "this window's options. Right-click any window for its mode menu.")
+    local bar = HM == "bar"
+    local th = BindSlider(L, d, "titleHeight", "Header height", { min = 12, max = 30, format = Px })
+    local tt = Texture(L, "Header texture", "titleTexture", ns.FLAT or "Interface\\Buttons\\WHITE8X8",
         function() return 0.3, 0.3, 0.3 end)
-    local tc = BindColor(L, d, "titleColor", "Title bar colour", Meter.LOOK_DEFAULTS.titleColor, true)
-    local ts = BindCheck(L, d, "titleSegment", "Name the segment too", "\"Damage Done - Current fight\" rather than \"Damage Done\".")
-    for _, w in ipairs({ th, tt, tc, ts }) do UI.SetEnabled(w, on) end
+    local tc = BindColor(L, d, "titleColor", "Header colour", Meter.LOOK_DEFAULTS.titleColor, true)
+    local ts = BindCheck(L, d, "titleSegment", "Name the fight when it is not the current one",
+        "\"Damage Done  -  #3 Ragnaros\", \"Overall Damage Done\".")
+    local tk = BindCheck(L, d, "headerClock", "Show the fight clock", "\"Damage Done (2:13)\": how long the fight has run, ticking in combat.")
+    local ta = BindCheck(L, d, "titleAccent", "Mode name in the accent colour",
+        "The mode's name in your accent colour with the clock in soft white after it. Off: the title text's own colour.")
+    local hs = BindSlider(L, d, "headerIconSize", "Icon size", { min = 10, max = 24, format = Px })
+    local ho = BindCheck(L, d, "headerIconsOnHover", "Icons only while the mouse is on the window",
+        "Off, the mode and settings icons stay; the fight, report and window icons always come with the mouse.")
+    local hl = BindCheck(L, d, "headerLine", "A line under the header", nil, function() MeterRefresh() ns.RefreshConfig() end)
+    local hlc = BindColor(L, d, "headerLineColor", "Line colour", Meter.LOOK_DEFAULTS.headerLineColor, true)
+    local NEEDS_BAR = 'Needs "Header" set to a bar.'
+    UI.SetEnabled(hlc, bar and d.headerLine ~= false, bar and 'Needs "A line under the header" turned on.' or NEEDS_BAR)
+    for _, w in ipairs({ th, tt, tc, ts, tk, ta, ho, hl }) do UI.SetEnabled(w, bar, NEEDS_BAR) end
+    UI.SetEnabled(hs, HM ~= "none", "No icons while the header is set to nothing.")
+    local tm = Drop(L, "Floating icons", { { "hover", "While the mouse is over the window" }, { "always", "Always" } },
+        function() return d.toolbarMode end, function(v) d.toolbarMode = v MeterRefresh() end, 260)
+    UI.SetEnabled(tm, HM == "hover", 'Needs "Header" set to icons floating on hover.')
     L:EndCard()
 
-    L:Card("Toolbar")
-    Drop(L, "Show the toolbar", { { "hover", "While the mouse is over the window" }, { "always", "Always" } },
-        function() return d.toolbarMode end, function(v) d.toolbarMode = v end, 260,
-        "The five icons over a window: mode, segment, display, report and reset.")
-    L:EndCard()
+    -- (Meter v2) a row click opens its breakdown inside the window; the
+    -- hover tooltip's look
+    if Meter.Breakdown then
+        L:Card("Breakdown")
+        Drop(L, "Hovering a row shows", { { "tooltip", "What it means, in words" },
+            { "bars", "Its abilities as bars" }, { "off", "Nothing" } },
+            function() return BDGet("hover") end, function(v) BDSet("hover", v) MeterRefresh() end, 260,
+            "Bars are for damage and healing; the other modes keep their words.")
+        local ms = UI.Slider(L.current, { width = 200, min = 0, max = 20, step = 1, label = "Abilities listed",
+            value = tonumber(BDGet("maxSpells")) or 0,
+            format = function(v) return v < 1 and "All of them" or tostring(v) end,
+            onChange = function(v) BDSet("maxSpells", v >= 1 and v or nil) MeterRefresh() end })
+        L:Row(ms, 40)
+        local function BDCheck(key, label, desc)
+            local w = UI.Checkbox(L.current, label, BDGet(key) and true or false, function(v)
+                BDSet(key, v and true or false)
+                MeterRefresh()
+            end)
+            L:Row(w, 17)
+            if desc then L:Desc(desc) end
+        end
+        BDCheck("showTargets", "Show the targets under the abilities", nil)
+        BDCheck("spellTooltip", "The game's spell tooltip on an ability", nil)
+        BDCheck("deathsInWindow", "A death opens a short recap in the window",
+            "Off, a death opens the death recap window with its health line.")
+        L:Desc("Click a row for its breakdown; the head, a right-click or Escape goes back.")
+        L:EndCard()
+    end
 
     L:Card("Threat rows")
     BindCheck(L, d, "threatIcons", "Show role icons", nil, function() ns.RefreshConfig() end)
     local ti = BindSlider(L, d, "threatIconSize", "Role icon size", { min = 8, max = 30, format = Px })
-    UI.SetEnabled(ti, d.threatIcons ~= false)
+    UI.SetEnabled(ti, d.threatIcons ~= false, 'Needs "Show role icons" turned on.')
     L:Desc("Threat rows share the row height, spacing and bar texture above; their colours "
         .. "are the threat itself, green to red.")
     L:EndCard()
@@ -968,14 +1281,21 @@ local function Tab_text(L)
     Drop(L, "Name colour", { { "white", "White" }, { "class", "Class colour" }, { "custom", "One colour" } },
         function() return d.nameColorMode end, function(v) d.nameColorMode = v ns.RefreshConfig() end)
     local nc = BindColor(L, d, "nameColor", "Name colour", Meter.LOOK_DEFAULTS.nameColor, true)
-    UI.SetEnabled(nc, d.nameColorMode == "custom")
-    BindCheck(L, d, "showRank", "Number the rows", "\"3. " .. me .. "\": each name with its place in the list.")
+    UI.SetEnabled(nc, d.nameColorMode == "custom", 'Needs "Name colour" set to one colour.')
+    BindCheck(L, d, "showRank", "Number the rows", "\"3. " .. me .. "\": each name with its place in the list.",
+        function() MeterRefresh() ns.RefreshConfig() end)
+    local dr = BindCheck(L, d, "dimRank", "The numbers dimmer than the names", nil)
+    UI.SetEnabled(dr, d.showRank and true or false, 'Needs "Number the rows" turned on.')
+    BindCheck(L, d, "textOutline", "A thin outline on the row texts",
+        "Crisp on any background. Off: the soft drop shadow (a font picked above keeps its own).",
+        function() MeterRefresh() ns.RefreshConfig() end)
     BindCheck(L, d, "removeRealm", "Hide realm names", nil)
     Spot(L, "name", Meter.ROW_TARGETS)
     L:EndCard()
 
     L:Card("Numbers")
     Font(L, "Number text", "numberFont", Meter.NumberFontDefaults(d), "371.4K I 2.0K  (18.6%)")
+    BindCheck(L, d, "dimSecond", "The per-second figure dimmer than the total", "\"371.4K\" bright, \"I 2.0K\" softer.")
     BindColor(L, d, "numberColor", "Number colour", Meter.LOOK_DEFAULTS.numberColor, true)
     local abbrevs = { { 1, "Plain (12345.0)" }, { 2, "12.3K" }, { 3, "12.3K / 123K" }, { 4, "12K" } }
     Drop(L, "Number abbreviation", abbrevs, function() return d.psAbbrev end,
@@ -993,7 +1313,7 @@ local function Tab_text(L)
             onEnter = function(text) d.numberSep = text MeterRefresh() end })
     end, { width = 200 })
     L:Add(sep, 6)
-    UI.SetEnabled(sep, sepOn)
+    UI.SetEnabled(sep, sepOn, 'Needs "What the number shows" to show both the total and per second.')
     L:Desc("Yours was \" I \" (a capital I with a space each side). Press Enter to use it.")
     Spot(L, "value", Meter.ROW_TARGETS)
     L:EndCard()
@@ -1058,8 +1378,26 @@ local function Tab_pos(L)
         BindSlider(L, w, "y", "Up", { min = -800, max = 800, format = Px, width = 240, after = Geo,
             desc = "Measured from the " .. (POINT_NAMES[w.point or ""] or "middle") .. " of the screen. "
             .. "A threat window sitting under the target frame ignores these." })
+        -- (Meter v2) the window's own options, as its header's gear menu
+        -- has them (nothing written until changed)
+        local sc = UI.Slider(L.current, { width = 240, min = 50, max = 150, step = 5, label = "Scale",
+            value = math.floor((tonumber(w.scale) or 1) * 100 + 0.5),
+            format = function(v) return format("%d%%", v) end,
+            onChange = function(v) w.scale = (v == 100) and nil or v / 100 MeterRefresh() end })
+        L:Row(sc, 40)
+        BindCheckD(L, w, "snap", "Snap to other meter windows", nil, true)
+        if w.display ~= "threat" then
+            BindCheckD(L, w, "syncSegments", "Sync its fight with other windows",
+                "Picking a fight here switches every window that has this on.", false)
+            BindCheckD(L, w, "autoCurrent", "Back to the current fight on a new pull", nil, true)
+            BindCheckD(L, w, "hideClock", "Hide the fight clock", nil, false)
+        end
         L:EndCard()
     end
+    L:Card("Windows together")
+    BindCheck(L, d, "snapWindows", "Dragging and resizing snap to other meter windows",
+        "Edges and sizes line up with the nearest window within 6 px. Each window can opt out above.")
+    L:EndCard()
     -- the list's order and length (look.layout; nothing saved = biggest
     -- first, everyone)
     L:Card("Order and length")
@@ -1115,6 +1453,19 @@ local function Tab_adv(L)
     L:Desc("Wipes every segment and the overall, exactly like the "
         .. "toolbar's reset icon.")
     L:EndCard()
+
+    -- (Meter v2) every window parked and built again from the saved list
+    local Win = Meter.Win
+    if Win and Win.Rebuild then
+        L:Card("Windows")
+        local rb = UI.Button(L.current, "Rebuild the windows", { width = 160,
+            onClick = function() Win.Rebuild() end })
+        L:Row(rb, 26)
+        L:Desc("Builds every meter window again from its settings - after a profile change, or if one went "
+            .. "missing - without a reload. Key Bindings > ZacUI damage meter has a key to show and hide "
+            .. "them all, and one to reset the data.")
+        L:EndCard()
+    end
 end
 
 -- ============================================================
@@ -1127,6 +1478,11 @@ local function PreviewModes()
         { id = "healing", label = "Healing" },
         { id = "threat", label = "Threat" },
     }
+    -- (Meter v2) a row's breakdown, and the header at a wide window's width
+    if ns.Meter and ns.Meter.Breakdown then m[#m + 1] = { id = "breakdown", label = "Breakdown" } end
+    m[#m + 1] = { id = "header", label = "Header" }
+    -- (Forever / Retail) the window in a fight, from the game's own meter
+    if ns.Meter and ns.Meter.Live then m[#m + 1] = { id = "live", label = "Live" } end
     if ns.ThreatGlow then
         m[#m + 1] = { id = "glowWarn", label = "Glow: warning" }
         m[#m + 1] = { id = "glow", label = "Glow: danger" }
@@ -1137,7 +1493,9 @@ local function PreviewModes()
         m[#m + 1] = { id = "aggro", label = "Aggro" }
     end
     if ns.Meter and ns.Meter.NewRecapPanel then
-        m[#m + 1] = { id = "deathTip", label = "Death tooltip" }
+        -- (Forever keeps no hits before a death: no tooltip of them; the
+        -- recap shows what it says there)
+        if not NoLog() then m[#m + 1] = { id = "deathTip", label = "Death tooltip" } end
         m[#m + 1] = { id = "deathRecap", label = "Death recap" }
     end
     m[#m + 1] = { id = "summary", label = "Raid summary" }
@@ -1161,7 +1519,7 @@ RegisterPage("Meter", function(L)
             if not k then return end
             ZacUIDB.config = ZacUIDB.config or {}
             ZacUIDB.config.tabs = ZacUIDB.config.tabs or {}
-            ZacUIDB.config.tabs.meter = (k == "bar") and "look" or (k == "icon" or k == "threatIcon") and "pos" or "text"
+            ZacUIDB.config.tabs.meter = (k == "bar" or k == "headerIcons") and "look" or (k == "icon" or k == "threatIcon") and "pos" or "text"
             ns.RefreshConfig()
         end)
     end

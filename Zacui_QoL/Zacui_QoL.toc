@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99QoL|r
 ## Notes: ZacUI quality of life: automation, mutes, raid performance mode. Replaces Leatrix Plus.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -28,4 +28,30 @@ QoL_RaidTimers.lua
 QoL_Snowball.lua
 QoL_GCDTracker.lua
 QoL_DialogKeys.lua
+# Feature cluster 1 (2026-11-07), each a file of its own with its card on the
+# Quality of life page: combat logging on its own in raids, the low
+# durability warning, the unspent talent points reminder.
+QoL_CombatLog.lua
+QoL_Durability.lua
+QoL_TalentReminder.lua
+# Feature cluster 3 (2026-11-07): the small automations QoL_Automation
+# lacked (DELETE typed, containers opened, cinematics skipped, a res
+# accepted, release in battlegrounds), each its own switch, all off.
+QoL_Autos.lua
+# Feature cluster 3: the loot feed (fading rows for loot, money, rep, skill-ups).
+QoL_LootFeed.lua
+# Overnight gap build (2026-11-08, ELLESMERE_GAPS_1108.md), each its own file,
+# all off by default: quest helpers, quest tracker visibility, alerts, gathering
+# skill on node tooltips, the junk items window, character stats, cursor rings,
+# reminders (pet / tracking / ready-check mana), data blocks, target distance.
+QoL_Quests.lua
+QoL_TrackerVis.lua
+QoL_Alerts.lua
+QoL_GatherSkill.lua
+QoL_JunkItems.lua
+QoL_Stats.lua
+QoL_Cursor.lua
+QoL_Reminders.lua
+QoL_DataBlocks.lua
+QoL_Distance.lua
 Config_PagesQoL.lua

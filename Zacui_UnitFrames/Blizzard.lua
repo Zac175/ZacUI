@@ -92,6 +92,8 @@ local function kill(frame, doNotReparent)
         if child and child.UnregisterAllEvents then child:UnregisterAllEvents() end
     end
 end
+-- (the focus and boss frames hide the game's own the same way: Extras.lua)
+ns.KillBlizzardFrame = kill
 
 -- CompactPartyFrame ("raid-style party frames") is created lazily by
 -- CompactPartyFrame_Generate on the 1.15.9+ client, so it may not exist at

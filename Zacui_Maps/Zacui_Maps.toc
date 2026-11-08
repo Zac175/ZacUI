@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Maps|r
 ## Notes: ZacUI world map, battlefield map and minimap markers. Replaces Leatrix Maps.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -27,5 +27,9 @@ Maps_Icons.lua
 Maps_Group.lua
 Maps_Battlefield.lua
 Maps_Module.lua
+# Feature cluster 3 (2026-11-07): the game's own map fade (mapFade, through the
+# CVar helper) and a dim behind the maximized map, off by default. After
+# Maps_Module (it rides the module's apply).
+Maps_GameFade.lua
 Minimap_Pins.lua
 Config_PagesMaps.lua

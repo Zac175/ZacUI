@@ -49,6 +49,15 @@ local function RunModule(m)
     -- a module whose part (Zacui_Nameplates, say) is not loaded has no
     -- entry here; that is a tick box in the AddOns list, not a failure
     if not Modules[m] then return false end
+    -- a skin or cover of the game's own UI stands down while its part wears
+    -- a game look (Core_Look's Look.STOCK: the windows, chat, tooltips,
+    -- minimap and loot rolls stay Blizzard's own). Latched per session, so
+    -- this never undoes a skin live: the look changes only at a reload.
+    if ns.Look and ns.Look.StandsDown and ns.Look.StandsDown(m) then
+        ZUI._stock = ZUI._stock or {}
+        ZUI._stock[m] = true
+        return false
+    end
     local ok, err = pcall(Modules[m])
     if ok then
         ZUI._ran[m] = true
@@ -106,6 +115,10 @@ local function EnableModuleLive(m)
         Print(m .. " on - it will apply once " .. (part or "its addon") .. " is enabled in the AddOns list.")
         return
     end
+    if ns.Look and ns.Look.StandsDown and ns.Look.StandsDown(m) then
+        Print(m .. " on - it stays the game's own while that part wears a game look (Style page).")
+        return
+    end
     if COMBAT_SENSITIVE[m] and InCombatLockdown and InCombatLockdown() then
         Defer(m)
         return
@@ -113,7 +126,9 @@ local function EnableModuleLive(m)
     if RunModule(m) then
         Print(m .. " on - applied live.")
     else
-        Print(m .. " on, but live apply failed - /reload.")
+        -- (the reload question: UIF_Dialogs, loaded by the time anything is switched on)
+        if ns.AskReload then ns.AskReload(m .. " is on, but could not start right away. A reload starts it.")
+        else Print(m .. " on, but live apply failed - /reload.") end
     end
 end
 

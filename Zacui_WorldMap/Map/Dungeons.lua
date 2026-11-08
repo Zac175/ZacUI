@@ -10,6 +10,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local S = ns.MapStitch
 local mod = ns:GetModule("worldmap")
 local Look, Safe, L = ns.Look, ns.Safe, ns.L

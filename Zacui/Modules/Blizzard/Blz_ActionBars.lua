@@ -86,7 +86,20 @@ local function RefreshEquipped()
     end
 end
 
+-- UNDER A GAME LOOK (2026-11-08, Zac: "there is no blizzard art on action
+-- bars"): Classic WoW UI, Blizzard style and WoW Forever draw the game's
+-- own art, so Blizzard's own bars stay exactly as the game draws them -
+-- the gryphons, the bar art, the button rings, the XP strip. Nothing runs:
+-- no skin, no hook, nothing of Blizzard's touched (Core_Look's rule for
+-- the game's own UI under a game look, decided once a session like every
+-- look answer). ZacUI's own bars wear the look's kit (Zacui_Bars).
+function ns.BlizzardBarsStock()
+    local L = ns.Look
+    return (L and L.Stock and L.Stock("bars")) and true or false
+end
+
 Modules.actionbars = function()
+    if ns.BlizzardBarsStock() then return end
 
     -- BUTTONS -----------------------------------------------------------
     for _, bar in ipairs(BUTTON_BARS) do
@@ -200,7 +213,10 @@ Modules.actionbars = function()
                          "SocialsMicroButton", "WorldMapMicroButton",
                          "MainMenuMicroButton", "HelpMicroButton",
                          "LFGMicroButton", "GuildMicroButton",
-                         "PVPMicroButton" }) do
+                         "PVPMicroButton",
+                         -- WoW Forever's (Blizzard_MicroMenu/Camelot); nil elsewhere
+                         "ProfessionMicroButton", "LegacyMicroButton", "LFDMicroButton",
+                         "CollectionsMicroButton", "EJMicroButton", "StoreMicroButton" }) do
         local b = _G[n]
         if b then
             HideRegions(n, { "Border", "Flash" })

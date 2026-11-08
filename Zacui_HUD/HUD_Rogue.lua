@@ -21,7 +21,7 @@ ns.HUD.DefineClass({
         bladeFlurry = 13877, prep = 14185, ghostly = 14278, riposte = 14251,
         distract = 1725, cheapShot = 1833, premeditation = 14183, sliceDice = 6774,
         stealth = 1784, rupture = 11275, garrote = 11290, exposeArmor = 11198,
-        hemo = 17348, sap = 11297,
+        hemo = 17348, sap = 11297, feint = 25302,
     },
 
     grid = {
@@ -59,8 +59,8 @@ ns.HUD.DefineClass({
     },
 
     debuffRow = {
-        { key = "rupture",     id = 11275 },
-        { key = "garrote",     id = 11290 },
+        { key = "rupture",     id = 11275, castsDot = true },
+        { key = "garrote",     id = 11290, castsDot = true },
         { key = "kidney",      id = 8643 },
         { key = "cheapShot",   id = 1833 },
         { key = "exposeArmor", id = 11198 },
@@ -94,5 +94,80 @@ ns.HUD.DefineClass({
           end },
     },
 
+
+    -- Class HUD v2: the utility row, the roles, TBC's additions
+    utility = {
+        { key = "sliceDice",   kind = "spell", spell = "sliceDice",   label = "Slice and Dice", noRange = true },
+        { key = "rupture",     kind = "spell", spell = "rupture",     label = "Rupture" },
+        { key = "garrote",     kind = "spell", spell = "garrote",     label = "Garrote" },
+        { key = "cheapShot",   kind = "spell", spell = "cheapShot",   label = "Cheap Shot" },
+        { key = "exposeArmor", kind = "spell", spell = "exposeArmor", label = "Expose Armor" },
+        { key = "hemo",        kind = "spell", spell = "hemo",        label = "Hemorrhage" },
+        { key = "feint",       kind = "spell", spell = "feint",       label = "Feint" },
+        { key = "stealth",     kind = "spell", spell = "stealth",     label = "Stealth", noRange = true },
+        { key = "sap",         kind = "spell", spell = "sap",         label = "Sap" },
+    },
+    -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
+    -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
+    -- section 13: Icy Veins' Classic and TBC rogue guides). The base lists
+    -- are Classic Era's (WoW Forever plays them too; no Rupture / Expose
+    -- Armor / poison debuffs there: debuff slots and the warrior's Sunder);
+    -- a spec's tbc block replaces the rows it names on TBC.
+    roles = {
+        { key = "assassination", label = "Assassination", tab = 1, aux = true, res = { rangeDim = true }, show = {
+            main = { "kick", "coldBlood", "vanish", "tea", "potion", "rune" },
+            utility = { "sliceDice", "feint", "stealth", "sap", "cheapShot", "garrote" },
+            buffs = { "sliceDice", "coldBlood", "zhc" },
+            debuffs = {} },
+          glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
+                    coldBlood = { { when = "ready", style = "edge", combatOnly = true } } },
+          tbc = { show = {
+              main = { "kick", "coldBlood", "vanish", "cloakOfShadows", "tea", "potion", "rune" },
+              utility = { "sliceDice", "rupture", "exposeArmor", "feint", "shiv", "stealth", "sap" },
+              debuffs = { "rupture", "exposeArmor", "deadly" } },
+            glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
+                      ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:exposeArmor"] = { { when = "expiring", style = "pulse" } } } } },
+        { key = "combat", label = "Combat", tab = 2, aux = true, res = { rangeDim = true }, show = {
+            main = { "kick", "adrenaline", "bladeFlurry", "vanish", "tea", "potion", "rune" },
+            utility = { "sliceDice", "feint", "stealth", "sap", "cheapShot" },
+            buffs = { "sliceDice", "adrenaline", "bladeFlurry", "zhc" },
+            debuffs = {} },
+          glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
+                    adrenaline = { { when = "ready", style = "edge", combatOnly = true } },
+                    bladeFlurry = { { when = "ready", style = "edge", combatOnly = true } } },
+          tbc = { show = {
+              main = { "kick", "adrenaline", "bladeFlurry", "vanish", "cloakOfShadows", "tea", "potion", "rune" },
+              utility = { "sliceDice", "rupture", "exposeArmor", "feint", "shiv", "stealth", "sap" },
+              debuffs = { "rupture", "exposeArmor", "deadly" } },
+            glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
+                      ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:exposeArmor"] = { { when = "expiring", style = "pulse" } },
+                      adrenaline = { { when = "ready", style = "edge", combatOnly = true } },
+                      bladeFlurry = { { when = "ready", style = "edge", combatOnly = true } } } } },
+        { key = "subtlety", label = "Subtlety", tab = 3, aux = true, res = { rangeDim = true }, show = {
+            main = { "kick", "prep", "ghostly", "vanish", "tea", "potion", "rune" },
+            utility = { "sliceDice", "hemo", "feint", "stealth", "sap", "cheapShot", "garrote" },
+            buffs = { "sliceDice", "ghostly", "zhc" },
+            debuffs = {} },
+          glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } } },
+          tbc = { show = {
+              main = { "kick", "prep", "shadowstep", "vanish", "cloakOfShadows", "tea", "potion", "rune" },
+              utility = { "sliceDice", "hemo", "rupture", "exposeArmor", "feint", "shiv", "stealth", "sap" },
+              debuffs = { "rupture", "hemo", "exposeArmor", "deadly" } },
+            glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
+                      ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } } } } },
+    },
+    flavors = {
+        tbc = { add = {
+            { key = "shadowstep",     kind = "spell", spell = "shadowstep",     spellId = 36554, label = "Shadowstep" },
+            { key = "cloakOfShadows", kind = "spell", spell = "cloakOfShadows", spellId = 31224, label = "Cloak of Shadows", noRange = true },
+            { key = "deadlyThrow",    kind = "spell", spell = "deadlyThrow",    spellId = 26679, label = "Deadly Throw", row = "utility" },
+            { key = "shiv",           kind = "spell", spell = "shiv",           spellId = 5938,  label = "Shiv", row = "utility" },
+            { key = "cloakBuff",      id = 31224, label = "Cloak of Shadows", row = "buffs" },
+            { key = "anesthetic",     id = 26688, label = "Anesthetic Poison", row = "debuffs" },
+        } },
+    },
+    buffBars = { "sliceDice", "adrenaline", "bladeFlurry" },
     bars = { "power", "tick", "combo", "swing" },
 })

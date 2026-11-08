@@ -141,7 +141,7 @@ RegisterPage("Motion", function(L)
         onChange = function(v) DB().speed = math.floor(v * 100 + 0.5) / 100 end,
     })
     L:Row(speed, 40)
-    UI.SetEnabled(speed, Motion.Enabled())
+    UI.SetEnabled(speed, Motion.Enabled(), 'Needs "Play animations" turned on.')
     L:Desc("Higher is faster. At 1x every animation runs at the length it was set to.")
     L:Gap(4)
     local reset = UI.Button(L.current, "Reset", { width = 80,

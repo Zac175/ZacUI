@@ -66,6 +66,16 @@ SlashCmdList["ZACUI"] = function(msg)
     local cmd, rest = raw:match("^(%S+)%s*(.-)$")
     cmd = cmd and cmd:lower() or ""
 
+    -- commands a feature file registered for itself (ns.SlashCommands[word]
+    -- = function(rest, word); Chat_Privacy's /zui privacy, Core_DevSecrets'
+    -- /zui dev): looked up before the fixed list, so a file can add one
+    -- without a line here
+    local own = ns.SlashCommands and ns.SlashCommands[cmd]
+    if type(own) == "function" then
+        own(rest or "", cmd)
+        return
+    end
+
     if cmd == "plate" or cmd == "preview" then
         -- the sample nameplate with everything on
         local Pv = ns.Nameplates and ns.Nameplates.Preview
@@ -228,6 +238,12 @@ SlashCmdList["ZACUI"] = function(msg)
             Print(fname .. " header line y=" .. y .. " (saved; opens skinned)")
         end
         return
+    elseif cmd == "reset" and (rest or ""):lower() == "all" then
+        -- a fresh install: every ZacUI setting cleared, the game's settings
+        -- put back (asks first)
+        if ns.TutorialSetup and ns.TutorialSetup.Uninstall then ns.TutorialSetup.Uninstall()
+        else Print("The setup did not load.") end
+        return
     elseif cmd == "reset" then
         ZacUIDB.modules = {}
         for m, v in pairs(DEFAULT_MODULES) do ZacUIDB.modules[m] = v end
@@ -236,7 +252,8 @@ SlashCmdList["ZACUI"] = function(msg)
         ZacUIDB.tooltipPos = nil
         ZacUIDB.config = nil
         ZacUIDB.font = { name = nil, delta = 0, outline = nil }
-        Print("Settings reset to defaults - /reload to apply.")
+        ZacUIDB.look = nil
+        ns.AskReload("Settings are back to their defaults. They take hold after a reload.")
         return
     elseif cmd == "xray" then
         -- Dump every visible text renderer under the quest/gossip trees:
@@ -310,7 +327,7 @@ SlashCmdList["ZACUI"] = function(msg)
         elseif action == "use" and arg ~= "" then
             local ok, err = Profiles.Use(arg)
             if ok then
-                Print("this character now wears '" .. arg .. "' - /reload to apply everywhere.")
+                ns.AskReload("This character now wears '" .. arg .. "'. It takes hold everywhere after a reload.")
             else
                 Print("switch failed: " .. tostring(err))
             end
@@ -503,6 +520,11 @@ SlashCmdList["ZACUI"] = function(msg)
     elseif cmd == "ui" or cmd == "config" or cmd == "options" then
         OpenConfig(PAGE_ALIAS[rest:lower()])
         return
+    elseif cmd == "search" or cmd == "find" then
+        -- the settings window with the words typed into its search box
+        -- (Config_SearchBox); bare, just the cursor in the box
+        if ns.ConfigSearchOpen then ns.ConfigSearchOpen(rest) else OpenConfig() end
+        return
     elseif cmd == "auras" or cmd == "aura" then
         -- The engine registers no slash command of its own, so this is the
         -- only way in. Bare "/zacui auras" opens the page; anything else is
@@ -543,6 +565,24 @@ SlashCmdList["ZACUI"] = function(msg)
         return
     elseif cmd == "setup" or cmd == "wizard" then
         if ns.Tutorial then ns.Tutorial.OpenSetup() else Print("The tutorial did not load.") end
+        return
+    elseif cmd == "hints" then
+        -- SETUP2: /zui hints reset brings every one-time tip (and the
+        -- welcome) back; bare lists what has been shown
+        if not ns.Hints then Print("The hints did not load.") return end
+        if rest:lower() == "reset" then
+            ns.Hints.Reset()
+            Print("Hints reset - every one-time tip shows again, and the welcome at your next login.")
+        else
+            local seen = ns.Hints.List()
+            Print(#seen == 0 and "No one-time hints shown yet." or ("Hints shown: " .. table.concat(seen, ", ")))
+        end
+        return
+    elseif cmd == "uninstall" then
+        -- SETUP2: the same as /zui reset all (ZacUI is no longer turned
+        -- off: settings cleared, game settings put back, reload; asks first)
+        if ns.TutorialSetup and ns.TutorialSetup.Uninstall then ns.TutorialSetup.Uninstall()
+        else Print("The setup did not load.") end
         return
     elseif cmd == "edit" or cmd == "editmode" then
         if ns.ToggleEditMode then ns.ToggleEditMode() end
@@ -617,6 +657,12 @@ SlashCmdList["ZACUI"] = function(msg)
         end
         Print("rescan: walked " .. n .. " frames (fence skips finished ones; watcher tail untouched).")
         return
+    elseif cmd == "kb" or cmd == "keybind" or cmd == "keybinds" then
+        -- ZacUI's keybind mode: hover a bar button, press a key (Zacui_Bars)
+        local AB = ns.Bars
+        if AB and AB.ToggleKeyMode then AB.ToggleKeyMode()
+        else Print("The bar system did not load.") end
+        return
     elseif cmd == "bars" and rest ~= "" then
         -- /zui bars lock | unlock | import | keys | reset
         local AB = ns.Bars
@@ -629,7 +675,9 @@ SlashCmdList["ZACUI"] = function(msg)
             Print(n and ("Imported " .. n .. " Bartender4 profile(s).") or ("Import failed: " .. tostring(err)))
         elseif sub == "keys" then AB.MigrateBartenderKeys(true)
         elseif sub == "apply" then AB.ApplyAll() Print("Bars re-applied.")
-        elseif sub == "kb" or sub == "keybind" or sub == "bind" then AB.QuickKeybind()
+        elseif sub == "kb" or sub == "keybind" or sub == "bind" then
+            -- ZacUI's keybind mode (Zacui_Bars/AB_Keys); /kb stays Blizzard's
+            if AB.ToggleKeyMode then AB.ToggleKeyMode() else AB.QuickKeybind() end
         else Print("/zui bars lock | unlock | kb | import | keys | apply") end
         return
     elseif cmd == "loadout" and rest ~= "" then
@@ -671,7 +719,7 @@ SlashCmdList["ZACUI"] = function(msg)
             EnableModuleLive(module)
         else
             ZacUIDB.modules[module] = false
-            Print(module .. " off - /reload to restore the stock look.")
+            ns.AskReload(module .. " is off. The game's own look comes back after a reload.")
         end
         return
     end

@@ -129,7 +129,7 @@ local function NewRow(frame, i)
     icon:SetSize(12, 12)
     icon:SetPoint("LEFT", row, "LEFT", 3, 0)
     icon:SetTexture("Interface\\Icons\\Ability_Racial_BloodRage")
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(icon)
     icon:Hide()
     row.bloodrageIcon = icon
     local st = row:CreateFontString(nil, "OVERLAY")
@@ -171,6 +171,8 @@ function T.New(parent, preview)
         elseif side == "bottom" then t:SetPoint("BOTTOMLEFT") t:SetPoint("BOTTOMRIGHT") t:SetHeight(1)
         elseif side == "left" then t:SetPoint("TOPLEFT") t:SetPoint("BOTTOMLEFT") t:SetWidth(1)
         else t:SetPoint("TOPRIGHT") t:SetPoint("BOTTOMRIGHT") t:SetWidth(1) end
+        -- (one physical pixel under ZacUI's look: Core_Pixel, HD polish)
+        if ns.Pixel then ns.Pixel.Edge(t, side:upper(), frame) end
         frame.simpleBorder[side] = t
     end
     local hb = CreateFrame("Frame", nil, frame)
@@ -185,12 +187,12 @@ function T.New(parent, preview)
     hb.rule:SetTexture(FLAT)
     hb.rule:SetPoint("BOTTOMLEFT", hb, "BOTTOMLEFT", 0, 0)
     hb.rule:SetPoint("BOTTOMRIGHT", hb, "BOTTOMRIGHT", 0, 0)
-    hb.rule:SetHeight(1)
+    if ns.Pixel then ns.Pixel.Edge(hb.rule, "BOTTOM", hb) else hb.rule:SetHeight(1) end
     local ti = hb:CreateTexture(nil, "OVERLAY")
     ti:SetSize(14, 14)
     ti:SetPoint("LEFT", hb, "LEFT", 6, 1)
     ti:SetTexture("Interface\\Icons\\Ability_Warrior_BattleShout")
-    ti:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(ti)
     local tt = hb:CreateFontString(nil, "OVERLAY")
     ns.ApplyFontSpec(tt, Font(tc, "titleFont"), BR.DEFAULTS.tracker.titleFont)
     tt:SetPoint("LEFT", ti, "RIGHT", 5, 1)
@@ -507,6 +509,7 @@ local function MemberRow(def, unit, tc, threshold, doRange)
     if def.port then
         local inR, chk = false, false
         if UnitInRange then inR, chk = UnitInRange(unit) end
+        if ns.Hidden(inR, chk) then inR, chk = true, false end   -- (WoW Forever)
         oor = doRange and unit ~= "player" and chk and not inR
     else
         local inR, chk = BR.InSpellRange(BR.SingleName(def), unit)

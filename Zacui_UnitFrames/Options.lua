@@ -45,6 +45,22 @@ local POS_KEY = {
 local FRAME_KEYS   = { "player", "target", "targettarget", "pet", "party", "raid" }
 local FRAME_LABELS = { player = "Player", target = "Target", targettarget = "Target of target",
                        pet = "Pet", party = "Party", raid = "Raid" }
+-- Apply to all frames (finish pass): the sections and their keys (Config.lua
+-- frames.*); a frame takes only the keys it has
+local UF_SECTIONS = {
+    { label = "Colours", hint = "health, name, background, border", keys = { "healthClassColor", "healthColor",
+        "nameClassColor", "nameColor", "bgColor", "borderColor" } },
+    { label = "Text", hint = "health text, name and health places", keys = { "healthText", "name", "nameAnchor",
+        "nameX", "nameY", "hpAnchor", "hpX", "hpY" } },
+    { label = "Icons", hint = "combat, leader, role, marker, PvP, rez", keys = { "combatIcon", "leaderIcon",
+        "roleIcon", "raidIcon", "pvpIcon", "rezIcon", "combatSize", "leaderSize", "roleSize", "raidSize", "pvpSize",
+        "rezSize", "combatAnchor", "combatX", "combatY", "leaderAnchor", "leaderX", "leaderY", "roleAnchor", "roleX",
+        "roleY", "raidAnchor", "raidX", "raidY", "pvpAnchor", "pvpX", "pvpY", "rezAnchor", "rezX", "rezY" } },
+    { label = "Auras", hint = "buffs and debuffs, where they sit", keys = { "showBuffs", "showDebuffs", "buffAnchor",
+        "buffX", "buffY", "debuffAnchor", "debuffX", "debuffY" } },
+}
+-- the frames only some games have (focus, boss...: Extras.lua and theirs)
+if ns.WithExtraKeys then FRAME_KEYS = ns.WithExtraKeys(FRAME_KEYS, FRAME_LABELS) end
 
 local PREVIEW_FRAMES = "unitframes.frames"
 
@@ -374,6 +390,13 @@ local HEALTH_TEXT = {
     { text = "Percent", value = "percent" }, { text = "Current and percent", value = "both" },
 }
 
+-- the helpers the extra frames' own cards build with (Extras.lua)
+local H = { Checks = Checks, Sliders = Sliders, Drops = Drops, Button = Button, Buttons = Buttons,
+    PX = PX, Apply = Apply, Refresh = Refresh, InnerWidth = InnerWidth }
+local function ExtraCards(L, tab, key, cfg)
+    if ns.ExtraPageCards then ns.ExtraPageCards(L, tab, key, cfg, H) end
+end
+
 -- ----------------------------------------------------------------------------
 -- The "Settings for" card at the top of the per-frame tabs
 -- ----------------------------------------------------------------------------
@@ -388,6 +411,27 @@ local function FramePicker(L)
             SetCurrentFrame(v)
             Refresh()
         end })
+    -- APPLY TO ALL (finish pass): this frame's colours, text, icons or
+    -- auras onto the other frames that have them (UI.ApplyToAll); size,
+    -- place and on / off stay each frame's own
+    if UI.ApplyToAll then
+        local apply = UI.ApplyToAll(L.current, {
+            text = "Apply to all frames...", width = 140, title = "Apply to all frames",
+            tooltip = "Copies this frame's colours, text, icons or auras onto the other frames, after you confirm.",
+            what = function() return FRAME_LABELS[key] or key end,
+            source = function() return CfgOf(key) end,
+            targets = function()
+                local out = {}
+                for _, k in ipairs(FRAME_KEYS) do
+                    if k ~= key and CfgOf(k) then out[#out + 1] = { label = FRAME_LABELS[k] or k, tbl = CfgOf(k) } end
+                end
+                return out
+            end,
+            onto = function() return "the other frames" end,
+            sections = UF_SECTIONS, allLabel = "All four", allWord = "colours, text, icons and auras",
+            onDone = function() Apply() Refresh() end })
+        L:Row(apply, M.BUTTON_H + 6)
+    end
     L:Desc("The settings marked \"this frame\" below are for the frame picked here, and the preview shows it.")
     L:EndCard()
     return key, CfgOf(key)
@@ -449,7 +493,7 @@ local function AuraList(L, title, list)
         icon._zui_own = true
         icon:SetSize(16, 16)
         icon:SetPoint("LEFT", 22, 0)
-        icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        ZacUI.Look.CropIcon(icon, nil, nil, { look = "zacui" })
         icon:SetTexture(spellTexture(e.id) or spellTexture(e.label) or "Interface\\Icons\\INV_Misc_QuestionMark")
         local t = UI.Font(row, F.LABEL, { text = e.label or (e.id and tostring(e.id)) or e.name or "?" })
         t:SetPoint("LEFT", 44, 0)
@@ -574,7 +618,7 @@ local function GlowLook(L, t, o)
         set = function(r, g, b, a) cs(r, g, b, a) Apply() end })
     cp._zNatW = math.max(120, cp:GetWidth() or 0)
     Grid(L, { cp }, 2, M.ROW, M.ROW - 16, 16, FitInto)
-    if o.byType then UI.SetEnabled(cp, t.byType == false) end
+    if o.byType then UI.SetEnabled(cp, t.byType == false, 'Needs "Colour by debuff type" turned off.') end
     local function S(label, k, lo, hi, step, fmt)
         return Slider(L.current, { label = label, min = lo, max = hi, step = step, format = fmt,
             get = function() return val(k) end, set = function(v) t[k] = v end })
@@ -583,27 +627,98 @@ local function GlowLook(L, t, o)
     local PCT1 = function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end
     local str, reach = S("Strength", "alpha", 0.1, 1, 0.05, PCT1), S("Reach", "size", 1, 30, 1, PX)
     Row({ str, reach })
-    UI.SetEnabled(reach, edge or style == "autocast")
+    UI.SetEnabled(reach, edge or style == "autocast", "Not used by this glow style.")
     local thick, off = S("Thickness", "thickness", 1, 8, 1, PX), S("Offset from the edge", "offset", -6, 12, 1, PX)
     Row({ thick, off })
-    UI.SetEnabled(thick, style == "pixel" or style == "solid")
+    UI.SetEnabled(thick, style == "pixel" or style == "solid", "Not used by this glow style.")
     local wide = Check(L.current, "Wide soft halo", function() return val("wide") end, function(v) t.wide = v end)
     local pulse = Check(L.current, "Pulse", function() return val("pulse") end, function(v) t.pulse = v Refresh() end)
     Grid(L, { wide, pulse }, 2, M.ROW, M.ROW - M.CHECK, M.CHECK, FitInto)
-    UI.SetEnabled(wide, edge)
+    UI.SetEnabled(wide, edge, "Not used by this glow style.")
     local sp = S("Pulse speed (one beat)", "pulseSpeed", 0.1, 2, 0.05, SEC)
     local dp = S("Pulse depth", "pulseDepth", 0, 0.9, 0.05, PCT1)
     Row({ sp, dp })
-    UI.SetEnabled(sp, val("pulse"))
-    UI.SetEnabled(dp, val("pulse"))
+    UI.SetEnabled(sp, val("pulse"), 'Needs "Pulse" turned on.')
+    UI.SetEnabled(dp, val("pulse"), 'Needs "Pulse" turned on.')
     local n = S(style == "autocast" and "Sparkles" or "Lines", "lines", 1, 20, 1)
     local len = S("Line length", "length", 2, 30, 1, PX)
     Row({ n, len })
     local spd = S("Speed (laps a second)", "speed", 0.05, 1.5, 0.05, function(v) return string.format("%.2f", v) end)
     Row({ spd })
-    UI.SetEnabled(n, moving)
-    UI.SetEnabled(len, style == "pixel")
-    UI.SetEnabled(spd, moving)
+    UI.SetEnabled(n, moving, "Not used by this glow style.")
+    UI.SetEnabled(len, style == "pixel", "Not used by this glow style.")
+    UI.SetEnabled(spd, moving, "Not used by this glow style.")
+end
+
+-- a frame's portrait settings (Portrait.lua), filled from the defaults for
+-- a settings table that has none yet (a proxy over one, a very old save)
+local function PC(cfg)
+    if type(cfg.portrait) ~= "table" then cfg.portrait = {} end
+    if ns.PORTRAIT_DEFAULTS then ns.DeepFill(cfg.portrait, ns.PORTRAIT_DEFAULTS) end
+    return cfg.portrait
+end
+
+local PORTRAIT_STYLE = { { text = "2D - the face", value = "2d" }, { text = "3D - a model", value = "3d" } }
+local PORTRAIT_SIDE = { { text = "Left", value = "LEFT" }, { text = "Right", value = "RIGHT" } }
+local PORTRAIT_LAYOUT = {
+    { text = "The bars make room", value = "shrink" },
+    { text = "Beside the frame", value = "outside" },
+    { text = "Over the bar's end", value = "inside" },
+}
+
+-- The portrait card (Look tab): style, class icon, placement, size, gap,
+-- border and background, the 3D zoom. Controls the picked style does not
+-- use are dimmed; everything but the switch is dimmed while it is off.
+local function PortraitCard(L, cfg, group)
+    local pc = PC(cfg)
+    L:Card("Portrait on this frame")
+    local on = Check(L.current, "Show a portrait", function() return ns.PortraitOn(cfg) end,
+        function(v) pc.enabled = v Refresh() end,
+        "Unless you set it, it follows the look: off under ZacUI's own, on under the game's looks. The frame picked above gets it; the preview shows it.")
+    Grid(L, { on }, 1, M.ROW, M.ROW - M.CHECK, M.CHECK, FitInto)
+    local is3d = (pc.style == "3d")
+    local ws = {
+        Drop(L.current, { label = "Kind", items = PORTRAIT_STYLE,
+            get = function() return pc.style or "2d" end, set = function(v) pc.style = v Refresh() end }),
+        Drop(L.current, { label = "Side", items = PORTRAIT_SIDE,
+            get = function() return pc.side or "LEFT" end, set = function(v) pc.side = v end }),
+    }
+    Grid(L, ws, 2, 16 + M.DROPDOWN_H + 8, 8, 16 + M.DROPDOWN_H, FitDrop)
+    local layout = Drop(L.current, { label = "Placement", items = PORTRAIT_LAYOUT,
+        get = function() return pc.layout or "shrink" end, set = function(v) pc.layout = v end })
+    Grid(L, { layout }, 2, 16 + M.DROPDOWN_H + 8, 8, 16 + M.DROPDOWN_H, FitDrop)
+    local classIcon = Check(L.current, "Class icon for players", function() return pc.classIcon end,
+        function(v) pc.classIcon = v end, "A 2D portrait shows a player's class icon instead of their face. Creatures keep theirs.")
+    local border = Check(L.current, "Border", function() return pc.border ~= false end, function(v) pc.border = v end,
+        "A 1 px edge in this frame's border colour.")
+    local bg = Check(L.current, "Background", function() return pc.background ~= false end, function(v) pc.background = v end,
+        "This frame's background colour behind the portrait.")
+    Grid(L, { classIcon, border, bg }, 3, M.ROW, M.ROW - M.CHECK, M.CHECK, FitInto)
+    local size = Slider(L.current, { label = "Size (0 = frame height)", min = 0, max = 80, format = PX,
+        get = function() return pc.size or 0 end, set = function(v) pc.size = v end })
+    local gap = Slider(L.current, { label = "Gap", min = 0, max = 20, format = PX,
+        get = function() return pc.gap or 2 end, set = function(v) pc.gap = v end })
+    Grid(L, { size, gap }, 2, 40, 10, 30, FitInto)
+    local zoom = Slider(L.current, { label = "3D zoom", min = 0, max = 1, step = 0.05,
+        format = function(v) return string.format("%d%%", math.floor(v * 100 + 0.5)) end,
+        get = function() return pc.zoom or 1 end, set = function(v) pc.zoom = v end })
+    Grid(L, { zoom }, 2, 40, 10, 30, FitInto)
+    -- (a dropdown under a label is a holder: its box goes deaf as well)
+    local function Dim(w, enabled, why)
+        UI.SetEnabled(w, enabled, why or 'Needs "Show a portrait" turned on.')
+        if w.dropdown and w.dropdown.EnableMouse then w.dropdown:EnableMouse(enabled and true or false) end
+    end
+    for _, w in ipairs({ ws[1], ws[2], layout, classIcon, border, bg, size, gap, zoom }) do
+        Dim(w, ns.PortraitOn(cfg))
+    end
+    if ns.PortraitOn(cfg) then
+        Dim(classIcon, not is3d, "Not used by the 3D portrait.")
+        Dim(zoom, is3d, 'Needs "Kind" set to 3D.')
+    end
+    L:Desc("The bars make room: the health and power bars shrink by its width and every text keeps its spot on them. Beside the frame: the frame stays as it is and the square sits next to it (it takes no clicks). Over the bar's end: on top of the bar."
+        .. (group and " Beside a party or raid frame it needs room between the columns." or "")
+        .. (is3d and " A 3D model costs more than a picture; on many frames at once, prefer 2D." or ""))
+    L:EndCard()
 end
 
 -- ============================================================================
@@ -636,6 +751,8 @@ local function TabGeneral(L)
         { "Debuffs",   function() return cfg.showDebuffs end, function(v) cfg.showDebuffs = v end },
         { "Castbar",   function() return cfg.castbar end, function(v) cfg.castbar = v end },
         { "Incoming heals", function() return cfg.healPrediction end, function(v) cfg.healPrediction = v end },
+        { "Portrait", function() return PC(cfg).enabled end, function(v) PC(cfg).enabled = v end,
+          "The unit's face (or a 3D model) beside the bars. Its look and placement are on the Look tab." },
     }
     if group then
         show[#show + 1] = { "Fade out of range", function() return cfg.rangeFade end, function(v) cfg.rangeFade = v end }
@@ -646,6 +763,7 @@ local function TabGeneral(L)
     L:Desc("Switching a frame on or off, and the party and raid layout, take a reload; everything else changes at once.")
     Button(L, "Reload UI", 100, function() if not InCombatLockdown() then ReloadUI() end end)
     L:EndCard()
+    ExtraCards(L, "general", key, cfg)
 
     if not group and key ~= "softtarget" then
         L:Card("When this frame shows")
@@ -786,6 +904,8 @@ local function TabLook(L)
         L:Desc("How see-through a member out of range is, with Fade out of range on.")
     end
     L:EndCard()
+
+    PortraitCard(L, cfg, group)
 
     L:Card("Bars (all frames)")
     local bar = UI.TexturePicker(L.current, { label = "Bar texture", width = 260, defaultLabel = "Blizzard",
@@ -1005,7 +1125,7 @@ local function TabAnimation(L)
         get = function() return lh.pulseAnim end,
         set = function(s) lh.pulseAnim = s Apply() end })
     L:Add(pp, 6)
-    UI.SetEnabled(pp, lh.pulse)
+    UI.SetEnabled(pp, lh.pulse, 'Needs "Pulse the wash" turned on.')
     L:EndCard()
 
     L:Card("Health and power bars")
@@ -1015,7 +1135,7 @@ local function TabAnimation(L)
         value = tonumber(db.smoothTime) or 0.15, label = "Glide time", format = SEC,
         onChange = function(v) db.smoothTime = math.floor(v * 100 + 0.5) / 100 end })
     L:Row(glide, 40)
-    UI.SetEnabled(glide, db.smoothBars ~= false)
+    UI.SetEnabled(glide, db.smoothBars ~= false, 'Needs "Smooth bars" turned on.')
     L:EndCard()
 
     L:Card("Everywhere")
@@ -1099,6 +1219,7 @@ local function TabPosition(L)
             { label = "Y", min = -1000, max = 1000, step = 2, format = PX, get = function() return cfg.y end, set = function(v) setFramePos(key, "y", v) end })
         L:EndCard()
     end
+    ExtraCards(L, "pos", key, cfg)
 
     L:Card("Place and size an element on this frame")
     L:Desc("Pick the element, then set its anchor, offset and size.")
@@ -1323,10 +1444,16 @@ local function TabAdvanced(L)
                     return
                 end
             end
+            -- out of combat the reload is asked for FIRST, then the import
+            -- writes, inside the click (WoW Forever; ZacUI's ns.AskReload)
+            local Z = ns.ZUI
+            local reloadFirst = not InCombatLockdown()
+            if reloadFirst then
+                if Z and Z.RequestReload then Z.RequestReload() else ReloadUI() end
+            end
             local ok, err = ns.ImportString(text)
             if ok then
-                if not InCombatLockdown() then ReloadUI()
-                elseif status then status:SetText("Imported - type /reload to apply (in combat).") end
+                if not reloadFirst and status then status:SetText("Imported - type /reload to apply (in combat).") end
             elseif status then
                 status:SetText("Import failed: " .. (err or "unknown") .. ".")
             end
@@ -1356,7 +1483,11 @@ local function TabAdvanced(L)
         local t = UI.Font(r, F.LABEL, { text = nm })
         t:SetPoint("LEFT", 4, 0)
         local load = UI.Button(r, "Load", { width = 60, onClick = function()
-            if ns.LoadProfile(nm) and not InCombatLockdown() then ReloadUI() end
+            -- the reload FIRST, then the load's writes (WoW Forever)
+            if InCombatLockdown() then ns.LoadProfile(nm) return end
+            local Z = ns.ZUI
+            if Z and Z.RequestReload then Z.RequestReload() else ReloadUI() end
+            ns.LoadProfile(nm)
         end })
         local del = UI.Button(r, "Delete", { width = 60, onClick = function()
             ns.DeleteProfile(nm)
@@ -1476,18 +1607,49 @@ do
                 show = function()
                     if ns.db.locked == false then return end
                     ns._zuiEdit = true
+                    -- remembered in the save too: a /reload (or an error)
+                    -- before Edit Mode closes must not leave the frames
+                    -- unlocked for good (Core.lua puts the lock back)
+                    ns.db._editUnlocked = true
                     ns.db.locked = false
                     ns.ApplySettings()
                 end,
                 hide = function()
                     if not ns._zuiEdit then return end
                     ns._zuiEdit = nil
+                    ns.db._editUnlocked = nil
                     if ns.HideMoveDialog then ns.HideMoveDialog() end
                     ns.db.locked = true
                     ns.ApplySettings()
                 end,
                 frames = EditFrames,
                 content = EditFrames,
+                -- every frame's spot, for Edit Mode's undo and Cancel
+                snapshot = function()
+                    local out = {}
+                    for k, cfg in pairs(ns.db.frames or {}) do
+                        if type(cfg) == "table" and cfg.point then
+                            out["frames." .. k] = { point = cfg.point, x = cfg.x, y = cfg.y }
+                        end
+                    end
+                    for k, cfg in pairs(ns.db) do
+                        if k ~= "frames" and type(cfg) == "table" and cfg.point and cfg.x ~= nil then
+                            out[k] = { point = cfg.point, x = cfg.x, y = cfg.y }
+                        end
+                    end
+                    return out
+                end,
+                restore = function(v)
+                    if type(v) ~= "table" or InCombatLockdown() then return end
+                    for path, spot in pairs(v) do
+                        local k = path:match("^frames%.(.+)$")
+                        local cfg = k and ns.db.frames and ns.db.frames[k] or (not k and ns.db[path])
+                        if type(cfg) == "table" then cfg.point, cfg.x, cfg.y = spot.point, spot.x, spot.y end
+                    end
+                    ns.ApplySettings()
+                    if ns.RefreshMoveDialog then ns.RefreshMoveDialog() end
+                end,
+                page = "unitframes",
             } }
         end
     end
@@ -1499,7 +1661,8 @@ do
             .. " smooth glide range opacity dispel debuff buff aura filter shout taunt low health wash"
             .. " cleanse decurse cure glow edge pixel autocast sparkle countdown timer challenging roar"
             .. " pulse flash preview test tot pet focus marker skull leader assist tank rez resurrection"
-            .. " pvp heal prediction healcomm chips legend profile import export zacuf")
+            .. " pvp heal prediction healcomm chips legend profile import export zacuf"
+            .. " portrait portraits face 3d model class icon picture")
     end
     if ZUI and ZUI.RegisterPage and ZUI.UI then
         UI, M, F = ZUI.UI, ZUI.UI.M, ZUI.UI.F
@@ -1524,6 +1687,7 @@ do
                     -- the glows: their look; the countdown: its font and spot
                     if el == "dispelGlow" or el == "tauntGlow" then st.tabs.unitframes = "look"
                     elseif el == "tauntCount" then st.tabs.unitframes = "text"
+                    elseif el == "portrait" then st.tabs.unitframes = "look"
                     elseif isText then st.tabs.unitframes = "text"
                     else
                         st.tabs.unitframes = "pos"
@@ -1534,7 +1698,8 @@ do
             end
             if ns.UFPreview then
                 ns.UFPreview.focus = nil   -- set again by the Position tab's element picker
-                L:Preview(FramesPreviewSpec())
+                -- (draggable pieces: PreviewDrag.lua)
+                L:Preview(ns.UFDragAttach and ns.UFDragAttach(FramesPreviewSpec()) or FramesPreviewSpec())
             end
             L:Tabs(TABS)
         end)

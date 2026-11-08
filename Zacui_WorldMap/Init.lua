@@ -15,6 +15,7 @@
 --------------------------------------------------------------------------------
 
 local ADDON, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 if ns.loadMs.start then ns.loadMs.files = debugprofilestop() - ns.loadMs.start end
 
 local function Options()

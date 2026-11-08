@@ -62,6 +62,12 @@ Meter.segments = {}
 Meter.segmentsRev = 0            -- bumped whenever the segment list changes; windows parked on a past fight refresh against it
 Meter.HealthCache = {}
 Meter.HealthMaxCache = {}
+-- a unit's max health for a death record; 0 while WoW Forever hides it
+function Meter.PlainMaxHealth(unit)
+    local mx = UnitHealthMax(unit)
+    if ns.IsSecret(mx) then return 0 end
+    return mx or 0
+end
 
 local _tempo = time()
 Meter.now = function() return _tempo end
@@ -515,7 +521,7 @@ function Meter.BuildDeathTable(playerName, playerClass, deathTime, targetSerial)
         time = deathTime,
         name = playerName,
         class = playerClass,
-        maxHealth = Meter.HealthMaxCache[targetSerial] or UnitHealthMax(playerName) or 0,
+        maxHealth = Meter.HealthMaxCache[targetSerial] or Meter.PlainMaxHealth(playerName),
         timeString = floor(elapsed / 60) .. "m " .. floor(elapsed % 60) .. "s",
         deadAt = elapsed,
         clock = time(),             -- the time of day, for "died at 21:42"
@@ -1016,8 +1022,10 @@ events:RegisterEvent("UNIT_MAXHEALTH")
 events:SetScript("OnEvent", function(_, event, arg1)
     if event == "UNIT_MAXHEALTH" then
         local guid = UnitGUID(arg1)
-        if guid then
-            Meter.HealthMaxCache[guid] = UnitHealthMax(arg1)
+        local mx = UnitHealthMax(arg1)
+        -- (WoW Forever: a hidden GUID or max is not kept)
+        if guid and not ns.Hidden(guid, mx) then
+            Meter.HealthMaxCache[guid] = mx
         end
     elseif event == "UNIT_PET" then
         PetScanSoon()

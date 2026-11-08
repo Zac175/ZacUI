@@ -115,8 +115,161 @@ local function IsBlizzards(frame)
 end
 TakeSnapshot()
 
+-- ============================================================
+-- FOREVER'S MAP KEEPS ITS OWN BUTTONS (2026-11-07)
+-- ============================================================
+-- (Zac on WoW Forever: "text overlap on the map and buttons that are
+-- blank".) Forever's map is the modern one, and the modern map hangs
+-- its controls over the canvas as "overlay frames" (map.overlayFrames:
+-- the tracking filter and its reset X, the map pin button, the floor
+-- picker, the quest panel toggle, Blizzard's own coordinates...). Their
+-- pictures are the buttons - the sweep below blanked them and SkinControls
+-- boxed them, which is what the empty dark squares were. So on a map
+-- that has overlay frames they are left as Blizzard draws them; only the
+-- zone breadcrumb (NavBar) keeps ZacUI's treatment, and Blizzard's
+-- coordinates step aside for ZacUI's strip (S.SyncCoordsPanel). The
+-- Classic Era and TBC maps have no overlay frames, so nothing changes
+-- there.
+local overlaySet = setmetatable({}, { __mode = "k" })
+local function NoteOverlays(map)
+    for _, f in ipairs(type(map.overlayFrames) == "table" and map.overlayFrames or {}) do
+        if f ~= map.NavBar then overlaySet[f] = true end
+    end
+end
+
+-- Blizzard's own coordinate readout (the modern map's bottom-left
+-- "Player: x, y (zone)") sits right where ZacUI's strip writes; while
+-- ZacUI's coordinates are on, it is put away (and back when they go).
+function S.SyncCoordsPanel(map)
+    map = map or _G.WorldMapFrame
+    if not (map and type(map.overlayFrames) == "table") then return end
+    local ours = On("coords") and true or false
+    for _, f in ipairs(map.overlayFrames) do
+        if f.PlayerCoords and f.CursorCoords then
+            if ours then
+                f._zui_coordsAway = true
+                f:SetAlpha(0)
+                f:Hide()
+            elseif f._zui_coordsAway then
+                f._zui_coordsAway = nil
+                f:SetAlpha(1)
+                f:Show()
+            end
+        end
+    end
+end
+
+-- ============================================================
+-- THE MODERN MAP'S OWN BUTTONS, IN ZACUI'S LOOK (2026-11-07)
+-- ============================================================
+-- (Zac on Forever: the tracking filter and the quest-panel toggle were
+-- Blizzard's pictures on dark boxes.) Forever's map (Blizzard_WorldMap/
+-- Camelot) keeps three buttons over the canvas: the tracking filter (a
+-- dropdown arrow picture, its red reset X on top), the map pin button and
+-- the quest-panel toggle (two arrow pictures). Each becomes the icon
+-- button the minimap's corners wear: a dark flat backing with ZacUI's 1px
+-- border, the picture cropped inside (the pin keeps its own; the filter
+-- gets the tracking eye, the toggle ZacUI's arrows), hover and press as
+-- flat washes. Their clicks and dropdowns are still Blizzard's. Found by
+-- the map's own keys, so the Classic map (no such keys) is never touched.
+local MAP_BTN = 22
+local function Wash(tex, r, g, b, a, btn)
+    if not tex then return end
+    tex:SetColorTexture(r, g, b, a)
+    if tex.SetBlendMode then tex:SetBlendMode("ADD") end
+    tex:ClearAllPoints()
+    tex:SetAllPoints(btn)
+end
+local function SkinMapButton(btn, icon, flip)
+    if type(btn) ~= "table" or btn._zMapBtn or not btn.GetRegions then return end
+    btn._zMapBtn = true
+    local keep = (icon == true) and (rawget(btn, "Icon") or rawget(btn, "icon")) or nil
+    if keep ~= nil and type(keep) ~= "table" then keep = nil end
+    for _, r in ipairs({ btn:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and not r._zui_own and r ~= keep then
+            r:SetTexture(nil)
+            if r.SetAtlas then r:SetAtlas(nil) end
+            r:SetAlpha(0)
+        end
+    end
+    btn:SetSize(MAP_BTN, MAP_BTN)
+    local back = btn:CreateTexture(nil, "BACKGROUND", nil, -8)
+    back._zui_own = true
+    back:SetAllPoints()
+    back:SetTexture(FLAT)
+    btn._zMapBack = back
+    AddPixelBorder(btn)
+    local pic = keep
+    if not pic then
+        pic = btn:CreateTexture(nil, "ARTWORK")
+        pic._zui_own = true
+        pic:SetTexture(icon)
+        if flip then pic:SetTexCoord(1, 0, 0, 1) end
+    else
+        pic:SetDrawLayer("ARTWORK")
+        pic:SetAlpha(1)
+        if pic.SetTexCoord then pic:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+    end
+    pic:ClearAllPoints()
+    pic:SetPoint("TOPLEFT", btn, "TOPLEFT", 4, -4)
+    pic:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -4, 4)
+    btn._zMapPic = pic
+    if btn.GetNormalTexture then
+        local n = btn:GetNormalTexture()
+        if n then n:SetTexture(nil) n:SetAlpha(0) end
+    end
+    if btn.GetPushedTexture then Wash(btn:GetPushedTexture(), 1, 1, 1, 0.18, btn) end
+    if btn.GetHighlightTexture then Wash(btn:GetHighlightTexture(), 1, 1, 1, 0.12, btn) end
+    btn._zPaint = function(self)
+        local c = Col("windowBg")
+        self._zMapBack:SetVertexColor(c.r, c.g, c.b, 0.85)
+        if not keep then
+            local x = Col("xNormal")
+            self._zMapPic:SetVertexColor(x.r, x.g, x.b, 1)
+        end
+    end
+    btn:_zPaint()
+    if not keep then
+        btn:HookScript("OnEnter", function(self)
+            local a = Col("accent")
+            self._zMapPic:SetVertexColor(a.r, a.g, a.b, 1)
+        end)
+        btn:HookScript("OnLeave", function(self) self:_zPaint() end)
+    end
+    return btn
+end
+
+local TEX_EYE = "Interface\\Minimap\\Tracking\\None"
+function S.SkinModernButtons(map)
+    local track = rawget(map, "WorldMapTrackingOptionsButton")
+    if type(track) == "table" then
+        SkinMapButton(track, TEX_EYE)
+        -- its reset X (only up with filters changed): small, in the corner
+        local reset = rawget(track, "ResetButton")
+        if type(reset) == "table" and not reset._zMapReset then
+            reset._zMapReset = true
+            reset:SetSize(12, 12)
+            reset:ClearAllPoints()
+            reset:SetPoint("CENTER", track, "TOPRIGHT", -2, -2)
+        end
+    end
+    local pin = rawget(map, "WorldMapTrackingPinButton")
+    if type(pin) == "table" then SkinMapButton(pin, true) end
+    local toggle = rawget(map, "SidePanelToggle")
+    if type(toggle) == "table" then
+        if toggle.SetSize and not toggle._zMapBtn then
+            toggle._zMapBtn = true
+            toggle:SetSize(MAP_BTN, MAP_BTN)
+        end
+        -- open = reveal the quest panel to the right; close = fold it away
+        if type(rawget(toggle, "OpenButton")) == "table" then SkinMapButton(toggle.OpenButton, ns.TEX_ARROWL, true) end
+        if type(rawget(toggle, "CloseButton")) == "table" then SkinMapButton(toggle.CloseButton, ns.TEX_ARROWL, false) end
+    end
+end
+
 local function StripChrome(frame, canvas, depth)
     if not frame or depth > 4 then return end
+    if overlaySet[frame] then return end
     if frame == canvas or IsOurs(frame) or not IsBlizzards(frame) then return end
 
     if frame.GetRegions then
@@ -428,6 +581,7 @@ function S.Apply()
         end
     end
 
+    NoteOverlays(map)
     StripChrome(map, canvas, 0)
 
     -- The named furniture the windowed map brings with it. Listed as
@@ -454,6 +608,21 @@ function S.Apply()
         if mm.Hide then mm:Hide() end
         if mm.SetAlpha then mm:SetAlpha(0) end
     end
+    -- Forever's (modern) map keeps its title bar parts on BorderFrame
+    -- instead: the maximise toggle, the help-plate button, the portrait
+    -- and the title ("Map & Quest Log", printed over ZacUI's header
+    -- title - the jumbled title). ZacUI's header carries the title and
+    -- owns sizing, so they go. Classic's BorderFrame has none of them.
+    local bf = map.BorderFrame
+    if bf then
+        for _, key in ipairs({ "MaximizeMinimizeFrame", "Tutorial", "TitleContainer", "PortraitContainer" }) do
+            local piece = bf[key]
+            if type(piece) == "table" then
+                if piece.SetAlpha then piece:SetAlpha(0) end
+                if piece.Hide then piece:Hide() end
+            end
+        end
+    end
     -- And the fullscreen dimmer behind it.
     if map.BlackoutFrame then
         map.BlackoutFrame:SetAlpha(0)
@@ -473,7 +642,7 @@ function S.Apply()
         if not root or depth > 2 or root == canvas or IsOurs(root) then return end
         if not root.GetChildren then return end
         for _, child in ipairs({ root:GetChildren() }) do
-            if child ~= canvas and not IsOurs(child) and IsBlizzards(child) then
+            if child ~= canvas and not IsOurs(child) and IsBlizzards(child) and not overlaySet[child] then
                 local otype = child.GetObjectType and child:GetObjectType()
                 if (otype == "Button" or otype == "CheckButton")
                     and not child._zMapCtl and ns.SkinButton then
@@ -485,6 +654,8 @@ function S.Apply()
         end
     end
     SkinControls(map, 0)
+    S.SkinModernButtons(map)
+    S.SyncCoordsPanel(map)
 
     SkinBackdrop(map, "windowBg", 0.95)
     S.PaintWindowBg(map)

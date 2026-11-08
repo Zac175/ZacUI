@@ -49,6 +49,11 @@ local FOOTER = 22        -- money + free slots
 
 local views = {}
 local buttonSerial = 0
+-- ZacUI's bank window: off on a game version whose bank is not the
+-- Classic bank bags this window lays out (Core_Flavor's feature table;
+-- Retail's is tabs, character and Warband). Blizzard's bank is left
+-- alone there, and only the inventory window is built.
+local BANK_ON = not (ns.FeatureOn and not ns.FeatureOn("bank"))
 
 -- ============================================================
 -- THE LOOK (ZacUIDB.bags, Bags & maps > Bags)
@@ -156,6 +161,19 @@ local SLOT_PIECES = { "IconBorder", "IconOverlay", "IconOverlay2",
     "SlotArt", "SlotBackground", "IconQuestTexture",
     "BattlepayItemTexture", "NewItemTexture",
     "ExtendedOverlay", "searchOverlay", "SearchOverlay" }
+-- WoW Forever's item buttons (the modern template) mask the icon into a
+-- rounded square; ZacUI's slots are square, so the masks come off the icon.
+-- Classic's buttons carry no mask: nothing to do there.
+local function UnmaskIcon(icon)
+    if not (icon.GetNumMaskTextures and icon.GetMaskTexture and icon.RemoveMaskTexture) then return end
+    local n = icon:GetNumMaskTextures()
+    if type(n) ~= "number" then return end
+    for i = n, 1, -1 do
+        local m = icon:GetMaskTexture(i)
+        if m then icon:RemoveMaskTexture(m) end
+    end
+end
+
 local function KillSlotArt(btn)
     if not btn.GetRegions then return end
     -- a button's texture regions are fixed at creation, so the list is
@@ -164,7 +182,11 @@ local function KillSlotArt(btn)
     if not regions then
         regions = {}
         for _, region in ipairs({ btn:GetRegions() }) do
-            if region.IsObjectType and region:IsObjectType("Texture") and not region._zui_own then
+            -- (not a mask: WoW Forever's item buttons round the icon with
+            -- a MaskTexture, and a mask wiped to nothing hides the whole
+            -- icon; the masks come off the icon in UnmaskIcon instead)
+            if region.IsObjectType and region:IsObjectType("Texture") and not region._zui_own
+                and not region:IsObjectType("MaskTexture") then
                 regions[#regions + 1] = region
             end
         end
@@ -187,6 +209,7 @@ local function KillSlotArt(btn)
     if btn._zIcon then
         btn._zIcon:SetAlpha(1)
         btn._zIcon:SetDrawLayer("ARTWORK")
+        UnmaskIcon(btn._zIcon)
     end
     -- Keyed pieces that are not plain regions of the button.
     for _, key in ipairs(SLOT_PIECES) do
@@ -404,7 +427,7 @@ end
 function DressSlot(btn)
     local icon = btn._zIcon
     if icon then
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(icon)
         icon:SetDrawLayer("ARTWORK")
         SharpenIcon(icon)
     end
@@ -774,7 +797,7 @@ local function PaintSlot(btn, item, isQuest, faded)
     -- Icon last, after everything that could have wiped it.
     if btn._zIcon then
         btn._zIcon:SetTexture(item and item.icon or nil)
-        btn._zIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(btn._zIcon)
         SharpenIcon(btn._zIcon)
         btn._zIcon:SetAlpha(item and 1 or 0)
         btn._zIcon:SetDesaturated(item and item.locked and true or false)
@@ -956,7 +979,7 @@ local function CreateBagSlot(view, index)
     local icon = btn:CreateTexture(nil, "ARTWORK")
     icon._zui_own = true
     icon:SetAllPoints()
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(icon)
     btn._zIcon = icon
     pcall(UI.Border, btn, "ui", "border")
 
@@ -991,7 +1014,7 @@ local function BuildBagBar(view)
         ico._zui_own = true
         ico:SetAllPoints()
         ico:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
-        ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(ico)
         pcall(UI.Border, pack, "ui", "border")
         x = x + BAGBTN + 3
     end
@@ -1399,6 +1422,7 @@ local function CreateView(key, globalName, title, bagList)
                         local faded = searching
                             and not Bags.Matches(item, query, bag, slot, isQuest)
                         PaintSlot(btn, item, isQuest, faded)
+                        if Bags.SlotExtra then Bags.SlotExtra(btn, item, bag, slot) end   -- Bags_Extras (item level / BoE)
                     end
                 end
             end
@@ -1483,7 +1507,7 @@ Modules.inventory = function()
     -- while the visible one never opens.
     if views.inventory then
         views.inventory:Refresh()
-        views.bank:Refresh()
+        if views.bank then views.bank:Refresh() end
         return
     end
 
@@ -1492,14 +1516,14 @@ Modules.inventory = function()
 
     local inv = CreateView("inventory", "ZacUIBagFrame", "Inventory",
         Bags.BACKPACK_BAGS)
-    local bank = CreateView("bank", "ZacUIBankFrame", "Bank",
-        Bags.BANK_BAGS)
+    local bank = BANK_ON and CreateView("bank", "ZacUIBankFrame", "Bank",
+        Bags.BANK_BAGS) or nil
     inv.frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -20, 60)
-    bank.frame:SetPoint("LEFT", UIParent, "LEFT", 40, 60)
+    if bank then bank.frame:SetPoint("LEFT", UIParent, "LEFT", 40, 60) end
 
     Bags.Subscribe(function(batch)
         inv:Refresh(batch)
-        bank:Refresh(batch)
+        if bank then bank:Refresh(batch) end
     end)
 
     -- Other accounts' gold arrives with no bag event to repaint on; the
@@ -1522,7 +1546,7 @@ Modules.inventory = function()
     -- mode cannot create buttons under a lockdown; plain mode would pay
     -- for creating a hundred buttons on the first open).
     inv:Layout(true)
-    bank:Layout(true)
+    if bank then bank:Layout(true) end
 
     -- TAKING OVER THE BAG KEYS. These are ordinary Lua globals in
     -- FrameXML, not protected functions, and replacing them is how every
@@ -1668,6 +1692,11 @@ Modules.inventory = function()
     --
     -- Turned on live while Blizzard's bank is already open, the safety net
     -- below hides its window for that visit; the next one never shows it.
+    -- (Without ZacUI's bank window, Blizzard's bank is left exactly as it is.)
+    if not bank then
+        ns.BagViews = views
+        return
+    end
     local bankHost = _G.BankFrame
     if bankHost and bankHost.UnregisterEvent then
         bankHost:UnregisterEvent("BANKFRAME_OPENED")

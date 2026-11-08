@@ -31,6 +31,17 @@ local function CastOnUpdate(cb)
         cb:Hide()
     end
     cb:SetValue(cb.channeling and (1 - frac) or frac)
+    -- the match pass's time left (ZacUI's look): rebuilt only when the
+    -- shown tenth changes
+    local tm = cb.timer
+    if tm and tm:IsShown() then
+        local tenths = math.floor((endMS - now) / 100)
+        if tenths < 0 then tenths = 0 end
+        if cb._tenths ~= tenths then
+            cb._tenths = tenths
+            tm:SetText(string.format("%.1f", tenths / 10))
+        end
+    end
 end
 
 function NP.BuildCast(f)
@@ -46,7 +57,7 @@ function NP.BuildCast(f)
     local w = Col("windowBg")
     bg:SetColorTexture(w.r, w.g, w.b, 0.85)
     cb.bg = bg
-    AddPixelBorder(cb)
+    AddPixelBorder(cb, nil, nil, "nameplates")
 
     -- icon in its own bordered frame - the "Cast Icon Border" mod
     local iconFrame = CreateFrame("Frame", nil, cb)
@@ -54,12 +65,12 @@ function NP.BuildCast(f)
     cb.icon = iconFrame:CreateTexture(nil, "ARTWORK")
     cb.icon:SetPoint("TOPLEFT", 1, -1)
     cb.icon:SetPoint("BOTTOMRIGHT", -1, 1)
-    cb.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(cb.icon)
     local ibg = iconFrame:CreateTexture(nil, "BACKGROUND")
     ibg:SetAllPoints()
     ibg:SetColorTexture(w.r, w.g, w.b, 0.85)
     iconFrame.bg = ibg
-    AddPixelBorder(iconFrame)
+    AddPixelBorder(iconFrame, nil, nil, "nameplates")
 
     -- the leading-edge spark Plater draws on its cast bars
     local spark = cb:CreateTexture(nil, "OVERLAY", nil, 1)
@@ -96,6 +107,17 @@ end
 function NP.BoxClear()
     local e = NP.DB().extras or {}
     local st = e.arrowStyle or "box"
+    -- under a game look the stock art is what hangs below the bar: the
+    -- vanilla border's bottom reach + the cast border's top reach + the
+    -- reference's gap between them (0.229 + 0.230 + 0.35 of the bar's
+    -- height) under Classic, the bar background's 6 under the modern looks
+    if NP.StockLook and NP.StockLook() then
+        if NP.ClassicPlateOn and NP.ClassicPlateOn() then
+            local h = tonumber(NP.DB().enemy and NP.DB().enemy.height) or 16
+            return math.floor((0.229 + 0.230 + 0.35) * h + 0.5)
+        end
+        return 6
+    end
     if e.targetArrows and (st == "box" or st == "brackets") then return 3 end
     return 0
 end
@@ -163,27 +185,66 @@ function NP.LayoutCast(f)
     NP.BarChrome(cb.bg, cb)
     NP.BarChrome(cb.iconFrame.bg, cb.iconFrame)
     cb.spark:SetShown(d.castbar.spark ~= false)
+    -- the match pass (ZacUI's look, NP_Core): the reference's cast bar -
+    -- flush under the health bar, a square icon flush at its left, the
+    -- spell at the left, the time at the right, a dark 90% fill with no
+    -- edge but a 1 px black line where it meets the icon, a bar-tall spark
+    local match = NP.MatchOn and NP.MatchOn()
     -- where the bar, its icon and its spell name sit: the built-in spot
     -- with the side's saved anchor on top (NP.Place, NP_Health)
-    NP.Place(f, cb, "castbar", NP.SetDef(f, "castbar", "TOP", f.health, "BOTTOM", 0, -2 - NP.BoxClear()))
+    NP.Place(f, cb, "castbar", NP.SetDef(f, "castbar", "TOP", f.health, "BOTTOM", 0, (match and 0 or -2) - NP.BoxClear()))
     cb:SetSize(cfg.castWidth, cfg.castHeight)
+    if match then
+        local bgc = d.castbar.bgColor
+        cb.bg:SetColorTexture(bgc and bgc[1] or 0.1, bgc and bgc[2] or 0.1, bgc and bgc[3] or 0.1, bgc and bgc[4] or 0.9)
+        local strips = cb._zui_borderTex
+        if strips then
+            -- (AddPixelBorder's order: top, bottom, left, right)
+            for i, t in ipairs(strips) do
+                if i == 3 then t:SetColorTexture(0, 0, 0, 1) t:Show() else t:Hide() end
+            end
+        end
+        cb.spark:ClearAllPoints()
+        cb.spark:SetPoint("TOP", cb:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+        cb.spark:SetPoint("BOTTOM", cb:GetStatusBarTexture(), "BOTTOMRIGHT", 0, 0)
+    end
 
     if d.castbar.icon then
-        -- castIconSize nil = a shade taller than the bar, as always
-        local sz = tonumber(cfg.castIconSize) or (cfg.castHeight + 6)
+        -- castIconSize nil = a shade taller than the bar, as always (the
+        -- match pass: as tall as the bar, flush)
+        local sz = tonumber(cfg.castIconSize) or (match and cfg.castHeight or (cfg.castHeight + 6))
         cb.iconFrame:SetSize(sz, sz)
-        NP.Place(f, cb.iconFrame, "castIcon", NP.SetDef(f, "castIcon", "RIGHT", cb, "LEFT", -2, 0))
+        NP.Place(f, cb.iconFrame, "castIcon", match
+            and NP.SetDef(f, "castIcon", "TOPRIGHT", cb, "TOPLEFT", 0, 0)
+            or NP.SetDef(f, "castIcon", "RIGHT", cb, "LEFT", -2, 0))
         cb.iconFrame:Show()
     else
         cb.iconFrame:ClearAllPoints()
         cb.iconFrame:Hide()
     end
-    NP.Place(f, cb.spell, "castText", NP.SetDef(f, "castText", "CENTER", cb, "CENTER", 0, 0))
+    NP.Place(f, cb.spell, "castText", match
+        and NP.SetDef(f, "castText", "LEFT", cb, "LEFT", 5, 0, "LEFT")
+        or NP.SetDef(f, "castText", "CENTER", cb, "CENTER", 0, 0))
 
     NP.ApplyNPFont(cb.spell, cfg.castFont, cfg.castTextSize or 9)
     local tc = d.castbar.textColor
     if tc then cb.spell:SetTextColor(tc[1] or 1, tc[2] or 1, tc[3] or 1, tc[4] or 1) end
-    cb.spell:SetWidth(cfg.castWidth - 4)
+    -- (the match pass leaves the time its room at the right end)
+    cb.spell:SetWidth(cfg.castWidth - (match and 34 or 4))
+    if match then
+        if not cb.timer then
+            cb.timer = cb:CreateFontString(nil, "OVERLAY")
+            SetNPFont(cb.timer, 10)
+            cb.timer:SetJustifyH("RIGHT")
+        end
+        NP.Place(f, cb.timer, "castTime", NP.SetDef(f, "castTime", "RIGHT", cb, "RIGHT", -3, 0, "RIGHT"))
+        NP.ApplyNPFont(cb.timer, cfg.castFont, cfg.castTextSize or 10)
+        if tc then cb.timer:SetTextColor(tc[1] or 1, tc[2] or 1, tc[3] or 1, tc[4] or 1) end
+        cb.timer:SetShown(d.castbar.timer ~= false)
+        cb._tenths = nil
+    elseif cb.timer then
+        cb.timer:Hide()
+    end
 end
 
 -- ============================================================
@@ -219,6 +280,8 @@ local function PaintCast(cb, notInterruptible)
         NP.PaintState(cb, cb.spell, (not alert) and ((notInterruptible and "uninterruptible")
             or (cb.channeling and "channel") or "casting") or nil, 0.95, CastTextBack(cb))
     end
+    -- the interrupt-ready tint (NP_Interrupt; off = it only notes the colour)
+    if NP.KickPaint then NP.KickPaint(cb, c, notInterruptible, alert) end
 end
 
 function NP.StopCast(f)
@@ -290,6 +353,8 @@ function NP.CheckCast(f)
             end
         end
     end
+    -- (a hidden "can't be interrupted" flag is a secret boolean: never tested)
+    if ns.IsSecret(notInterruptible) then notInterruptible = false end
     NP.FillCast(f, name, texture, startMS, endMS, notInterruptible, spellID, channeling, tn, color)
 
     -- a NEW cast (not a re-read of the same one) wakes the script engine

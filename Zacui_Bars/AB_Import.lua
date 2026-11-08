@@ -241,9 +241,11 @@ end
 -- MODULE ENTRY
 -- ============================================================
 local function DisableBartender()
+    -- the reload FIRST, then the switch (WoW Forever honours a reload only when
+    -- it is asked for at the start of the click; UIF_Dialogs' ns.AskReload)
+    if ns.RequestReload then ns.RequestReload() else ReloadUI() end
     local disable = (C_AddOns and C_AddOns.DisableAddOn) or DisableAddOn
     if disable then pcall(disable, "Bartender4") end
-    ReloadUI()
 end
 
 local function OfferBartenderHandoff(count)
@@ -251,7 +253,7 @@ local function OfferBartenderHandoff(count)
         Print("Bartender4 settings imported (" .. count .. " profiles). Disable Bartender4 and /reload to use ZacUI's bars.")
         return
     end
-    UI.Confirm({
+    return UI.Confirm({
         title = "Bartender4 imported",
         text = count .. " Bartender4 profile" .. (count == 1 and "" or "s") .. " copied into ZacUI's "
             .. "action bars, with each character's choice. ZacUI's bars take over once Bartender4 "
@@ -268,12 +270,18 @@ Modules.bars = function()
         if not store.importedBT4 then
             local count, err = AB.ImportBartender()
             if count then
-                OfferBartenderHandoff(count)
+                -- in its turn among the login popups (Core_Popups)
+                if ns.Popups then
+                    ns.Popups.Want("bartender", function() return OfferBartenderHandoff(count) end, { order = 45 })
+                else
+                    OfferBartenderHandoff(count)
+                end
             elseif err then
                 Print("Bartender4 import: " .. err)
             end
         else
-            Print("Bartender4 is still enabled - ZacUI's action bars are standing down. Disable it to switch.")
+            local line = "Bartender4 is still enabled - ZacUI's action bars are standing down. Disable it to switch."
+            if ns.Popups then ns.Popups.Say(line) else Print(line) end
         end
         return
     end

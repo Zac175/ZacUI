@@ -208,6 +208,27 @@ ns.EditModeProviders[#ns.EditModeProviders + 1] = function()
                 local box = boxes[key]
                 return box and { box } or nil
             end,
+            -- its numbers, for Edit Mode's undo and Cancel
+            snapshot = function()
+                local a = S.Area(key)
+                return a and { x = a.x, y = a.y, w = a.w, h = a.h } or false
+            end,
+            restore = function(v)
+                local a = S.Area(key)
+                if not (a and type(v) == "table") then return end
+                a.x, a.y, a.w, a.h = v.x, v.y, v.w, v.h
+                S.Rebuild()
+            end,
+            -- Edit Mode's Match width / height (UIParent units: the boxes
+            -- are UIParent's own children, unscaled)
+            size = { set = function(w, h)
+                local a = S.Area(key)
+                if not a then return end
+                if w then a.w = math.max(10, Round(w)) end
+                if h then a.h = math.max(10, Round(h)) end
+                S.Rebuild()
+            end },
+            page = "sbt",
         }
     end
     return list

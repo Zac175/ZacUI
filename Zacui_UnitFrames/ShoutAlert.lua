@@ -343,7 +343,7 @@ castWatch:SetScript("OnEvent", OnUnitCast)
 
 -- which signal this client has (looked up each time: a test can switch it)
 local function useCastEvent()
-    if _G.ZACUI_IS_FOREVER == true or CombatLogGetCurrentEventInfo == nil then return true end
+    if _G.ZACUI_MODERN == true or CombatLogGetCurrentEventInfo == nil then return true end
     -- Forever's rules under ZacUI's game-version override too (Core_Flavor)
     local Z = _G.ZacUI
     return (Z and Z.NoCombatLog and Z.NoCombatLog()) and true or false

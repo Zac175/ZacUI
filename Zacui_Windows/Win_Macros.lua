@@ -907,7 +907,7 @@ local function BuildIconRow(row)
         t._zui_own = true
         t:SetPoint("TOPLEFT", 1, -1)
         t:SetPoint("BOTTOMRIGHT", -1, 1)
-        t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(t)
         SharpenIcon(t)
         b.tex = t
         b._zPaint = PaintCell

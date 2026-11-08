@@ -15,6 +15,12 @@
 local ADDON_NAME = ...
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's own
+-- consumables are not in these tables yet): the whole part stands down
+-- here, before it publishes ns.ConsData. Every later file of the part
+-- needs ns.ConsData and returns at once without it, so no frame, event,
+-- ticker or menu row is ever made there.
+if ns.PartOff and ns.PartOff("Zacui_Consumables") then return end
 
 local D = {}
 ns.ConsData = D

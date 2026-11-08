@@ -125,7 +125,8 @@ local function DrawSections(host, v, x, y, width)
         local style = Changelog.STYLES[sec.type] or { label = tostring(sec.type), key = "gray" }
         local head = UI.Font(host, F.LABEL, { text = style.label, cat = "text", key = style.key })
         head:SetPoint("TOPLEFT", host, "TOPLEFT", x, y)
-        y = y - 16
+        -- (as tall as its type: the settings window's is larger)
+        y = y - math.max(16, math.ceil(head:GetStringHeight() or 12) + 3)
         for _, item in ipairs(sec.items or {}) do
             local dash = UI.Font(host, F.LABEL, { text = "-", cat = "text", key = "gray" })
             dash:SetPoint("TOPLEFT", host, "TOPLEFT", x + 4, y)
@@ -295,6 +296,15 @@ function Changelog.CheckOnLogin()
     end
     if cmp == 0 or db.popup == false then return false end
     if #Changelog.Unseen() == 0 then return false end
+    -- its turn in the login popup queue (Core_Popups: after the welcome,
+    -- never in combat, never on top of another popup)
+    if ns.Popups then
+        ns.Popups.Want("changelog", function()
+            Changelog.Show()
+            return popup
+        end, { delay = 3 })
+        return true
+    end
     C_Timer.After(3, ShowWhenCalm)
     return true
 end

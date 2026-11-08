@@ -87,6 +87,8 @@ local SECTIONS = {
       desc = "The embedded aura engine's switches (not the auras themselves, which live in ZacUI_Auras)." },
     { key = "buffRem",    label = "Buff reminders",    keys = { "buffRem" },
       desc = "The group buff reminders and tracker: which buffs, when they show, their look and texts." },
+    { key = "look",       label = "Look",              keys = { "look", "iconZoom" },
+      desc = "Which art the world wears - ZacUI's flat look or the game's Classic one - overall and per part. Applied at the next reload." },
 }
 local SECTION_BY_KEY = {}
 for _, sec in ipairs(SECTIONS) do SECTION_BY_KEY[sec.key] = sec end
@@ -388,6 +390,12 @@ end
 
 local function CharKey()
     local name, realm = UnitName("player"), GetRealmName()
+    -- (WoW Forever, no realms: name + ruleset, the old key moved over -
+    -- Core_Names; everywhere else the same string as always)
+    if ns.CharKey then
+        ZacUIDB.charProfiles = ZacUIDB.charProfiles or {}
+        return ns.CharKey(" - ", name or "?", realm or "?", ZacUIDB.charProfiles)
+    end
     return (name or "?") .. " - " .. (realm or "?")
 end
 

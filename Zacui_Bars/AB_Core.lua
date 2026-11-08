@@ -42,6 +42,14 @@ AB.BUTTON      = 36          -- action button edge, Bartender's stock size
 AB.PET_BUTTON  = 30
 AB.PLAYER_CLASS = select(2, UnitClass("player"))
 
+-- the ZacUI look on the bars (the match pass's numbers; see THE MATCH
+-- PASS by the text helpers)
+local function HDOn()
+    local L = ns.Look
+    return (L and L.Is and L.Is("bars", "zacui")) and true or false
+end
+AB.HDOn = HDOn
+
 -- ============================================================
 -- DEFAULTS
 -- ============================================================
@@ -206,6 +214,12 @@ end
 
 function AB.CharKey()
     local name, realm = UnitName("player"), GetRealmName()
+    -- (WoW Forever, no realms: name + ruleset, the old key moved over -
+    -- Core_Names; everywhere else the same string as always)
+    if ns.CharKey then
+        local d = ZacUIDB.bars
+        return ns.CharKey(" - ", name or "?", realm or "?", type(d) == "table" and d.charProfile or nil)
+    end
     return (name or "?") .. " - " .. (realm or "?")
 end
 
@@ -434,6 +448,9 @@ function AB.LayoutButtons(header, buttons, cfg, size, count)
         end
         if i <= count then
             btn:SetSize(size, size)
+            -- a game look's kit follows the button's size (the kits below;
+            -- before them the Classic ring alone, Core_Look's FitClassicRing)
+            if AB.KitOf and AB.KitOf(btn) then AB.PaintKit(btn, size, size) end
             btn:Show()
         else
             btn:Hide()
@@ -473,13 +490,42 @@ function AB.VisibilityDriver(cfg)
     return table.concat(parts, ";")
 end
 
+-- VEHICLES, OVERRIDE AND POSSESS BARS (2026-11-07). Bar 1's keys are
+-- taken onto ZacUI's buttons, so in a vehicle they fired the normal page
+-- while Blizzard's vehicle bar held the abilities. On a client that has
+-- these bars (the modern client: Retail, Forever - each index asked of the
+-- client, never assumed) bar 1 pages to them first, in Blizzard's own
+-- order, and to the skyriding page after the stances. Classic Era and TBC
+-- have none: nothing is added there.
+local function BarIndex(name)
+    local f = _G[name] or (C_ActionBar and C_ActionBar[name])
+    if type(f) ~= "function" then return nil end
+    local ok, v = pcall(f)
+    if ok and type(v) == "number" and v > 0 then return v end
+    return nil
+end
+function AB.VehicleStates()
+    if not (ns.ModernClient and ns.ModernClient()) then return nil, nil end
+    local o, v, t = BarIndex("GetOverrideBarIndex"), BarIndex("GetVehicleBarIndex"), BarIndex("GetTempShapeshiftBarIndex")
+    local first = {}
+    if o then first[#first + 1] = "[overridebar]" .. o end
+    if v then first[#first + 1] = "[vehicleui][possessbar]" .. v end
+    if t then first[#first + 1] = "[shapeshift]" .. t end
+    if #first == 0 then return nil, nil end
+    return table.concat(first, ";"), "[bonusbar:5]11"
+end
+
 -- The page a bar shows, as a state: 0 = its own slots, N = Blizzard page
 -- N (slots (N-1)*12+1 ..). Built left to right in priority order.
-function AB.PageDriver(cfg)
+-- n: the bar's number (bar 1 takes the vehicle pages); left out, none.
+function AB.PageDriver(cfg, n)
     local p = cfg.paging or {}
     if not p.enabled then return "0" end
     if p.customEnabled and p.custom and p.custom ~= "" then return p.custom end
     local parts = {}
+    local vFirst, vLast
+    if n == 1 then vFirst, vLast = AB.VehicleStates() end
+    if vFirst then parts[#parts + 1] = vFirst end
     if (p.ctrl or 0) > 0  then parts[#parts + 1] = "[mod:ctrl]" .. p.ctrl end
     if (p.alt or 0) > 0   then parts[#parts + 1] = "[mod:alt]" .. p.alt end
     if (p.shift or 0) > 0 then parts[#parts + 1] = "[mod:shift]" .. p.shift end
@@ -495,6 +541,7 @@ function AB.PageDriver(cfg)
             if (page or 0) > 0 then parts[#parts + 1] = "[bonusbar:" .. idx .. "]" .. page end
         end
     end
+    if vLast then parts[#parts + 1] = vLast end
     parts[#parts + 1] = tostring(p.default or 0)
     return table.concat(parts, ";")
 end
@@ -531,6 +578,15 @@ local hider
 function AB.HideBlizzard()
     if AB._blizzHidden then return end
     AB._blizzHidden = true
+    -- a fresh install starts each bar where Blizzard's is (ZacUI's
+    -- Core_FreshLayout; nothing on an existing install), read before they go
+    -- (a fresh install under a game look first takes that look's stock bar
+    -- settings, so the spots below are worked out for them)
+    if AB.KitFreshDefaults then pcall(AB.KitFreshDefaults) end
+    if ns.FreshLayout and ns.FreshLayout.Bars then pcall(ns.FreshLayout.Bars, AB) end
+    -- ...and where the client's bag buttons and micro menu sit (AB_Extras;
+    -- read only, used only by a bar that was never placed)
+    if AB.CaptureStockSpots then pcall(AB.CaptureStockSpots) end
     hider = hider or CreateFrame("Frame", "ZacUIBarsHider", UIParent)
     hider:Hide()
     local function Frame(f, clearEvents)
@@ -577,7 +633,15 @@ function AB.HideBlizzard()
     Frame(_G.StatusTrackingBarManager, false)
     Frame(_G.BagsBar, true)
     Frame(_G.MicroMenu, true)
-    if _G.MainMenuBarVehicleLeaveButton then Frame(_G.MainMenuBarVehicleLeaveButton, true) end
+    -- the vehicle / taxi leave button: on the modern client (vehicles,
+    -- Retail's flight paths) it stays the client's, lifted off the hidden
+    -- main bar so it can still show; elsewhere put away as before
+    local leave = _G.MainMenuBarVehicleLeaveButton
+    if leave and ns.ModernClient and ns.ModernClient() then
+        if leave.SetParent then leave:SetParent(UIParent) end
+    elseif leave then
+        Frame(leave, true)
+    end
 end
 function AB.Hider() return hider end
 
@@ -618,17 +682,48 @@ end
 
 -- A bar's two fade animations, and the wait before the fade-out (only
 -- for a real fade - "none" stays the instant snap it always was).
+-- Under the ZacUI look the shipped pair ("none", 0.2 s / 0.4 s, a 0.2 s
+-- wait) is the reference's mouseover fade: 0.15 s each way, no wait
+-- (match pass); anything picked on the Animation tab is the player's.
+AB.HD_FADE = { style = "fade", duration = 0.15, delay = 0, easing = "easeOutQuad" }
+local function ShippedFade(s, dur)
+    return type(s) == "table" and s.style == "none" and s.duration == dur and (s.delay or 0) == 0
+end
 function AB.FadeSpecs(cfg)
     local inS = type(cfg.fadeIn) == "table" and cfg.fadeIn or AB.FADE_IN
     local outS = type(cfg.fadeOut) == "table" and cfg.fadeOut or AB.FADE_OUT
+    local delay = tonumber(cfg.fadeDelay) or 0
+    if HDOn() then
+        local shippedIn, shippedOut = ShippedFade(inS, AB.FADE_IN.duration), ShippedFade(outS, AB.FADE_OUT.duration)
+        if shippedIn then inS = AB.HD_FADE end
+        if shippedOut then
+            outS = AB.HD_FADE
+            if cfg.fadeDelay == nil or cfg.fadeDelay == 0.2 then delay = 0 end
+        end
+    end
     local wait = 0
-    if outS.style and outS.style ~= "none" then wait = math.max(0, tonumber(cfg.fadeDelay) or 0) end
+    if outS.style and outS.style ~= "none" then wait = math.max(0, delay) end
     return inS, outS, wait
 end
 
+-- SHOW ON MOUSEOVER (2026-11-07): "On mouseover" picked under When it
+-- shows (cfg.showRule.show) is a fade to nothing until the mouse is over
+-- the bar - the same poll, at 0 unless the bar's own fade is on (then its
+-- fade opacity). Secure show / hide cannot see the mouse; alpha can.
+function AB.HoverOnly(cfg)
+    local r = cfg and cfg.showRule
+    return type(r) == "table" and r.show == "mouseover" or false
+end
+local function FadeOn(cfg) return cfg.fade or AB.HoverOnly(cfg) end
+local function OutAlpha(cfg)
+    if cfg.fade then return cfg.fadeAlpha or 0.1 end
+    return 0
+end
+AB.FadeOutAlpha = OutAlpha
+
 local fadeBars, fadeTicker = {}, nil
 function AB.RegisterFade(header, cfg)
-    if cfg.fade then fadeBars[header] = cfg else fadeBars[header] = nil end
+    if FadeOn(cfg) then fadeBars[header] = cfg else fadeBars[header] = nil end
     local any = next(fadeBars) ~= nil
     if any and not fadeTicker then
         fadeTicker = C_Timer.NewTicker(0.15, function() AB.PollFade() end)
@@ -645,7 +740,7 @@ function AB.RegisterFade(header, cfg)
     header._zFadeSerial = (header._zFadeSerial or 0) + 1
     header._zFadeWait = nil
     if ns.StopAnim then ns.StopAnim(header) end
-    if not cfg.fade then header:SetAlpha(cfg.alpha or 1) else AB.PollFade() end
+    if not FadeOn(cfg) then header:SetAlpha(cfg.alpha or 1) else AB.PollFade() end
 end
 
 local function Hovered(header)
@@ -664,10 +759,11 @@ local function Hovered(header)
 end
 
 function AB.PollFade()
-    local edit = ns.IsEditMode and ns.IsEditMode()
+    -- ZacUI's keybind mode shows every bar too, so each button can be bound
+    local edit = (ns.IsEditMode and ns.IsEditMode()) or AB.keyMode
     for header, cfg in pairs(fadeBars) do
         local want = (edit or Hovered(header)) and "in" or "out"
-        local target = (want == "in") and (cfg.alpha or 1) or (cfg.fadeAlpha or 0.1)
+        local target = (want == "in") and (cfg.alpha or 1) or OutAlpha(cfg)
         if header._zFadeState ~= want then
             local first = header._zFadeState == nil
             header._zFadeState = want
@@ -728,20 +824,43 @@ local KEY_SHORT = {
     { "NUMPADDIVIDE", "N/" }, { "NUMPADMULTIPLY", "N*" }, { "NUMPADMINUS", "N-" },
     { "NUMPADPLUS", "N+" }, { "NUMPADDECIMAL", "N." }, { "NUMPADEQUALS", "N=" },
     { "NUMPAD", "N" }, { "NUMLOCK", "NL" }, { "PAGEUP", "PU" }, { "PAGEDOWN", "PD" },
-    { "SPACE", "Sp" }, { "INSERT", "Ins" }, { "DELETE", "Del" }, { "HOME", "Hm" },
-    { "END", "En" }, { "BACKSPACE", "BS" }, { "CAPSLOCK", "Cp" }, { "ESCAPE", "Esc" },
+    -- (BACKSPACE before SPACE: the other way round it came out "BACKSp")
+    { "BACKSPACE", "BS" }, { "SPACE", "Sp" }, { "INSERT", "Ins" }, { "DELETE", "Del" }, { "HOME", "Hm" },
+    { "END", "En" }, { "CAPSLOCK", "Cp" }, { "ESCAPE", "Esc" },
     { "ENTER", "Ent" }, { "TAB", "Tb" }, { "SCROLLLOCK", "SL" }, { "PRINTSCREEN", "PS" },
     { "DOWN", "Dn" }, { "LEFT", "Lf" }, { "RIGHT", "Rt" }, { "UP", "Up" },
 }
 -- ShortKey runs per button on every hotkey refresh, so the answer for a
 -- binding string is remembered; the ~30 gsubs happen once per distinct key
 local MODS = { { "CTRL%-", "C" }, { "SHIFT%-", "S" }, { "ALT%-", "A" }, { "META%-", "M" } }
-local shortKeys = {}
-function AB.ShortKey(key)
+-- THE KEY TEXT STYLE (core.keyStyle, Advanced > Keys; nothing saved =
+-- "short", what the corner has always said): short S-1 / C-N7 / A-M4,
+-- compact the same without the hyphen (S1, CN7, AM4), full the game's own
+-- name for the key (Shift-1). Remembered per style.
+AB.KEY_STYLES = {
+    { id = "short", label = "Short (S-1, C-N7, A-M4)" },
+    { id = "compact", label = "Compact (S1, CN7, AM4)" },
+    { id = "full", label = "The game's name (Shift-1)" },
+}
+local shortKeys = { short = {}, compact = {}, full = {} }
+function AB.ShortKey(key, style)
     if not key or key == "" then return "" end
-    local hit = shortKeys[key]
+    if not style then
+        local c = AB._core or (AB.active and AB.CoreCfg()) or nil
+        style = c and c.keyStyle
+    end
+    if not shortKeys[style or ""] then style = "short" end
+    local cache = shortKeys[style]
+    local hit = cache[key]
     if hit then return hit end
     local raw = key
+    if style == "full" then
+        local ok, t = false, nil
+        if GetBindingText then ok, t = pcall(GetBindingText, key) end
+        local out = (ok and type(t) == "string" and t ~= "") and t or key
+        cache[raw] = out
+        return out
+    end
     key = key:upper():gsub(" ", "")
     local mods = ""
     local changed = true
@@ -756,8 +875,9 @@ function AB.ShortKey(key)
         end
     end
     for _, pair in ipairs(KEY_SHORT) do key = key:gsub(pair[1], pair[2]) end
-    local out = (mods ~= "") and (mods .. "-" .. key) or key
-    shortKeys[raw] = out
+    local sep = (style == "compact") and "" or "-"
+    local out = (mods ~= "") and (mods .. sep .. key) or key
+    cache[raw] = out
     return out
 end
 
@@ -783,16 +903,78 @@ end
 
 local WHITE = { 1, 1, 1, 1 }
 
+-- ------------------------------------------------------------
+-- THE MATCH PASS (2026-11-07, zui_tests/MATCH_BARS_1107.md; ZacUI look
+-- only). The bar settings are SAVED as they are read (Fill), so a profile
+-- holds the numbers ZacUI shipped as values. Under the ZacUI look a value
+-- still at the shipped number draws the reference UI's number instead
+-- (key text 12 white at -1,-3; count 12 at -1,4; macro 12 at 0,4; the
+-- countdown in ZacUI's font at 12; a warm edge glow for hover / press, a
+-- white one while active; the equipped ring in the item's quality colour;
+-- a 0.15 grey backing in an empty slot; a 0.15 s fade). Nothing is
+-- written: the Classic, Blizzard and Forever looks draw exactly what they
+-- drew, and anything set by hand is the player's. A font picked on the
+-- Text tab is marked (el.own) and never mapped again, so the old number
+-- can be picked back.
+-- ------------------------------------------------------------
+-- key -> the shipped size / spot, and what they draw under the ZacUI look
+AB.HD_TEXT = {
+    hotkey = { size = 13, to = 12, anchor = "TOPRIGHT", x = -2, y = -4, tx = -1, ty = -3 },
+    count  = { size = 16, to = 12, anchor = "BOTTOMRIGHT", x = -2, y = 4, tx = -1, ty = 4 },
+    macro  = { size = 10, to = 12, anchor = "BOTTOM", x = 0, y = 2, tx = 0, ty = 4 },
+}
+local function HDText(el, key)
+    local m = key and AB.HD_TEXT[key]
+    if not (m and el and HDOn()) then return nil end
+    return m
+end
+-- the size a text draws at
+function AB.TextSize(el, key)
+    local s = el and el.size
+    local m = HDText(el, key)
+    if m and not el.own and s == m.size then return m.to end
+    return s
+end
+-- the spot (built-in corner offsets) a text draws at
+function AB.TextSpot(el, key)
+    local x, y = (el and el.x) or 0, (el and el.y) or 0
+    local m = HDText(el, key)
+    if m and (el.anchor or "CENTER") == m.anchor and x == m.x and y == m.y then return m.tx, m.ty end
+    return x, y
+end
+-- the colour a text draws in: the key text's shipped grey (0.9) is white
+local function ShippedGrey(c)
+    if type(c) ~= "table" then return false end
+    local r, g, b = c[1] or c.r, c[2] or c.g, c[3] or c.b
+    local a = c[4] or c.a or 1
+    return r == 0.9 and g == 0.9 and b == 0.9 and a == 1
+end
+function AB.TextColour(el, key)
+    local c = el and el.color
+    if key == "hotkey" and ShippedGrey(c) and HDText(el, key) then return 1, 1, 1, 1 end
+    return ns.ColorOf(c, WHITE)
+end
+-- the same for a picker: the colour table that draws
+function AB.TextColourShown(el, key)
+    local c = el and el.color
+    if key == "hotkey" and ShippedGrey(c) and HDText(el, key) then return { 1, 1, 1, 1 } end
+    return c
+end
+
 -- A text element ({ font, size, flags, color, anchor, x, y, justify,
 -- shadow, shadowX, shadowY }) as the standard font spec, and back. The
 -- saved keys stay what they always were; only the pickers see specs.
-function AB.FontSpecOf(el)
+-- key: which text it is (hotkey / count / macro), for the ZacUI look's
+-- numbers (left out: the saved size as it is).
+function AB.FontSpecOf(el, key)
     el = el or {}
-    return { face = el.font, size = el.size, outline = el.flags,
+    return { face = el.font, size = AB.TextSize(el, key), outline = el.flags,
              shadow = el.shadow, shadowX = el.shadowX, shadowY = el.shadowY }
 end
 function AB.PutFontSpec(el, spec)
     spec = spec or {}
+    -- picked by hand: the player's from here (never mapped by the look)
+    el.own = true
     el.font = spec.face
     el.size = spec.size
     el.flags = ns.FontOutlineFlags and ns.FontOutlineFlags(spec.outline) or "OUTLINE"
@@ -832,10 +1014,11 @@ local function Resolver(btn)
     return btn.zAnchorTo
 end
 -- a text's built-in spot from its element settings (for the page too)
-function AB.TextAnchorDefaults(el, into)
+function AB.TextAnchorDefaults(el, into, key)
     local t = into or {}
     local a = (el and el.anchor) or "CENTER"
-    t.point, t.relPoint, t.x, t.y = a, a, (el and el.x) or 0, (el and el.y) or 0
+    t.point, t.relPoint = a, a
+    t.x, t.y = AB.TextSpot(el, key)
     t.justify = (el and el.justify) or "CENTER"
     return t
 end
@@ -844,24 +1027,63 @@ local function AnchorSpec(cfg, key)
     return type(a) == "table" and a[key] or nil
 end
 
+-- THE HD RULE for icon text (HD_POLISH_STANDARD_1107, ZacUI look only):
+-- key, count and macro text is a crisp outline with no drop shadow under
+-- it - outline plus the template's shadow drew a soft double edge. Only
+-- the default: a shadow picked on the Text tab stays. The Classic,
+-- Blizzard and Forever looks keep the template's shadow as before.
+function AB.TextShadowDefault(sh)
+    local has = sh and (sh[1] ~= 0 or sh[2] ~= 0) or false
+    if has and ns.Look and ns.Look.Is and ns.Look.Is("bars", "zacui") then has = false end
+    return has
+end
+
 -- key / cfg: which text it is and the bar it is on (its saved anchor);
 -- left out, the old corner alone.
+-- A GAME LOOK'S TEXT (2026-11-08, Zac: under a game look everything is
+-- that look's own by default): a text still exactly as ZacUI shipped it
+-- (size, outline, colour, spot, no font picked, no anchor saved) is left
+-- as the client's template draws it - the stock key, count and macro
+-- fonts, colours and spots (all three outlined). Anything set by hand is
+-- the player's and draws as set.
+local SHIPPED_TEXT = DefaultFonts()
+function AB.TextIsShipped(el, key, cfg)
+    local d = key and SHIPPED_TEXT[key]
+    if not (d and type(el) == "table") or el.own then return false end
+    if el.font ~= nil or el.shadow ~= nil or el.shadowX ~= nil or el.shadowY ~= nil then return false end
+    if el.size ~= d.size or (el.flags or "OUTLINE") ~= d.flags then return false end
+    if (el.anchor or d.anchor) ~= d.anchor or (el.x or d.x) ~= d.x or (el.y or d.y) ~= d.y then return false end
+    if (el.justify or d.justify) ~= d.justify then return false end
+    local c, dc = el.color, d.color
+    if type(c) == "table" then
+        if (c[1] or c.r) ~= dc[1] or (c[2] or c.g) ~= dc[2] or (c[3] or c.b) ~= dc[3] or (c[4] or c.a or 1) ~= 1 then return false end
+    end
+    if AnchorSpec(cfg, key) ~= nil then return false end
+    return true
+end
+
 function AB.ApplyText(btn, fs, el, hidden, key, cfg)
     if not (fs and el) then return end
+    if AB.KitOf and AB.KitOf(btn) and AB.TextIsShipped(el, key, cfg) then
+        -- the game look's own text: the template's, untouched
+        fs:SetAlpha(hidden and 0 or 1)
+        return
+    end
     local sh = StockShadow(fs)
-    local has = (sh[1] ~= 0 or sh[2] ~= 0)
+    local has = AB.TextShadowDefault(sh)
     if ns.ApplyFontSpec then
-        ns.ApplyFontSpec(fs, AB.FontSpecOf(el), { size = 12, outline = "outline", shadow = has,
+        ns.ApplyFontSpec(fs, AB.FontSpecOf(el, key), { size = 12, outline = "outline", shadow = has,
             shadowX = has and sh[1] or 1, shadowY = has and sh[2] or -1 })
     else
         local path = (el.font and ns.ResolveFontPath and ns.ResolveFontPath(el.font)) or STANDARD_TEXT_FONT
-        local ok, set = pcall(fs.SetFont, fs, path, el.size or 12, el.flags or "OUTLINE")
-        if not (ok and set) then pcall(fs.SetFont, fs, STANDARD_TEXT_FONT, el.size or 12, el.flags or "OUTLINE") end
+        local size = AB.TextSize(el, key) or 12
+        local ok, set = pcall(fs.SetFont, fs, path, size, el.flags or "OUTLINE")
+        if not (ok and set) then pcall(fs.SetFont, fs, STANDARD_TEXT_FONT, size, el.flags or "OUTLINE") end
     end
     local r, g, b, a = 1, 1, 1, 1
-    if ns.ColorOf then r, g, b, a = ns.ColorOf(el.color, WHITE) end
+    if ns.ColorOf then r, g, b, a = AB.TextColour(el, key) end
     fs:SetTextColor(r, g, b, a)
-    local def = AB.TextAnchorDefaults(el, fs.zAnchorDef)
+    local def = AB.TextAnchorDefaults(el, fs.zAnchorDef, key)
     def.to = btn
     fs.zAnchorDef = def
     ns.ApplyAnchor(fs, AnchorSpec(cfg, key), def, Resolver(btn))
@@ -891,7 +1113,7 @@ function AB.TintButtonBorder(btn, equipped)
     if equipped == nil then equipped = btn.zEquipped end
     btn.zEquipped = equipped and true or nil
     local ch = cfg.chrome
-    local c = (equipped and cfg.equippedColor) or (type(ch) == "table" and ch.borderColor) or cfg.borderColor
+    local c = (equipped and AB.EquippedColour(btn, cfg)) or (type(ch) == "table" and ch.borderColor) or cfg.borderColor
     if c and ns.ColorOf and ns.TintBorder then
         ns.TintBorder(btn, ns.ColorOf(c))
     elseif ns.TintBorder then
@@ -911,9 +1133,99 @@ local function AccentWash()
     return { r = a.r, g = a.g, b = a.b, a = 0.35 }
 end
 
+-- THE ZacUI LOOK'S HIGHLIGHTS (match pass): ZacUI's own edge glow
+-- (Zacui/Media/Textures/btnglow, drawn by zui_tests/hd/match/
+-- make_btn_glow.py), tinted, added over the icon: warm (0.973, 0.839,
+-- 0.604) for hover and press, white while active. A shipped wash colour
+-- (white 12 % / 18 %, no active colour) means these; a colour picked by
+-- hand tints the glow instead.
+AB.GLOW_TEX = "Interface\\AddOns\\Zacui\\Media\\Textures\\btnglow"
+AB.HD_WARM = { r = 0.973, g = 0.839, b = 0.604, a = 1 }
+AB.HD_ACTIVE = { r = 1, g = 1, b = 1, a = 1 }
+local SHIPPED_WASH = { hoverColor = 0.12, pushedColor = 0.18 }
+local function ShippedWash(key, c)
+    local a = SHIPPED_WASH[key]
+    if not a then return c == nil end
+    if type(c) ~= "table" then return c == nil end
+    local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+    local ca = c.a or c[4] or 1
+    return r == 1 and g == 1 and b == 1 and math.abs(ca - a) < 0.001
+end
+-- the colour a highlight draws in (also what the Look tab's swatch shows)
+function AB.HighlightColour(cfg, key)
+    local c = cfg and cfg[key]
+    if HDOn() and ShippedWash(key, c) then
+        return (key == "checkedColor") and AB.HD_ACTIVE or AB.HD_WARM
+    end
+    return c
+end
+local function Glow(tex, c)
+    if not tex then return end
+    local r, g, b, a = ns.ColorOf(c, AB.HD_WARM)
+    tex:SetTexture(AB.GLOW_TEX)
+    if tex.SetTexCoord then tex:SetTexCoord(0, 1, 0, 1) end
+    tex:SetVertexColor(r, g, b, a)
+    if tex.SetBlendMode then tex:SetBlendMode("ADD") end
+end
+
+-- The equipped-item ring: the shipped colour under the ZacUI look is the
+-- item's quality colour (btn.zEquipQ, read when the slot changes), a
+-- colour picked by hand is the player's.
+local SHIPPED_EQUIP = { 0.35, 0.65, 1.0, 1 }
+function AB.EquippedColour(btn, cfg)
+    local c = cfg and cfg.equippedColor
+    if not c then return nil end
+    if HDOn() and btn and btn.zEquipQ and type(c) == "table" then
+        local r, g, b, a = c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1
+        if r == SHIPPED_EQUIP[1] and g == SHIPPED_EQUIP[2] and b == SHIPPED_EQUIP[3] and a == 1 then
+            return btn.zEquipQ
+        end
+    end
+    return c
+end
+-- the quality colour of the item an action slot holds (nil when unknown)
+local qualityCols = {}
+function AB.ItemQualityColour(action)
+    if not (action and GetActionInfo) then return nil end
+    local ok, kind, id = pcall(GetActionInfo, action)
+    if not ok or kind ~= "item" or type(id) ~= "number" then return nil end
+    local q
+    if C_Item and C_Item.GetItemQualityByID then
+        local ok2, v = pcall(C_Item.GetItemQualityByID, id)
+        if ok2 and type(v) == "number" then q = v end
+    end
+    if not q and GetItemInfo then
+        local ok3, _, _, v = pcall(GetItemInfo, id)
+        if ok3 and type(v) == "number" then q = v end
+    end
+    if not q then return nil end
+    local t = qualityCols[q]
+    if t then return t end
+    local r, g, b
+    if C_Item and C_Item.GetItemQualityColor then
+        local ok4, rr, gg, bb = pcall(C_Item.GetItemQualityColor, q)
+        if ok4 and type(rr) == "number" then r, g, b = rr, gg, bb end
+    end
+    if not r and GetItemQualityColor then
+        local ok5, rr, gg, bb = pcall(GetItemQualityColor, q)
+        if ok5 and type(rr) == "number" then r, g, b = rr, gg, bb end
+    end
+    if not r then return nil end
+    t = { r = r, g = g, b = b, a = 1 }
+    qualityCols[q] = t
+    return t
+end
+
+-- what an unset countdown font means: under the ZacUI look ZacUI's font
+-- at 12 with a crisp outline (the reference's numbers), else 16 (the
+-- picker's old default; with nothing picked the client's own font draws)
+function AB.CooldownFontDefaults()
+    return { size = HDOn() and 12 or 16, outline = "outline", shadow = false }
+end
+
 -- The countdown numbers on a cooldown: shown, hidden or the game's
 -- option, in the bar's font and colour (nil = the client's own, put back
--- exactly as it was found).
+-- exactly as it was found; the ZacUI look's own numbers - match pass).
 function AB.StyleCooldown(btn, cfg)
     local cd = AB.Region(btn, "cooldown", "Cooldown")
     if not cd then return end
@@ -955,13 +1267,23 @@ function AB.StyleCooldown(btn, cfg)
     end
     local st = fs.zStock
     local spec = cfg.fonts and cfg.fonts.cooldown
+    local hd = HDOn() and not (btn._zLook == "classic")
     if type(spec) == "table" and ns.ApplyFontSpec then
-        ns.ApplyFontSpec(fs, spec, { size = 16, outline = "outline", shadow = false })
+        ns.ApplyFontSpec(fs, spec, AB.CooldownFontDefaults())
+    elseif hd and ns.ApplyFontSpec then
+        -- the ZacUI look's countdown: ZacUI's font, 12, a crisp outline
+        ns.ApplyFontSpec(fs, nil, AB.CooldownFontDefaults())
     elseif st.path then
-        pcall(fs.SetFont, fs, st.path, st.size or 16, st.flags or "")
+        -- the client's own face and size; under a game look's kit always
+        -- with an outline (the numbers stay legible on the game's art)
+        local fl = st.flags or ""
+        if AB.KitOf and AB.KitOf(btn) and not tostring(fl):upper():find("OUTLINE") then fl = "OUTLINE" end
+        pcall(fs.SetFont, fs, st.path, st.size or 16, fl)
     end
     if cfg.cdColor then
         fs:SetTextColor(ns.ColorOf(cfg.cdColor))
+    elseif hd then
+        fs:SetTextColor(1, 1, 1, 1)
     else
         fs:SetTextColor(st.r, st.g, st.b, st.a)
     end
@@ -995,8 +1317,34 @@ function AB.StyleButton(btn, cfg)
     cfg = cfg or {}
     btn.zLook = cfg
     local icon = AB.Region(btn, "icon", "Icon")
-    local z = math.max(0, math.min(30, tonumber(cfg.iconZoom) or 8)) / 100
-    if icon and icon.SetTexCoord then icon:SetTexCoord(z, 1 - z, z, 1 - z) end
+    -- THE CLASSIC LOOK (Core_Look; SkinSecureIcon marked the button): the
+    -- shipped zoom (8) means the look's crop (none), a zoom set by hand is
+    -- the player's; the ring follows the button's size; the washes stay
+    -- Blizzard's own unless a colour was picked for one. No strips exist,
+    -- so the border walk below finds nothing.
+    -- (the shipped zoom, 8, follows the look's icon crop through the one
+    -- helper: ZacUI's cuts the bevel off, Classic's keeps it, the General
+    -- page's Icon zoom tunes it)
+    local classic = btn._zLook == "classic"
+    -- a game look's kit (THE GAME LOOKS' KITS, below): the button wears the
+    -- game's own art; the ZacUI look's border, glow and washes stand back
+    -- unless a colour was picked by hand
+    local kit = AB.KitOf and AB.KitOf(btn)
+    local zoom = tonumber(cfg.iconZoom) or 8
+    if icon and icon.SetTexCoord then
+        if zoom == 8 and ns.Look and ns.Look.CropIcon then
+            ns.Look.CropIcon(icon, nil, nil, { part = "bars", border = false })
+        else
+            if ns.Look and ns.Look.ForgetIcon then ns.Look.ForgetIcon(icon) end
+            local z = math.max(0, math.min(30, zoom)) / 100
+            icon:SetTexCoord(z, 1 - z, z, 1 - z)
+        end
+    end
+    if kit then
+        AB.PaintKit(btn)
+    elseif classic and ns.FitClassicRing then
+        ns.FitClassicRing(btn)
+    end
 
     -- the button's edge on the standard's chrome shape (cfg.chrome, Look
     -- tab): its border size / colour and backing colour stand in for the
@@ -1006,8 +1354,14 @@ function AB.StyleButton(btn, cfg)
     local size = math.max(0, math.floor(tonumber(ch and ch.borderSize) or tonumber(cfg.borderSize) or 1))
     for i, t in ipairs(btn._zui_borderTex or {}) do
         local side = (i - 1) % 4          -- AddPixelBorder: top, bottom, left, right
-        if side < 2 then t:SetHeight(math.max(1, size)) else t:SetWidth(math.max(1, size)) end
-        if size > 0 then t:Show() else t:Hide() end
+        -- through the pixel helper: N PHYSICAL pixels under the ZacUI look
+        -- (SetHeight / SetWidth in UI units undid ns.Pixel.Edge and gave
+        -- 1 px / 2 px edges); exactly the old SetHeight / SetWidth elsewhere
+        local px = math.max(1, size)
+        if not (ns.Pixel and ns.Pixel.SetEdgeSize and ns.Pixel.SetEdgeSize(t, px)) then
+            if side < 2 then t:SetHeight(px) else t:SetWidth(px) end
+        end
+        if size > 0 and not kit then t:Show() else t:Hide() end
     end
     AB.TintButtonBorder(btn)
 
@@ -1034,9 +1388,34 @@ function AB.StyleButton(btn, cfg)
         ns.ApplyChrome(btn, sg, nil)
     end
 
-    Wash(btn.GetHighlightTexture and btn:GetHighlightTexture(), cfg.hoverColor, { 1, 1, 1, 0.12 }, true)
-    Wash(btn.GetPushedTexture and btn:GetPushedTexture(), cfg.pushedColor, { 1, 1, 1, 0.18 }, true)
-    Wash(btn.GetCheckedTexture and btn:GetCheckedTexture(), cfg.checkedColor, AccentWash(), false)
+    if kit then
+        -- the kit's own hover / press / active art; a colour picked by hand
+        -- (not the shipped wash) is the player's and washes over it
+        if not ShippedWash("hoverColor", cfg.hoverColor) then
+            Wash(btn.GetHighlightTexture and btn:GetHighlightTexture(), cfg.hoverColor, { 1, 1, 1, 0.12 }, true)
+        end
+        if not ShippedWash("pushedColor", cfg.pushedColor) then
+            Wash(btn.GetPushedTexture and btn:GetPushedTexture(), cfg.pushedColor, { 1, 1, 1, 0.18 }, true)
+        end
+        if cfg.checkedColor then
+            Wash(btn.GetCheckedTexture and btn:GetCheckedTexture(), cfg.checkedColor, AccentWash(), false)
+        end
+    elseif not classic and HDOn() then
+        -- the ZacUI look: the edge glow (see THE ZacUI LOOK'S HIGHLIGHTS)
+        Glow(btn.GetHighlightTexture and btn:GetHighlightTexture(), AB.HighlightColour(cfg, "hoverColor"))
+        Glow(btn.GetPushedTexture and btn:GetPushedTexture(), AB.HighlightColour(cfg, "pushedColor"))
+        Glow(btn.GetCheckedTexture and btn:GetCheckedTexture(), AB.HighlightColour(cfg, "checkedColor"))
+    else
+        if not classic or cfg.hoverColor then
+            Wash(btn.GetHighlightTexture and btn:GetHighlightTexture(), cfg.hoverColor, { 1, 1, 1, 0.12 }, true)
+        end
+        if not classic or cfg.pushedColor then
+            Wash(btn.GetPushedTexture and btn:GetPushedTexture(), cfg.pushedColor, { 1, 1, 1, 0.18 }, true)
+        end
+        if not classic or cfg.checkedColor then
+            Wash(btn.GetCheckedTexture and btn:GetCheckedTexture(), cfg.checkedColor, AccentWash(), false)
+        end
+    end
 
     AB.StyleCooldown(btn, cfg)
     if btn.zGlow and btn.zGlow:IsShown() then AB.SetGlow(btn, true, true) end
@@ -1113,6 +1492,20 @@ function AB.BaseTint(core, oor, usable, noMana)
     return ir, ig, ib, hr, hg, hb
 end
 
+-- The key text's own colour (the bar's Text tab), put back over the
+-- game's: the client's range update repaints every hotkey light grey (red
+-- out of range) on each check, which buried the colour picked for it.
+-- Out of range the game's red stays - that is its range cue.
+local function KeyColour(btn)
+    local fs = btn.zHotkey
+    if not fs or btn.zOutOfRange then return end
+    local el = btn.zCfg and btn.zCfg.fonts and btn.zCfg.fonts.hotkey
+    if not el then return end
+    local r, g, b = AB.TextColour(el, "hotkey")
+    fs:SetVertexColor(r, g, b)
+end
+AB.KeyColour = KeyColour
+
 -- Live: after the game has coloured the button (its usability and range
 -- updates), ZacUI's colours go over the top - only while they are on.
 function AB.ColorButton(btn, usable, noMana)
@@ -1121,7 +1514,7 @@ function AB.ColorButton(btn, usable, noMana)
     -- the state looks need this pass too (over the game's colours); once
     -- they go, one more pass puts the game's colours back
     local st = StatesOf(core)
-    if not (core.colorButtons or st or btn._abSt) then return end
+    if not (core.colorButtons or st or btn._abSt) then KeyColour(btn) return end
     btn._abSt = st and true or nil
     local action = btn.action
     if usable == nil and action and IsUsableAction then usable, noMana = IsUsableAction(action) end
@@ -1134,7 +1527,7 @@ function AB.ColorButton(btn, usable, noMana)
         if hr then fs:SetVertexColor(hr, hg, hb)
         else
             local el = btn.zCfg and btn.zCfg.fonts and btn.zCfg.fonts.hotkey
-            local r, g, b = ns.ColorOf(el and el.color, WHITE)
+            local r, g, b = AB.TextColour(el, "hotkey")
             fs:SetVertexColor(r, g, b)
         end
     end
@@ -1176,6 +1569,8 @@ function AB.StyleGlow(btn)
     local g = AB.EnsureGlow(btn)
     local core = AB.CoreCfg()
     local t = math.max(1, math.floor(tonumber(core.glowSize) or 2))
+    -- whole physical pixels under the ZacUI look (1 UI unit elsewhere)
+    if ns.Pixel and ns.Pixel.On and ns.Pixel.On() then t = t * ns.Pixel.One(btn) end
     local w, h = btn:GetWidth() or AB.BUTTON, btn:GetHeight() or AB.BUTTON
     g:ClearAllPoints()
     g:SetPoint("CENTER", btn, "CENTER", 0, 0)
@@ -1331,6 +1726,34 @@ function AB.EditModeMovables()
                 frames = function() local m = movers[header] return m and { m } or nil end,
                 -- the bar itself, faded while it is hidden in Edit Mode
                 content = function() return { header } end,
+                -- its spot of record, for Edit Mode's undo and Cancel
+                snapshot = function()
+                    local cfg = header.cfg
+                    return { point = cfg.point, x = cfg.x, y = cfg.y }
+                end,
+                restore = function(v)
+                    local cfg = header.cfg
+                    if type(v) ~= "table" or not cfg or InCombatLockdown() then return end
+                    cfg.point, cfg.x, cfg.y = v.point, v.x, v.y
+                    AB.Place(header, cfg)
+                    if movers[header] and movers[header]:IsShown() then AB.FitMover(movers[header]) end
+                end,
+                page = "bars",
+            }
+        elseif header.cfg and header.key then
+            -- switched off (or hidden by its own show rules): listed
+            -- greyed, with the way to bring it up
+            local off = header.cfg.enabled == false
+            list[#list + 1] = {
+                key = "zbar_" .. header.key, label = header.label or header.key,
+                show = function() end, hide = function() end,
+                page = "bars",
+                state = function()
+                    if off then
+                        return "off", "This bar is switched off. Turn it on on the Action bars page, then it can be placed here."
+                    end
+                    return "hidden now", "This bar is not on screen right now (its show rules on the Action bars page decide when it is)."
+                end,
             }
         end
     end
@@ -1364,6 +1787,902 @@ end
 -- called after every settings change.
 AB.appliers = {}
 function AB.RegisterApplier(fn) AB.appliers[#AB.appliers + 1] = fn end
+
+-- ============================================================
+-- THE GAME LOOKS' KITS (2026-11-08, zui_tests/AB_KITS_STUDY_1108.md)
+-- ============================================================
+-- Under a game look (Core_Look, part "bars") the buttons wear the game's
+-- own art, the way the reference UI's style kits do - its numbers, never
+-- its code:
+--   classic   the vanilla button: the Quickslot ring (66 on 36, one down;
+--             the empty-slot ring on an empty slot), the depress, the
+--             square hilight and checked art (added), the equipped ring
+--             (62 on 36, one up). On Era and TBC that IS the client's own
+--             template; on Forever and Retail it is painted over the
+--             modern one (its mask and slot art put away).
+--   blizzard  the modern template's own frame art, kept and fitted to the
+--             button (WoW Forever's client draws the retail sheet for it).
+--   forever   the same pieces from Forever's own atlases.
+-- ZacUI's buttons keep their size (the reference scales a 45 px button
+-- instead; that would shrink the key text and move saved bars): every
+-- template layer is placed at the template's proportions of the button's
+-- own size. Region calls only (safe on a secure button, in combat too);
+-- the one frame write (the modern cooldown's anchor) waits for no combat.
+-- Under ZacUI's look none of this runs.
+AB.KIT_CLASSIC = {
+    slot     = "Interface\\Buttons\\UI-Quickslot2",
+    empty    = "Interface\\Buttons\\UI-Quickslot",
+    pushed   = "Interface\\Buttons\\UI-Quickslot-Depress",
+    hilight  = "Interface\\Buttons\\ButtonHilight-Square",
+    checked  = "Interface\\Buttons\\CheckButtonHilight",
+    equipped = "Interface\\Buttons\\UI-ActionButton-Border",
+    ring = 66, border = 62, unit = 36,
+}
+-- the modern template's art (the Mainline ActionButtonTemplate's atlases)
+AB.KIT_MODERN = {
+    normal   = "UI-HUD-ActionBar-IconFrame",
+    pushed   = "UI-HUD-ActionBar-IconFrame-Down",
+    hover    = "UI-HUD-ActionBar-IconFrame-Mouseover",
+    -- the layers the template hangs from the top-left at 46 x 45 on a 45
+    -- button; a measured template size wins (AB.KitCapture)
+    topLeft = { "Normal", "Highlight", "Checked", "Border", "Flash", "NewActionTexture", "SpellHighlightTexture" },
+    -- every layer WoW Forever's kit lays out as the template does
+    geo = { "icon", "IconMask", "SlotBackground", "SlotArt", "Normal", "Pushed", "Highlight", "Checked", "Border",
+            "Flash", "NewActionTexture", "SpellHighlightTexture" },
+    unitW = 46, unitH = 45, unit = 45,
+}
+local KIT_IDS = { classic = true, blizzard = true, forever = true }
+
+-- the kit the bars wear this session ("zacui" when none)
+function AB.Kit()
+    local L = ns.Look
+    local lk = L and L.For and L.For("bars")
+    local id = lk and lk.id
+    return KIT_IDS[id] and id or "zacui"
+end
+-- the kit one button was skinned in (SkinSecureIcon marks it)
+-- (only the action, pet and stance buttons and their samples: AB.KitCapture
+-- marks them when they are made - a bag slot's art is its icon)
+function AB.KitOf(btn)
+    if not (btn and rawget(btn, "_zKitNative")) then return nil end
+    local id = rawget(btn, "_zLook")
+    return KIT_IDS[id] and id or nil
+end
+
+-- Atlas presence, asked once per name (a piece the client lacks is
+-- skipped and the template's art stays).
+local atlasOK = {}
+function AB.AtlasOK(name)
+    if type(name) ~= "string" then return false end
+    local v = atlasOK[name]
+    if v == nil then
+        v = false
+        local get = C_Texture and C_Texture.GetAtlasInfo
+        if get then
+            local ok, info = pcall(get, name)
+            v = (ok and type(info) == "table") and true or false
+        end
+        atlasOK[name] = v
+    end
+    return v
+end
+
+-- BLIZZARD STYLE ON THE FOREVER CLIENT: that client draws its own bronze
+-- art under the retail names, so Blizzard style takes the retail sheets
+-- the client still ships - by file and box (pixels: the reference UI's
+-- measured records, EllesmereUI_RetailAtlas.lua:549-577). Only when the
+-- file is there (its id asked of the client) and the client's atlas is not
+-- already that sheet; the 2x sheet when the client draws its own pressed
+-- frame from it. Anywhere else the atlas.
+local SHEET1 = { 4613342, "Interface\\HUD\\UIActionBar", 256, 1024 }
+local SHEET2 = { 4615764, "Interface\\HUD\\UIActionBar2x", 512, 2048 }
+AB.KIT_RETAIL_ROWS = {
+    ["ui-hud-actionbar-iconframe"]      = { 181, 227, 254, 299, 359, 451, 649, 739 },
+    ["ui-hud-actionbar-iconframe-down"] = { 181, 227, 521, 566, 359, 451, 881, 971 },
+    ["ui-hud-actionbar-gryphon-left"]   = { 1, 179, 136, 303, 1, 357, 209, 543 },
+    ["ui-hud-actionbar-gryphon-right"]  = { 1, 179, 305, 472, 1, 357, 545, 879 },
+    ["ui-hud-actionbar-wyvern-left"]    = { 1, 179, 474, 641, 1, 357, 881, 1215 },
+    ["ui-hud-actionbar-wyvern-right"]   = { 1, 179, 643, 810, 1, 357, 1217, 1551 },
+}
+local sheetHas = {}
+local function SheetPresent(s)
+    local v = sheetHas[s]
+    if v == nil then
+        v = false
+        if GetFileIDFromPath then
+            local ok, id = pcall(GetFileIDFromPath, s[2])
+            v = (ok and id == s[1]) and true or false
+        end
+        sheetHas[s] = v
+    end
+    return v
+end
+local function RetailBox(name)
+    if not _G.ZACUI_IS_FOREVER then return nil end
+    local row = AB.KIT_RETAIL_ROWS[string.lower(name)]
+    if not row then return nil end
+    local get = C_Texture and C_Texture.GetAtlasInfo
+    local ok, native = false, nil
+    if get then ok, native = pcall(get, name) end
+    local nf = ok and type(native) == "table" and native.file or nil
+    if nf == SHEET1[1] or nf == SHEET2[1] then return nil end      -- already the retail art
+    local hi = false
+    if get then
+        local ok2, d = pcall(get, "UI-HUD-ActionBar-IconFrame-Down")
+        hi = ok2 and type(d) == "table" and d.file == SHEET2[1] or false
+    end
+    local s, l, r, t, b = SHEET1, row[1], row[2], row[3], row[4]
+    if (hi or not SheetPresent(SHEET1)) and SheetPresent(SHEET2) then
+        s, l, r, t, b = SHEET2, row[5], row[6], row[7], row[8]
+    elseif not SheetPresent(SHEET1) then
+        return nil
+    end
+    return s[1], l / s[3], r / s[3], t / s[4], b / s[4]
+end
+
+-- One piece of modern art onto a texture: the retail sheet (Blizzard style
+-- on Forever), else the atlas when the client has it. False: left as it was.
+function AB.KitArt(tex, name, stock)
+    if not (tex and name) then return false end
+    if stock then
+        local file, l, r, t, b = RetailBox(name)
+        if file then
+            tex:SetTexture(file)
+            tex:SetTexCoord(l, r, t, b)
+            return true
+        end
+    end
+    if not (AB.AtlasOK(name) and tex.SetAtlas) then return false end
+    if tex.SetTexCoord then tex:SetTexCoord(0, 1, 0, 1) end
+    tex:SetAtlas(name)
+    return true
+end
+
+local function StateTex(btn, kind)
+    local get = btn["Get" .. kind .. "Texture"]
+    return get and get(btn) or nil
+end
+local function LayerOf(btn, key)
+    if key == "Normal" or key == "Highlight" or key == "Checked" or key == "Pushed" then return StateTex(btn, key) end
+    if key == "Border" then return AB.Region(btn, "Border", "Border") end
+    if key == "Flash" then return AB.Region(btn, "Flash", "Flash") end
+    return rawget(btn, key)
+end
+
+-- THE TEMPLATE'S OWN SIZES, read once when a button is made (before the
+-- bars resize it): the button's native edge and each top-left layer's size
+-- as a share of it. What the kit fits the layers to; a client that could
+-- not answer gets the template's numbers (46 x 45 on 45).
+function AB.KitCapture(btn)
+    if not btn or rawget(btn, "_zKitNative") then return end
+    local nw = btn.GetWidth and btn:GetWidth() or 0
+    local nh = btn.GetHeight and btn:GetHeight() or 0
+    local nat = { w = (type(nw) == "number" and nw > 0) and nw or nil, h = (type(nh) == "number" and nh > 0) and nh or nil, layers = {} }
+    if nat.w and nat.h and rawget(btn, "SlotArt") ~= nil then
+        for _, key in ipairs(AB.KIT_MODERN.topLeft) do
+            local t = LayerOf(btn, key)
+            if t and t.GetSize then
+                local lw, lh = t:GetSize()
+                if type(lw) == "number" and type(lh) == "number" and lw > 0 and lh > 0 then
+                    nat.layers[key] = { lw / nat.w, lh / nat.h }
+                end
+            end
+        end
+        -- WoW Forever draws the template exactly as the client lays it out:
+        -- every layer's own anchors (to the button or the icon), offsets and
+        -- size, and its atlas, kept to be scaled to ZacUI's button size
+        -- (2026-11-08, Zac: Forever's icons did not fill the frame's window)
+        local icon = AB.Region(btn, "icon", "Icon")
+        nat.geo = {}
+        for _, key in ipairs(AB.KIT_MODERN.geo) do
+            local t = (key == "icon") and icon or LayerOf(btn, key)
+            if t and t.GetNumPoints then
+                local g = { pts = {} }
+                local okAll = true
+                for i = 1, t:GetNumPoints() do
+                    local p, rel, rp, x, y = t:GetPoint(i)
+                    local kind = (rel == nil or rel == btn) and "btn" or (rel == icon and key ~= "icon") and "icon" or nil
+                    if not kind then okAll = false break end
+                    g.pts[i] = { p, kind, rp or p, x or 0, y or 0 }
+                end
+                if okAll then
+                    if t.GetSize then
+                        local lw, lh = t:GetSize()
+                        if type(lw) == "number" and type(lh) == "number" and lw > 0 and lh > 0 then g.w, g.h = lw, lh end
+                    end
+                    if t.GetAtlas then
+                        local ok, a = pcall(t.GetAtlas, t)
+                        if ok and type(a) == "string" and a ~= "" then g.atlas = a end
+                    end
+                    nat.geo[key] = g
+                end
+            end
+        end
+    end
+    rawset(btn, "_zKitNative", nat)
+end
+
+-- is the slot filled (the ring's art follows it)
+local function SlotFilled(btn)
+    -- (an action bar's button; a pet or stance button's slot is not an
+    -- action slot, and Blizzard shows those only while they hold something)
+    if not rawget(btn, "zBar") then return true end
+    local a = btn.action or (btn.GetAttribute and btn:GetAttribute("action"))
+    if not a then return true end
+    if C_ActionBar and C_ActionBar.HasAction then
+        local ok, v = pcall(C_ActionBar.HasAction, a)
+        if ok then return v and true or false end
+    end
+    if HasAction then
+        local ok, v = pcall(HasAction, a)
+        if ok then return v and true or false end
+    end
+    return true
+end
+
+local function PinAll(btn, tex)
+    if tex and tex.ClearAllPoints then
+        tex:ClearAllPoints()
+        tex:SetAllPoints(btn)
+    end
+end
+
+-- the modern template's extras, fitted (both kits)
+local function ModernExtras(btn)
+    if btn.NewActionTexture then btn.NewActionTexture:SetAlpha(0) end
+    PinAll(btn, rawget(btn, "QuickKeybindHighlightTexture"))
+    if not (InCombatLockdown and InCombatLockdown()) then
+        local cd = AB.Region(btn, "cooldown", "Cooldown")
+        if cd and cd.ClearAllPoints then
+            cd:ClearAllPoints()
+            cd:SetAllPoints(btn)
+        end
+        local ac = rawget(btn, "AutoCastOverlay")
+        if ac and ac.ClearAllPoints then
+            ac:ClearAllPoints()
+            ac:SetAllPoints(btn)
+        end
+    end
+end
+
+-- Classic WoW UI on one button (study section 2)
+local function PaintClassic(btn, w, h, modern)
+    local art = AB.KIT_CLASSIC
+    local sw, sh = w / art.unit, h / art.unit
+    local icon = AB.Region(btn, "icon", "Icon")
+    local mask = rawget(btn, "IconMask")
+    if icon and mask then
+        if icon.RemoveMaskTexture then pcall(icon.RemoveMaskTexture, icon, mask) end
+        if mask.Hide then mask:Hide() end
+    end
+    if btn.SlotBackground then btn.SlotBackground:SetAlpha(0) end
+    if btn.SlotArt then btn.SlotArt:SetAlpha(0) end
+    local filled = rawget(btn, "_zKitFilled")
+    if filled == nil then
+        filled = SlotFilled(btn)
+        rawset(btn, "_zKitFilled", filled)
+    end
+    local nt = StateTex(btn, "Normal")
+    if nt then
+        nt:SetTexture(filled and art.slot or art.empty)
+        if nt.SetTexCoord then nt:SetTexCoord(0, 1, 0, 1) end
+        nt:SetVertexColor(1, 1, 1, 1)
+        nt:SetAlpha(1)
+        nt:ClearAllPoints()
+        nt:SetPoint("CENTER", btn, "CENTER", 0, -sh)
+        nt:SetSize(art.ring * sw, art.ring * sh)
+    end
+    local pt = StateTex(btn, "Pushed")
+    if pt then
+        pt:SetTexture(art.pushed)
+        if pt.SetTexCoord then pt:SetTexCoord(0, 1, 0, 1) end
+        if modern and pt.SetDrawLayer then pt:SetDrawLayer("OVERLAY", 7) end
+        if pt.SetBlendMode then pt:SetBlendMode("BLEND") end
+        PinAll(btn, pt)
+        pt:SetVertexColor(1, 1, 1, 1)
+        pt:SetAlpha(1)
+    end
+    for _, s in ipairs({ { "Highlight", art.hilight }, { "Checked", art.checked } }) do
+        local t = StateTex(btn, s[1])
+        if t then
+            t:SetTexture(s[2])
+            if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
+            if t.SetBlendMode then t:SetBlendMode("ADD") end
+            t:SetVertexColor(1, 1, 1, 1)
+            t:SetAlpha(1)
+            PinAll(btn, t)
+        end
+    end
+    local bd = AB.Region(btn, "Border", "Border")
+    if bd then
+        bd:SetTexture(art.equipped)
+        if bd.SetTexCoord then bd:SetTexCoord(0, 1, 0, 1) end
+        if bd.SetBlendMode then bd:SetBlendMode("ADD") end
+        bd:ClearAllPoints()
+        bd:SetPoint("CENTER", btn, "CENTER", 0, sh)
+        bd:SetSize(art.border * sw, art.border * sh)
+    end
+    if modern then
+        PinAll(btn, AB.Region(btn, "Flash", "Flash"))
+        PinAll(btn, rawget(btn, "SpellHighlightTexture"))
+        ModernExtras(btn)
+    end
+end
+
+-- Blizzard style / WoW Forever on a modern button (study sections 3, 4)
+-- WoW Forever on a modern button: the client's own template, every layer
+-- where and as big as the client lays it out, scaled to the button (the
+-- art's real proportions, never stretched); the slot art behind the icon
+-- on a bar wearing Forever's frame (the stock main bar's empty slot), the
+-- dark slot background elsewhere. False when nothing was measured.
+local function PaintForeverGeo(btn, w, h)
+    local nat = rawget(btn, "_zKitNative")
+    local geo = nat and nat.geo
+    if not (geo and nat.w and nat.h and next(geo)) then return false end
+    local kx, ky = w / nat.w, h / nat.h
+    local icon = AB.Region(btn, "icon", "Icon")
+    for key, g in pairs(geo) do
+        local t = (key == "icon") and icon or LayerOf(btn, key)
+        if t and t.ClearAllPoints and #g.pts > 0 then
+            if g.atlas and key ~= "icon" and key ~= "IconMask" and t.SetAtlas then
+                local cur
+                if t.GetAtlas then local ok, a = pcall(t.GetAtlas, t) cur = ok and a or nil end
+                if cur ~= g.atlas then
+                    if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
+                    t:SetAtlas(g.atlas)
+                end
+            end
+            t:ClearAllPoints()
+            for _, p in ipairs(g.pts) do
+                t:SetPoint(p[1], (p[2] == "icon") and icon or btn, p[3], p[4] * kx, p[5] * ky)
+            end
+            if #g.pts == 1 and g.w and t.SetSize then t:SetSize(g.w * kx, g.h * ky) end
+        end
+    end
+    local mask = rawget(btn, "IconMask")
+    if mask and mask.Show then mask:Show() end
+    local cfg, n = rawget(btn, "zCfg"), rawget(btn, "zBar")
+    local framed = n ~= nil and cfg ~= nil and AB.KitFrameOn(cfg, n)
+    if btn.SlotArt then
+        if framed then btn.SlotArt:SetAlpha(1) btn.SlotArt:Show() else btn.SlotArt:SetAlpha(0) btn.SlotArt:Hide() end
+    end
+    if btn.SlotBackground then btn.SlotBackground:SetAlpha(framed and 0 or 1) end
+    for _, key in ipairs({ "Normal", "Pushed", "Highlight", "Checked" }) do
+        local t = StateTex(btn, key)
+        if t then t:SetVertexColor(1, 1, 1, 1) t:SetAlpha(1) end
+    end
+    ModernExtras(btn)
+    return true
+end
+
+local function PaintModern(btn, w, h, kit)
+    if kit == "forever" and PaintForeverGeo(btn, w, h) then return end
+    local M = AB.KIT_MODERN
+    local stock = kit == "blizzard"
+    local nat = rawget(btn, "_zKitNative") or {}
+    local layers = nat.layers or {}
+    local nw = nat.w or M.unit
+    local nh = nat.h or M.unit
+    if btn.SlotArt then btn.SlotArt:Hide() btn.SlotArt:SetAlpha(0) end
+    AB.KitArt(StateTex(btn, "Normal"), M.normal, stock)
+    -- (Blizzard style draws the retail art: the retail template's own
+    -- numbers, 46 x 45 on a 45 button - never the sizes measured from the
+    -- client's atlases, which on the Forever client are its bigger bronze
+    -- frame; 2026-11-08, Zac: "icons dont fully fill the space")
+    for _, key in ipairs(M.topLeft) do
+        local t = LayerOf(btn, key)
+        if t and t.SetSize then
+            local share = (not stock) and layers[key] or nil
+            local fw = share and share[1] or (M.unitW / M.unit)
+            local fh = share and share[2] or (M.unitH / M.unit)
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+            t:SetSize(w * fw, h * fh)
+        end
+    end
+    local nt = StateTex(btn, "Normal")
+    if nt then nt:SetAlpha(1) nt:SetVertexColor(1, 1, 1, 1) end
+    -- hover and active: the template's own art (a hand-picked wash that
+    -- covered it is gone again once the colour is back to the shipped one)
+    for _, key in ipairs({ "Highlight", "Checked" }) do
+        local t = StateTex(btn, key)
+        if t and AB.KitArt(t, M.hover, false) then
+            t:SetVertexColor(1, 1, 1, 1)
+            t:SetAlpha(1)
+        end
+    end
+    local pt = StateTex(btn, "Pushed")
+    if pt then
+        AB.KitArt(pt, M.pushed, stock)
+        if pt.SetDrawLayer then pt:SetDrawLayer("OVERLAY", 7) end
+        if pt.SetBlendMode then pt:SetBlendMode("BLEND") end
+        PinAll(btn, pt)
+        pt:SetVertexColor(1, 1, 1, 1)
+        pt:SetAlpha(1)
+    end
+    -- Blizzard style: the icon fills the button (the frame's inner window)
+    -- under the rounded mask laid on the icon itself, and an empty slot
+    -- shows the slot's own dark background inside the frame, as the stock
+    -- button does
+    local icon = AB.Region(btn, "icon", "Icon")
+    local mask = rawget(btn, "IconMask")
+    if stock then
+        if icon and icon.ClearAllPoints then
+            icon:ClearAllPoints()
+            icon:SetAllPoints(btn)
+        end
+        if mask and mask.ClearAllPoints and icon then
+            mask:ClearAllPoints()
+            mask:SetAllPoints(icon)
+            if mask.Show then mask:Show() end
+        end
+        local bg = rawget(btn, "SlotBackground")
+        if bg and bg.SetAlpha then
+            PinAll(btn, bg)
+            bg:SetAlpha(1)
+            if bg.Show then bg:Show() end
+        end
+    -- the rounded mask at the template's size for this button
+    elseif mask and mask.SetSize and mask.Show then
+        local get = C_Texture and C_Texture.GetAtlasInfo
+        local ok, info = false, nil
+        if get then ok, info = pcall(get, "UI-HUD-ActionBar-IconFrame-Mask") end
+        if ok and type(info) == "table" and type(info.width) == "number" and info.width > 0 then
+            mask:SetSize(info.width * w / nw, (info.height or info.width) * h / nh)
+        end
+    end
+    ModernExtras(btn)
+end
+
+-- A button's kit, painted for a w x h button (its own size when left out).
+-- True when a kit was painted. Idempotent: the apply pass and every resize
+-- run it again.
+function AB.PaintKit(btn, w, h)
+    local kit = AB.KitOf(btn)
+    if not kit then return false end
+    if not w then w = btn.GetWidth and btn:GetWidth() or 0 end
+    if not h then h = btn.GetHeight and btn:GetHeight() or 0 end
+    if type(w) ~= "number" or w <= 0 then w = AB.BUTTON end
+    if type(h) ~= "number" or h <= 0 then h = w end
+    local modern = rawget(btn, "SlotArt") ~= nil
+    if kit == "classic" or not modern then
+        PaintClassic(btn, w, h, modern)
+    else
+        PaintModern(btn, w, h, kit)
+    end
+    rawset(btn, "_zKitW", w)
+    rawset(btn, "_zKitH", h)
+    -- Blizzard re-runs its art pass on a modern button (Edit Mode, bar art
+    -- on / off): the kit goes back on after it (a post-hook: nothing of
+    -- Blizzard's is written)
+    if btn.UpdateButtonArt and not rawget(btn, "_zKitArtHook") then
+        rawset(btn, "_zKitArtHook", true)
+        hooksecurefunc(btn, "UpdateButtonArt", function(self)
+            if AB.KitOf(self) then AB.PaintKit(self, rawget(self, "_zKitW"), rawget(self, "_zKitH")) end
+        end)
+    end
+    return true
+end
+
+-- The Classic ring follows the slot: the empty-slot art on an empty slot.
+-- One comparison when nothing changed (the content edges call it).
+function AB.KitSlot(btn, filled)
+    if AB.KitOf(btn) ~= "classic" then return end
+    filled = filled and true or false
+    if rawget(btn, "_zKitFilled") == filled then return end
+    rawset(btn, "_zKitFilled", filled)
+    local nt = StateTex(btn, "Normal")
+    if nt then nt:SetTexture(filled and AB.KIT_CLASSIC.slot or AB.KIT_CLASSIC.empty) end
+end
+
+-- ------------------------------------------------------------
+-- THE BAR'S CHROME (study section 5): end caps under every game look,
+-- WoW Forever's frame and dividers under that look. Per bar, a frame of
+-- ours on the header (never anchored to a button), placed on the button
+-- grid from the same numbers LayoutButtons uses; built the first time a
+-- piece shows, hidden when none does. Apply pass only (out of combat).
+-- ------------------------------------------------------------
+-- unit: the button size the art is drawn for (only ever scaled down);
+-- near / far: { left point, grid point, x, y, right point, grid point, x, y }
+-- for one row / several; lvl: frame levels over the bar.
+AB.KIT_CAPS = {
+    classic = {
+        unit = 36, w = 128, h = 128, lvl = 17, file = true,
+        any = { "Interface\\MainMenuBar\\UI-MainMenuBar-EndCap-Dwarf",
+                "Interface\\MainMenuBar\\UI-MainMenuBar-EndCap-Dwarf" },
+        near = { "BOTTOMRIGHT", "BOTTOMLEFT", 28, -3, "BOTTOMLEFT", "BOTTOMRIGHT", -29, -3 },
+        far  = { "BOTTOMRIGHT", "BOTTOMLEFT", 0, -3, "BOTTOMLEFT", "BOTTOMRIGHT", -1, -3 },
+    },
+    blizzard = {
+        unit = 45, w = 104.5, h = 98, lvl = 17, stock = true,
+        near = { "BOTTOMRIGHT", "BOTTOMLEFT", 9, -22, "BOTTOMLEFT", "BOTTOMRIGHT", -8, -22 },
+    },
+    forever = {
+        unit = 45, w = 154, h = 95, lvl = 4,
+        near = { "RIGHT", "LEFT", 30, 5, "LEFT", "RIGHT", -30, 5 },
+    },
+}
+AB.KIT_CAPS.forever.art = {
+    Alliance = { "ui-hud-actionbar-gryphon-left", "ui-hud-actionbar-gryphon-right" },
+    Horde    = { "ui-hud-actionbar-wyvern-left",  "ui-hud-actionbar-wyvern-right" },
+}
+AB.KIT_CAPS.blizzard.art = AB.KIT_CAPS.forever.art
+-- every look's caps sit this much higher than the art's own spot
+AB.KIT_CAP_LIFT = 5
+AB.KIT_FRAME = {
+    frame = "UI-HUD-ActionBar-Frame",
+    -- around the grid, in 45 px button units
+    l = -6, t = 6, r = 4, b = -5,
+    -- dividers: { start edge, end edge, middle, start depth, end depth }
+    divH = { "ui-hud-actionbar-frame-divider-ThreeSlice-EdgeTop",
+             "ui-hud-actionbar-frame-divider-ThreeSlice-EdgeBottom",
+             "!ui-hud-actionbar-frame-divider-ThreeSlice-Center", 14, 15 },
+    divV = { "ui-hud-actionbar-frame-divider-ThreeSlice-EdgeLeft",
+             "ui-hud-actionbar-frame-divider-ThreeSlice-EdgeRight",
+             "_ui-hud-actionbar-frame-divider-ThreeSlice-Center", 12, 12 },
+    -- a divider is 12 across at its own size, starting 7 before the next button
+    across = 12, before = 7,
+}
+
+-- which ends show caps / whether the frame shows, by the bar's settings:
+-- nil = the bar's default (bar 1 on), a saved true / false wins
+function AB.KitCapsOn(cfg, n)
+    local v = cfg and cfg.endCaps
+    if v == nil then return n == 1 end
+    return v and true or false
+end
+-- a bar wearing the look's chrome shows its empty slots, as the game's own
+-- main bar does (the slot art inside the frame); cfg.kitGrid = false: not
+function AB.KitShowsGrid(cfg, n)
+    if not cfg or cfg.kitGrid == false or AB.Kit() == "zacui" then return false end
+    if AB.KitCapsOn(cfg, n) then return true end
+    return AB.Kit() == "forever" and AB.KitFrameOn(cfg, n)
+end
+-- where a bar's chrome frame is (bar 1's: the XP bar seats on it), or nil
+function AB.KitGridFrame(header)
+    local st = header and rawget(header, "_zChrome")
+    if not st then return nil end
+    if st.under and st.under:IsShown() then return st.under, true end
+    if st.host and st.host:IsShown() then return st.host, false end
+    return nil
+end
+function AB.KitFrameOn(cfg, n)
+    local v = cfg and cfg.kitFrame
+    if v == nil then return n == 1 end
+    return v and true or false
+end
+
+-- the art of one cap side for the player's faction (nil while neutral)
+local function CapArt(c)
+    if c.any then return c.any end
+    local fac = UnitFactionGroup and UnitFactionGroup("player")
+    return fac and c.art and c.art[fac] or nil
+end
+local function SetCap(tex, c, name, right)
+    if c.file then
+        tex:SetTexture(name)
+        if right then tex:SetTexCoord(1, 0, 0, 1) else tex:SetTexCoord(0, 1, 0, 1) end
+        return true
+    end
+    if AB.KitArt(tex, name, c.stock) then
+        -- (a right cap drawn from the sheet keeps the sheet's own box)
+        return true
+    end
+    return false
+end
+
+-- a neutral character picks a side, or the faction was not known yet:
+-- the caps are painted again (registered only while waiting)
+local capWait
+local function WaitFaction(on)
+    if not on then return end
+    if not capWait then
+        capWait = CreateFrame("Frame")
+        capWait:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            if AB.ApplyAll then AB.ApplyAll() end
+        end)
+    end
+    capWait:RegisterEvent("NEUTRAL_FACTION_SELECT_RESULT")
+    capWait:RegisterEvent("PLAYER_ENTERING_WORLD")
+end
+
+local function HideChrome(st)
+    if not st then return end
+    if st.host then st.host:Hide() end
+    if st.under then st.under:Hide() end
+end
+
+-- Paints bar n's chrome round its button grid (count buttons of `size`,
+-- laid out by cfg as LayoutButtons lays them). The pieces live on
+-- header._zChrome; the caps are also header._zGryphons (left, right).
+function AB.KitChrome(header, cfg, size, count, n)
+    if not header then return end
+    cfg = cfg or {}
+    local st = rawget(header, "_zChrome")
+    local kit = AB.Kit()
+    if kit == "zacui" or not cfg or cfg.enabled == false then return HideChrome(st) end
+    count = math.max(1, math.min(count or cfg.buttons or 12, AB.PER_BAR))
+    size = size or cfg.buttonSize or AB.BUTTON
+    local perRow, rows, padX, padY = AB.LayoutShape(cfg, count)
+    local vertical = perRow == 1 and count > 1
+    local c = AB.KIT_CAPS[kit]
+    local set = c and CapArt(c)
+    local capsOn = c ~= nil and not vertical and AB.KitCapsOn(cfg, n)
+    local frameOn = kit == "forever" and AB.KitFrameOn(cfg, n) and AB.AtlasOK(AB.KIT_FRAME.frame)
+    WaitFaction(capsOn and set == nil and c.art ~= nil)
+    if not capsOn and not frameOn then return HideChrome(st) end
+    if not st then st = {} rawset(header, "_zChrome", st) end
+
+    local anchor, v, hz = AB.AnchorOf(cfg)
+    local ox = (hz == "LEFT") and 5 or -3
+    local oy = (v == "TOP") and -3 or 5
+    local gw = size * perRow + padX * (perRow - 1)
+    local gh = size * rows + padY * (rows - 1)
+    local lvl = header.GetFrameLevel and header:GetFrameLevel() or 0
+
+    -- the caps, over the buttons (made once the bar asks for them; a side
+    -- whose art the client lacks, or a neutral character's, stays hidden)
+    local host = st.host
+    if capsOn then
+        if not host then
+            host = CreateFrame("Frame", nil, header)
+            host._zui_own = true
+            host:EnableMouse(false)
+            st.host = host
+            st.capL = host:CreateTexture(nil, "OVERLAY", nil, 5)
+            st.capR = host:CreateTexture(nil, "OVERLAY", nil, 5)
+            st.capL._zui_own, st.capR._zui_own = true, true
+        end
+        host:SetFrameLevel(lvl + c.lvl)
+        host:ClearAllPoints()
+        host:SetPoint(anchor, header, anchor, ox, oy)
+        host:SetSize(gw, gh)
+        local kc = math.min(size / c.unit, 1)
+        local g = (rows > 1 and c.far) or c.near
+        local okL, okR = false, false
+        if set then
+            if st.capSet == set and st.capLook == kit then
+                okL, okR = true, true
+            else
+                okL = SetCap(st.capL, c, set[1], false)
+                okR = SetCap(st.capR, c, set[2], true)
+            end
+        end
+        st.capSet = (okL and okR) and set or nil
+        st.capLook = kit
+        for side = 1, 2 do
+            local t = side == 1 and st.capL or st.capR
+            local i = (side == 1) and 1 or 5
+            t:SetSize(c.w * kc, c.h * kc)
+            t:ClearAllPoints()
+            t:SetPoint(g[i], host, g[i + 1], g[i + 2] * kc, g[i + 3] * kc + AB.KIT_CAP_LIFT)
+            if (side == 1 and okL) or (side == 2 and okR) then t:Show() else t:Hide() end
+        end
+        rawset(header, "_zGryphons", { st.capL, st.capR })
+        host:Show()
+    elseif host then
+        host:Hide()
+    end
+
+    -- WoW Forever's frame and dividers, under the buttons
+    local under = st.under
+    if frameOn then
+        local F = AB.KIT_FRAME
+        local k = size / 45
+        if not under then
+            under = CreateFrame("Frame", nil, header)
+            under._zui_own = true
+            under:EnableMouse(false)
+            st.under = under
+            st.divs = {}
+            local fr = under:CreateTexture(nil, "BACKGROUND", nil, -3)
+            fr._zui_own = true
+            fr:SetAtlas(F.frame)
+            st.frame = fr
+        end
+        under:SetFrameLevel(lvl)
+        under:ClearAllPoints()
+        under:SetPoint(anchor, header, anchor, ox, oy)
+        under:SetSize(gw, gh)
+        st.frame:ClearAllPoints()
+        st.frame:SetPoint("TOPLEFT", under, "TOPLEFT", F.l * k, F.t * k)
+        st.frame:SetPoint("BOTTOMRIGHT", under, "BOTTOMRIGHT", F.r * k, F.b * k)
+        -- dividers on a one-line bar at the game's spacing (2 or less)
+        local line = (vertical and rows or perRow)
+        local lineOnly = (vertical and perRow == 1 or rows == 1) and (vertical and padY or padX) <= 2
+        local ds = vertical and F.divV or F.divH
+        local nDiv = lineOnly and (line - 1) or 0
+        if nDiv > 0 and not (AB.AtlasOK(ds[1]) and AB.AtlasOK(ds[2]) and AB.AtlasOK(ds[3])) then nDiv = 0 end
+        local step = size + (vertical and padY or padX)
+        for i = 1, nDiv do
+            local d = st.divs[i]
+            if not d then
+                d = { under:CreateTexture(nil, "BACKGROUND", nil, -2), under:CreateTexture(nil, "BACKGROUND", nil, -2),
+                      under:CreateTexture(nil, "BACKGROUND", nil, -2) }
+                st.divs[i] = d
+            end
+            local a, b, m = d[1], d[2], d[3]
+            if d.set ~= ds then
+                a:SetAtlas(ds[1]) b:SetAtlas(ds[2]) m:SetAtlas(ds[3])
+                d.set = ds
+            end
+            local at = i * step
+            a:ClearAllPoints() b:ClearAllPoints() m:ClearAllPoints()
+            if vertical then
+                a:SetSize(ds[4], F.across) b:SetSize(ds[5], F.across)
+                a:SetPoint("TOPLEFT", under, "TOPLEFT", 0, F.before - at)
+                b:SetPoint("TOPRIGHT", under, "TOPRIGHT", 0, F.before - at)
+                m:SetPoint("TOPLEFT", a, "TOPRIGHT")
+                m:SetPoint("BOTTOMRIGHT", b, "BOTTOMLEFT")
+            else
+                a:SetSize(F.across, ds[4]) b:SetSize(F.across, ds[5])
+                a:SetPoint("TOPLEFT", under, "TOPLEFT", at - F.before, 0)
+                b:SetPoint("BOTTOMLEFT", under, "BOTTOMLEFT", at - F.before, 0)
+                m:SetPoint("TOPLEFT", a, "BOTTOMLEFT")
+                m:SetPoint("BOTTOMRIGHT", b, "TOPRIGHT")
+            end
+            a:Show() b:Show() m:Show()
+        end
+        for i = nDiv + 1, #st.divs do
+            local d = st.divs[i]
+            d[1]:Hide() d[2]:Hide() d[3]:Hide()
+        end
+        under:Show()
+    elseif under then
+        under:Hide()
+    end
+end
+
+-- ------------------------------------------------------------
+-- DEFAULT SPOTS FOR THE BAG BAR AND THE MICRO MENU (2026-11-08, Zac: "good
+-- defaults for positions"). A bar that was never placed (a fresh install:
+-- AB.Place saves the spot the first time, so an existing save always has
+-- one and never moves) is centred on where the client's own buttons sit
+-- right now, before ZacUI takes them - the stock UI's spot, on every client
+-- and under every look. A client that cannot say (the buttons are already
+-- hidden) gets the stock modern corner: the micro menu in the bottom-right
+-- corner and the bag bar right above it, 4 px in.
+-- ------------------------------------------------------------
+local function StockRect(list)
+    local L, B, Rr, T
+    local us = UIParent:GetEffectiveScale() or 1
+    for _, f in ipairs(list or {}) do
+        if f and f.GetRect and (not f.IsVisible or f:IsVisible()) then
+            local ok, l, b, w, h = pcall(f.GetRect, f)
+            if ok and type(l) == "number" and type(b) == "number" and type(w) == "number" and type(h) == "number"
+                and w > 0 and h > 0 then
+                local k = (f.GetEffectiveScale and f:GetEffectiveScale() or us) / ((us > 0) and us or 1)
+                l, b, w, h = l * k, b * k, w * k, h * k
+                L = (L and math.min(L, l)) or l
+                B = (B and math.min(B, b)) or b
+                Rr = (Rr and math.max(Rr, l + w)) or (l + w)
+                T = (T and math.max(T, b + h)) or (b + h)
+            end
+        end
+    end
+    return L, B, Rr, T
+end
+-- the header spot (AB's convention) that centres a bar of `count` buttons
+-- (size wide, hgt tall) on cx, cy
+function AB.SpotFor(cfg, cx, cy, count, size, hgt)
+    local sc = cfg.scale or 1
+    if sc <= 0 then sc = 1 end
+    local perRow, rows, padX, padY = AB.LayoutShape(cfg, count)
+    local w = (perRow * size + (perRow - 1) * padX) * sc
+    local h = (rows * (hgt or size) + (rows - 1) * padY) * sc
+    local _, v, hz = AB.AnchorOf(cfg)
+    local ox = (hz == "LEFT") and 5 or -3
+    local oy = (v == "TOP") and -3 or 5
+    local px = ((hz == "LEFT") and (cx - w / 2) or (cx + w / 2)) - ox * sc
+    local py = ((v == "TOP") and (cy + h / 2) or (cy - h / 2)) - oy * sc
+    local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
+    local H = (px < uw / 3) and "LEFT" or (px > uw * 2 / 3) and "RIGHT" or ""
+    local V = (py < uh / 3) and "BOTTOM" or (py > uh * 2 / 3) and "TOP" or ""
+    local x = (H == "LEFT") and px or (H == "RIGHT") and (px - uw) or (px - uw / 2)
+    local y = (V == "BOTTOM") and py or (V == "TOP") and (py - uh) or (py - uh / 2)
+    local point = V .. H
+    if point == "" then point = "CENTER" end
+    return point, math.floor(x + 0.5), math.floor(y + 0.5), w, h
+end
+AB.STOCK_CORNER = { margin = 4, microH = 40, gap = 4 }
+function AB.StockRect(list) return StockRect(list) end
+function AB.SeatFromStock(cfg, list, size, kind, hgt)
+    if type(cfg) ~= "table" or cfg.point ~= nil then return false end
+    local count = math.max(1, #(list or {}))
+    local seen = AB._stock and AB._stock[kind]
+    local l, b, r, t
+    if seen then l, b, r, t = seen[1], seen[2], seen[3], seen[4] else l, b, r, t = StockRect(list) end
+    -- (only a spot fully on the screen: never a bar seated off it)
+    if l and not (l >= 0 and b >= 0 and r <= UIParent:GetWidth() + 0.5 and t <= UIParent:GetHeight() + 0.5) then
+        l, b, r, t = nil, nil, nil, nil
+    end
+    -- (and a real row: buttons not yet laid out all sit on one spot)
+    if l and count > 1 and (r - l) < size * 1.5 and (t - b) < size * 1.5 then
+        l, b, r, t = nil, nil, nil, nil
+    end
+    local cx, cy
+    if l then
+        cx, cy = (l + r) / 2, (b + t) / 2
+    else
+        local C = AB.STOCK_CORNER
+        local _, _, _, w, h = AB.SpotFor(cfg, 0, 0, count, size, hgt)
+        local uw = UIParent:GetWidth()
+        cx = uw - C.margin - w / 2
+        if kind == "micro" then
+            cy = C.margin + h / 2
+        else
+            local mc = (AB.Profile and AB.Profile().micro) or {}
+            local ms = (mc.scale or 1)
+            cy = C.margin + C.microH * ms + C.gap + h / 2
+        end
+    end
+    -- the whole bar on the screen
+    local _, _, _, bw, bh = AB.SpotFor(cfg, 0, 0, count, size, hgt)
+    local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
+    cx = math.max(bw / 2, math.min(uw - bw / 2, cx))
+    cy = math.max(bh / 2, math.min(uh - bh / 2, cy))
+    cfg.point, cfg.x, cfg.y = AB.SpotFor(cfg, cx, cy, count, size, hgt)
+    return true
+end
+
+-- ------------------------------------------------------------
+-- A FRESH INSTALL UNDER A GAME LOOK (2026-11-08, Zac: "make sure its
+-- actually default to what it suppose to look like"): the bars start as
+-- that look's stock bars - only the bars the game itself shows (its main
+-- bar, and each extra bar the player had switched on in the game), the
+-- game's button size and spacing, the pet and stance bars and the micro
+-- menu at the game's own scale. Once, on the first login of a fresh
+-- install (or after Reset ZacUI), and only over values still at ZacUI's
+-- shipped default; everything stays the player's to change afterwards. An
+-- existing save is never touched. (Fades, glows, empty-slot backings and
+-- number formats already default to the game's own under a game look.)
+-- ------------------------------------------------------------
+--   look -> { button size, spacing }: Era / TBC's main bar spaces its 36 px
+--   buttons 6 apart; the modern client's Edit Mode default is 45 px, 2 apart
+AB.KIT_STOCK = {
+    classic  = { size = 36, pad = 6 },
+    blizzard = { size = 45, pad = 2 },
+    forever  = { size = 45, pad = 2 },
+}
+-- ZacUI bar -> the game's bar it stands in for (Core_FreshLayout's pairs)
+AB.KIT_STOCK_BARS = { [3] = "MultiBarRight", [4] = "MultiBarLeft", [5] = "MultiBarBottomRight", [6] = "MultiBarBottomLeft" }
+function AB.KitFreshDefaults()
+    if not (ns.freshInstall == true or ns.openSetupAfterReset == true) then return false end
+    local kit = AB.Kit()
+    local st = AB.KIT_STOCK[kit]
+    if not st then return false end
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table" and type(p.bars) == "table") then return false end
+    if p.kitFresh then return false end
+    p.kitFresh = kit
+    -- (the modern client's main bar is shown at the 45 px of its own art;
+    -- the Classic client's 36 is ZacUI's default already)
+    local modernClient = ns.ModernClient and ns.ModernClient()
+    for n = 1, AB.NUM_BARS do
+        local c = p.bars[n]
+        if type(c) == "table" then
+            if n ~= 1 and c.enabled == (n <= 6) then
+                local f = AB.KIT_STOCK_BARS[n] and _G[AB.KIT_STOCK_BARS[n]]
+                c.enabled = (f and f.IsShown and f:IsShown()) and true or false
+            end
+            if c.padding == 2 then c.padding = st.pad end
+            if c.buttonSize == AB.BUTTON and (kit == "classic" or modernClient) then
+                c.buttonSize = (kit == "classic") and AB.BUTTON or st.size
+            end
+        end
+    end
+    if type(p.stance) == "table" and p.stance.scale == 1.5 then p.stance.scale = 1 end
+    if type(p.micro) == "table" and p.micro.scale == 0.8 then p.micro.scale = 1 end
+    return true
+end
+
+-- (kept for callers from before the kits: bar 1's caps on a header)
+function AB.Gryphons(header, size)
+    if not header then return end
+    local cfg = rawget(header, "cfg") or { enabled = true, buttons = 12, rows = 1, padding = 2 }
+    return AB.KitChrome(header, cfg, size, cfg.buttons or 12, rawget(header, "n") or 1)
+end
 
 function AB.ApplyAll()
     if not AB.active then return end

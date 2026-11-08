@@ -105,6 +105,43 @@ local QueueSlow = ns.Coalescer(function() Refresh() end, 0.25, RaidShown)
 -- anchored OFF the frame's right edge (Blizzard_RaidUI, so looked up
 -- fresh every time - it loads on the first roster update), and the attic
 -- controls whose top pixel sits above the cover's edge. None is secure.
+-- WHERE THE RAID PAGE LIVES. Classic: RaidFrame under FriendsFrame. WoW
+-- Forever (2026-11-07): the modern social window, SocialUIFrame, with
+-- the raid list as its RaidFrame content frame under the Raid tab - the
+-- cover hangs there, under the Battle.net bar, with ZacUI's title bar
+-- from Kit.ModernHeader on top (see Win_Social).
+-- Both windows can exist on Forever and the game picks which one opens
+-- (it can flip mid-session), so the cover follows whichever raid page is
+-- showing (Apply), as Win_Social's does.
+local socialMode                     -- "modern" (SocialUIFrame) | nil (FriendsFrame)
+local function Modern() return socialMode == "modern" end
+local function Panel()
+    if Modern() then return _G.SocialUIFrame end
+    return _G.FriendsFrame
+end
+local function ModernRaid()
+    local sui = _G.SocialUIFrame
+    local rf = sui and rawget(sui, "RaidFrame")
+    return type(rf) == "table" and rf or nil
+end
+local function RaidHosts()
+    local t = {}
+    if _G.FriendsFrame and _G.RaidFrame then t[#t + 1] = _G.RaidFrame end
+    local m = ModernRaid()
+    if m then t[#t + 1] = m end
+    return t
+end
+local function RaidHost(shown)
+    if shown then return shown end
+    for _, h in ipairs(RaidHosts()) do if h:IsVisible() then return h end end
+    if rw.host then return rw.host end
+    return ModernRaid() or _G.RaidFrame
+end
+local function SetRaidHost(host)
+    rw.host = host
+    socialMode = (host ~= nil and host == ModernRaid()) and "modern" or nil
+end
+
 local function Leftovers()
     local list = {}
     local function Add(x) if x then list[#list + 1] = x end end
@@ -112,6 +149,8 @@ local function Leftovers()
     Add(_G.RaidFrameAllAssistCheckButton)
     Add(_G.RaidFrameRaidInfoButton)
     Add(_G.RaidFrameReadyCheckButton)
+    -- Forever: whatever of the modern raid page still draws above the cover
+    if Modern() and rw.win then Kit.AboveCover(rw.win:GetParent(), rw.win, list) end
     return list
 end
 
@@ -124,7 +163,9 @@ local portrait
 local function Portrait()
     if portrait then return portrait end
     portrait = {}
-    if FriendsFrame.PortraitContainer then portrait[#portrait + 1] = FriendsFrame.PortraitContainer end
+    if _G.FriendsFrame and _G.FriendsFrame.PortraitContainer then portrait[#portrait + 1] = _G.FriendsFrame.PortraitContainer end
+    local sui = _G.SocialUIFrame
+    if sui and rawget(sui, "PortraitContainer") then portrait[#portrait + 1] = sui.PortraitContainer end
     if _G.FriendsFramePortrait then portrait[#portrait + 1] = _G.FriendsFramePortrait end
     return portrait
 end
@@ -141,17 +182,21 @@ end
 local function FadePortrait(on)
     for _, f in ipairs(Portrait()) do
         if on then
-            if f._zKitAlpha == nil then f._zKitAlpha = f:GetAlpha() or 1 end
+            if not f._zKitQuiet then
+                f._zKitQuiet = true
+                f._zKitAlpha = f:GetAlpha() or 1
+            end
             f:SetAlpha(0)
-        elseif f._zKitAlpha ~= nil then
+        elseif f._zKitQuiet then
             f:SetAlpha(f._zKitAlpha)
             f._zKitAlpha = nil
+            f._zKitQuiet = nil
         end
     end
 end
 
 local function SyncPortrait()
-    if not FriendsFrame then return end
+    if not Panel() then return end
     local need = (rw.win and rw.win:IsVisible()) or Vis("ZacUIWhoWindow") or Vis("ZacUIGuildWindow")
     FadePortrait(need and true or false)
 end
@@ -783,19 +828,32 @@ end
 local ev
 local function Build()
     if rw.win then return rw.win end
-    local win = Kit.Cover(RaidFrame, {
+    local win = Kit.Cover(rw.host, {
         name = "ZacUIRaidWindow",
-        insetName = "FriendsFrame",
-        onClose = function() HideUIPanel(FriendsFrame) end,
+        insetName = Modern() and "SocialUIFrame" or "FriendsFrame",
+        onClose = function() HideUIPanel(Panel()) end,
     })
     rw.win = win
     win.titleBar:Hide()
+    win._zKeepHeader = Modern() or nil      -- Forever: ZacUI's title bar stays on the window
     win.top = -Kit.PAD
     win.Reanchor = function()
-        local ins = ns.GetPanelInset("FriendsFrame", FriendsFrame)
+        local panel = Panel()
+        if not panel then return end
+        local ins = ns.GetPanelInset(Modern() and "SocialUIFrame" or "FriendsFrame", panel)
+        local top = BelowHairline(ins)
+        if Modern() then
+            -- under the Battle.net bar (Win_Social's PageCover does the same)
+            local bar = rawget(panel, "BattleNetBar")
+            -- (Forever can keep a window's edges secret: then the bar's
+            -- XML place, 22 down and 50 tall)
+            local pt, bb = panel:GetTop(), type(bar) == "table" and bar.GetBottom and bar:GetBottom()
+            if ns.IsSecret and (ns.IsSecret(pt) or ns.IsSecret(bb)) then pt, bb = nil, nil end
+            top = (pt and bb) and -(pt - bb) - 2 or -74
+        end
         win:ClearAllPoints()
-        win:SetPoint("TOPLEFT", FriendsFrame, "TOPLEFT", ins.l or 0, BelowHairline(ins))
-        win:SetPoint("BOTTOMRIGHT", FriendsFrame, "BOTTOMRIGHT", -(ins.r or 0), ins.b or 0)
+        win:SetPoint("TOPLEFT", panel, "TOPLEFT", ins.l or 0, top)
+        win:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -(ins.r or 0), ins.b or 0)
     end
     win.Reanchor()
     local y = win.top
@@ -942,10 +1000,17 @@ end
 -- Only while RaidFrame is FriendsFrame's own page: ClaimRaidFrame can
 -- hand it to RaidParentFrame, and a cover anchored to FriendsFrame would
 -- then float where the closed Friends window was.
-local function Apply()
-    if not FriendsFrame or not RaidFrame then return end
-    if Enabled() and RaidFrame:GetParent() == FriendsFrame then
+local function Apply(shown)
+    local host = RaidHost(type(shown) == "table" and shown or nil)
+    if not host then return end
+    SetRaidHost(host)
+    if not Panel() then return end
+    if Enabled() and host:GetParent() == Panel() then
         Build()
+        if rw.win:GetParent() ~= host then
+            rw.win:SetParent(host)
+            rw.win._zKeepHeader = Modern() or nil
+        end
         rw.win.Reanchor()
         rw.win:Show()
         if rw.win:IsVisible() then
@@ -968,10 +1033,11 @@ end
 -- Blizzard_RaidUI. That addon's single ns.RegisterLoD slot belongs to the
 -- friends skin, so a watcher of our own re-silences when it arrives.
 Modules.raidwin = function()
-    if not FriendsFrame or not RaidFrame or ns._zRaidWin then return end
+    local hosts = RaidHosts()
+    if #hosts == 0 or ns._zRaidWin then return end
     ns._zRaidWin = true
     Apply()
-    RaidFrame:HookScript("OnShow", Apply)
+    for _, h in ipairs(hosts) do h:HookScript("OnShow", function(self) Apply(self) end) end
     if ClaimRaidFrame then hooksecurefunc("ClaimRaidFrame", function() Apply() end) end
     -- Win_Social re-checks the shared portrait on its own Apply; follow.
     if ns.SocialWindow and ns.SocialWindow.Apply then

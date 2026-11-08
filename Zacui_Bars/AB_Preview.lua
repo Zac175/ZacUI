@@ -169,6 +169,8 @@ local function SampleButton(parent, kind)
     -- a look-alike: no drag, and a click puts the fake state back
     if b.RegisterForDrag then b:RegisterForDrag() end
     b:SetScript("OnClick", function(self) if self.SetChecked then self:SetChecked(self.zChecked and true or false) end end)
+    -- (the template's own sizes first, for a game look's kit: AB_Core)
+    if AB.KitCapture then AB.KitCapture(b) end
     if ns.SkinSecureIcon then ns.SkinSecureIcon(b) end
     return b
 end
@@ -291,6 +293,8 @@ local function StyleActionLike(g, cfg, core, kind)
         end
         if kind == "action" then AB.FitText(b, size) end
         b.zCfg = cfg
+        -- (a game look's Classic ring: the empty-slot art on the empty one)
+        if AB.KitSlot then AB.KitSlot(b, not d.empty) end
         AB.StyleButton(b, cfg)
         -- the colours the bar would put on a button in this state
         local ir, ig, ib, hr, hg, hb = AB.ButtonTint(core, d.oor, d.usable ~= false, d.noMana)
@@ -298,6 +302,8 @@ local function StyleActionLike(g, cfg, core, kind)
         if b.zHotkey and hr then b.zHotkey:SetTextColor(hr, hg, hb, 1) end
         -- an empty slot is there only while the bar shows its grid
         if d.empty then b:SetAlpha(cfg.showgrid and 1 or 0) else b:SetAlpha(1) end
+        -- and its backing, when that is on (AB_ActionBars)
+        if kind == "action" and AB.EmptyBacking then AB.EmptyBacking(b, d.empty and cfg.showgrid and true or false) end
     end
     return size
 end
@@ -443,6 +449,10 @@ local function Update(canvas, P)
         AB.LayoutButtons(g.root, g.buttons, cfg, size, count)
         w, h = ExtentFor(cfg, count, size, size, pad)
         if kind == "action" then ShowGlow(g, core) end
+        -- a game look's end caps / frame, as the bar draws them (AB_Core)
+        if kind == "action" and AB.KitChrome then
+            AB.KitChrome(g.root, cfg, size, count, tonumber(id:match("^bar(%d+)$") or "") or 0)
+        end
     elseif kind == "bagbar" then
         -- the live strip's order: key ring, bags 4-1, backpack
         local list, ring = {}, nil

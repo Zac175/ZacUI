@@ -93,6 +93,7 @@ local function Singles()
             cast = { "Hearthstone", ICON .. "INV_Misc_Rune_01", 3.0 } }),
         target = person({ name = "Onyxia", reaction = 2, pct = 0.64, maxHp = 1200000,
             ptoken = "MANA", ptype = 0, pp = 70, maxPp = 100,
+            portrait = ICON .. "INV_Misc_Head_Dragon_01", creature = 10184,
             buffs = { aura(A.frenzy) },
             debuffs = { aura(A.sunder, "player", 5), aura(A.demo, "player"), aura(A.clap), aura(A.faerie) },
             combat = true, marker = 8,
@@ -105,10 +106,30 @@ local function Singles()
             cast = { "Slam", ICON .. "Ability_Warrior_DecisiveStrike", 1.5 } }),
         pet = person({ name = "Grimclaw", reaction = 5, pct = 0.9, maxHp = 2600, friendly = true,
             ptoken = "FOCUS", ptype = 2, pp = 70, maxPp = 100,
+            portrait = ICON .. "Ability_Hunter_Pet_Wolf", creature = 299,
             buffs = { aura(A.motw) }, debuffs = {},
             heals = { { amount = 300, isHot = true, previewClass = "DRUID", previewSlot = 0, previewName = "Treehug" } },
             cast = { "Furious Howl", ICON .. "Ability_Hunter_Pet_Wolf", 1.0 } }),
     }
+end
+
+-- the makings of a sample, for the extra frames' own (Extras.lua: focus,
+-- boss...), and their samples on top of the four above
+function PV.Kit()
+    return { person = person, aura = aura, A = A, ICON = ICON, playerName = playerName, playerClass = playerClass }
+end
+do
+    local base = Singles
+    Singles = function()
+        local t = base()
+        for _, e in ipairs(ns.UF_EXTRA_FRAMES or {}) do
+            if e.sample and t[e.key] == nil then
+                local ok, d = pcall(e.sample, PV.Kit())
+                if ok and d then t[e.key] = d end
+            end
+        end
+        return t
+    end
 end
 
 -- a party of five (You first), each showing something worth seeing
@@ -194,7 +215,7 @@ function PV.Style(f, cfg)
     if f.Castbar then ns.CastbarStopMotion(f.Castbar) end
     f.cfg = cfg
     f:SetSize(cfg.width or 100, cfg.height or 30)
-    ns.UI:Backdrop(f, cfg.bgColor, cfg.borderColor)
+    ns.UI:FrameBackdrop(f, cfg.bgColor, cfg.borderColor)
     ns.StyleElements(f)
 end
 
@@ -221,6 +242,9 @@ function PV.Fill(f, d)
     ns.PaintPvP(f, d.pvp)
     ns.PaintHeals(f, d.heals, d.hp, d.maxHp)
     ns.PaintHealerDot(f, d.healerClass, d.healerSlot)
+    -- the portrait, when this frame wears one (Portrait.lua): a player's
+    -- is yours, a creature's its own picture
+    if ns.PaintPortrait and f.Portrait then ns.PaintPortrait(f, nil, d, true) end
     f._previewPerson = d
 end
 
@@ -400,6 +424,12 @@ PV.FRAME_MODES = {
     { id = "party", label = "Party" },
     { id = "raid", label = "Raid" },
 }
+-- the frames only some games have, each after the mode it names
+for _, e in ipairs(ns.UF_EXTRA_FRAMES or {}) do
+    local at = #PV.FRAME_MODES + 1
+    for i, m in ipairs(PV.FRAME_MODES) do if e.after and m.id == e.after then at = i + 1 end end
+    table.insert(PV.FRAME_MODES, at, { id = e.key, label = e.short or e.label })
+end
 
 local function cfgFor(mode)
     if mode == "party" or mode == "raid" then return ns.db[mode] end
@@ -429,6 +459,11 @@ function PV.FrameCanvasSize(mode)
         w, h = math.max(w, r - l), (t - b) + hang
     elseif cfg.castbar then
         h = h + CastH(cfg) + 4
+    end
+    -- a portrait beside the frame adds its width
+    local pc = cfg.portrait
+    if type(pc) == "table" and ns.PortraitOn(cfg) and pc.layout == "outside" and ns.PortraitSize then
+        w = w + ns.PortraitSize(cfg) + (tonumber(pc.gap) or 2)
     end
     return math.floor(w + FIT_PAD), math.floor(h + FIT_PAD)
 end
@@ -520,7 +555,10 @@ function PV.UpdateFrames(canvas, P)
     wipe(st.healFrames)
     st.taunts = st.taunts or {}
     wipe(st.taunts)
-    local single = (mode ~= "party" and mode ~= "raid")
+    -- a set of frames of an extra file (the boss frames...): its own layout
+    local ex = ns.ExtraFrame and ns.ExtraFrame(mode)
+    local lay = ex and ex.layout
+    local single = (mode ~= "party" and mode ~= "raid") and not lay
 
     -- singles: the frame with its auras and cast bar, as one piece
     if single then
@@ -577,6 +615,36 @@ function PV.UpdateFrames(canvas, P)
         else
             for _, f in ipairs(list) do f:Hide() end
         end
+    end
+
+    -- an extra set: the people its file lays out (its own frames first; a
+    -- person may wear other settings, d._cfg - a party cell beside them),
+    -- each placed from the host's middle as the groups are
+    st.extra = st.extra or {}
+    if lay then
+        local people, place = lay(cfg, PV.Kit())
+        people = people or {}
+        for i, d in ipairs(people) do
+            local f = poolFrame(st, st.extra, i)
+            local fcfg = d._cfg or cfg
+            PV.Style(f, fcfg)
+            PV.Fill(f, d)
+            FocusFill(f, d)
+            f:Show()
+            st.healFrames[#st.healFrames + 1] = f
+            if fcfg.castbar and d.cast then
+                st.casts[#st.casts + 1] = { frame = f, person = d, loop = true }
+                KeepCast(f, d)
+            else
+                StartCast(f, nil)
+            end
+            local x, y = place(i, d)
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", st.host, "CENTER", x, y)
+        end
+        for i = #people + 1, #st.extra do st.extra[i]:Hide() end
+    else
+        for _, f in ipairs(st.extra) do f:Hide() end
     end
 
     st.repaintHeals = true
@@ -667,6 +735,18 @@ function PV.UpdateHeals(canvas, P)
     local st = P.store
     local cfg = healCfg()
     local people = HealPeople()
+    -- Forever (Core_Flavor): other healers' heals come from the combat log
+    -- and addon messages, which it does not give addons - only your own show
+    local z = Z()
+    if z and z.NoCombatLog and z.NoCombatLog() then
+        for _, p in ipairs(people) do
+            if p.heals then
+                local own = {}
+                for _, h in ipairs(p.heals) do if h.own then own[#own + 1] = h end end
+                p.heals = own
+            end
+        end
+    end
     local bw, bh = cfg.width, cfg.height
     for i, f in ipairs(st.rows) do
         PV.Style(f, cfg)

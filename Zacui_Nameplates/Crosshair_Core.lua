@@ -712,6 +712,8 @@ function Core.New(host)
     local function SkipMode(c, unit)
         if not unit or not next(c.skip) then return nil end
         local name = UnitName(unit)
+        -- (WoW Forever can hide an enemy's name in a fight: then no skip)
+        if issecretvalue and issecretvalue(name) then return nil end
         return name and c.skip[name:lower()] or nil
     end
     CH.SkipMode = SkipMode
@@ -950,6 +952,7 @@ function Core.New(host)
             SetUp(plate:IsVisible() and true or false)
         end
         local guid = followUnit and UnitGUID(followUnit) or nil
+        if issecretvalue and issecretvalue(guid) then guid = nil end   -- (WoW Forever: hidden)
         if guid ~= followGUID then followGUID = guid; lastParry = 0 end
         local skip = SkipMode(c, followUnit)
         if skip == "hide" then

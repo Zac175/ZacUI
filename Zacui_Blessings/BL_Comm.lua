@@ -339,7 +339,7 @@ function Comm.Start()
     end
     frame:RegisterEvent("CHAT_MSG_ADDON")
     -- (only where addon messages can be held: Forever, or its override)
-    if ns.Flavor and ns.Flavor() == "forever" or _G.ZACUI_IS_FOREVER then
+    if (ns.ModernRules and ns.ModernRules()) or _G.ZACUI_MODERN then
         frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     end
 end

@@ -73,7 +73,113 @@ Modules.questlog = function()
 end
 
 -- FRIENDS / SOCIAL
+-- WoW Forever's modern side tabs (LargeSideTabButtonTemplate: the social
+-- window's Friends / Recent / Raid icons down its right edge): the icon
+-- stays, the carved tab art goes for ZacUI's flat box, and the selected /
+-- hover looks become flat washes pinned to the tab.
+local function SkinSideTab(tab)
+    if not tab or ZUI.skinned[tab] then return end
+    ZUI.skinned[tab] = true
+    if tab.Background then tab.Background:SetAlpha(0) end
+    SkinBackdrop(tab, "elementBg", 0.95)
+    -- the icon cropped as every icon ZacUI dresses (Core_Look's helper)
+    if tab.Icon and tab.Icon.SetTexCoord and ns.Look then ns.Look.CropIcon(tab.Icon, nil, nil, { border = false }) end
+    local a = Col("accent")
+    for key, wash in pairs({ SelectedTexture = { a.r, a.g, a.b, 0.28 }, HighlightTexture = { 1, 1, 1, 0.12 },
+                             TabGlow = { a.r, a.g, a.b, 0.35 } }) do
+        local t = tab[key]
+        if t and t.SetColorTexture then
+            t:SetColorTexture(wash[1], wash[2], wash[3], wash[4])
+            t:ClearAllPoints()
+            t:SetAllPoints(tab)
+        end
+    end
+end
+
+ns.SkinSideTab = SkinSideTab
+
+-- WoW Forever's social window (2026-11-07, Zac: "these menus are not
+-- styled"). Forever replaced the Friends frame with the modern
+-- SocialUIFrame (a portrait window with the Battle.net bar on top, a
+-- scrolling friends list and tabs down the right edge, made when it
+-- loads). It gets the treatment every skinned Blizzard window gets - the
+-- frame art, portrait and fades away for ZacUI's dark panel, its bars
+-- flattened, its scroll bars ZacUI's - and its side tabs as above. The
+-- buttons, boxes and dropdowns inside are styled by the classifier as
+-- everywhere. Classic Era and TBC have no SocialUIFrame.
+local function SkinSocialUI()
+    local sui = _G.SocialUIFrame
+    -- its own mark: a generic pass may have panelled the window already
+    if not sui or sui._zSocialSkin then return end
+    sui._zSocialSkin = true
+    SkinPanel(sui)
+    -- THE BATTLE.NET BAR, FLAT (2026-11-07, Zac: the blue bezel, the gold
+    -- framed menu button). Its backing goes; the status dropdown, the
+    -- BattleTag box and the menu button become ZacUI's flat boxes - the
+    -- status dot, the copy glyph and the menu glyph are the controls'
+    -- own pictures and stay; the dropdown's arrow is ZacUI's.
+    local bar = sui.BattleNetBar
+    if bar then
+        if bar.Background then bar.Background:SetAlpha(0) end
+        local cc = rawget(bar, "ControlsContainer")
+        if type(cc) == "table" then
+            if cc.BattleNetBackground then cc.BattleNetBackground:SetAlpha(0) end
+            local tag = rawget(cc, "PersonalBattleTagDisplay")
+            if type(tag) == "table" then
+                for _, r in ipairs({ tag:GetRegions() }) do
+                    if r.IsObjectType and r:IsObjectType("Texture") then r:SetAlpha(0) end
+                end
+                SkinBackdrop(tag, "elementBg", 0.9)
+                local copy = rawget(tag, "CopyBattleTagToClipboardButton")
+                if type(copy) == "table" and copy.GetHighlightTexture then
+                    local hl = copy:GetHighlightTexture()
+                    if hl then hl:SetColorTexture(1, 1, 1, 0.12) end
+                end
+            end
+            local status = rawget(cc, "OnlineStatusDropdown")
+            if type(status) == "table" then
+                for _, key in ipairs({ "Background" }) do
+                    if status[key] then status[key]:SetAlpha(0) end
+                end
+                if status.Arrow and status.Arrow.SetTexture then
+                    status.Arrow:SetTexture(ns.TEX_ARROW)
+                    status.Arrow:SetSize(10, 10)
+                    local x = Col("xNormal")
+                    status.Arrow:SetVertexColor(x.r, x.g, x.b, 1)
+                end
+                SkinBackdrop(status, "elementBg", 0.9)
+            end
+            local menu = rawget(cc, "BattleNetMenuButton")
+            if type(menu) == "table" and menu.GetNormalTexture then
+                for _, get in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture" }) do
+                    local t = menu[get](menu)
+                    if t then t:SetTexture(nil) t:SetAlpha(0) end
+                end
+                local hl = menu:GetHighlightTexture()
+                if hl then hl:SetColorTexture(1, 1, 1, 0.12) hl:SetAlpha(1) hl:ClearAllPoints() hl:SetAllPoints(menu) end
+                SkinBackdrop(menu, "elementBg", 0.9)
+            end
+        end
+    end
+    for _, key in ipairs({ "TopFade", "BottomFade" }) do
+        if sui[key] then sui[key]:SetAlpha(0) end
+    end
+    local function Tabs()
+        for _, child in ipairs({ sui:GetChildren() }) do
+            if child.SelectedTexture and child.Icon and child.Background then SkinSideTab(child) end
+        end
+    end
+    Tabs()
+    SkinAllScrollBarsUnder(sui, 0)
+    -- the tabs come from a pool when the window lays itself out
+    sui:HookScript("OnShow", function()
+        Tabs()
+        SkinAllScrollBarsUnder(sui, 0)
+    end)
+end
+
 Modules.friends = function()
+    SkinSocialUI()
     -- Sub-panels stripped only when they are actually FriendsFrame's own
     -- tab panels (GuildFrame/RaidFrame can be standalone windows on some
     -- builds - stripping those would wreck unrelated UI).

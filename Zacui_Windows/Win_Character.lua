@@ -39,6 +39,9 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's character sheet is its own; a Retail version comes later):
+-- this window stands down here, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_character") then return end
 
 -- shared state from earlier ZacUI files
 local FLAT = ns.FLAT
@@ -168,11 +171,19 @@ end
 local function Leftovers(page)
     local t = {}
     local function Add(f) if f then t[#t + 1] = f end end
-    Add(_G.CharacterFrameCloseButton)
-    Add(_G.CharacterFramePortrait)
-    if CharacterFrame then
-        Add(CharacterFrame.PortraitContainer)
-        Add(CharacterFrame.NineSlice)
+    -- (on the modern client the window's own chrome - close button,
+    -- portrait, frame art, title bar - is Kit.CharacterCover's, quietened
+    -- in a side table with the other parts, never with fields on them)
+    if not _G.ZACUI_MODERN then
+        Add(_G.CharacterFrameCloseButton)
+        Add(_G.CharacterFramePortrait)
+        if CharacterFrame then
+            Add(CharacterFrame.PortraitContainer)
+            Add(CharacterFrame.NineSlice)
+            -- Forever's (modern) CharacterFrame has a title bar at frame level
+            -- 510 that draws over the cover ("Zac Warrior" twice); Classic's has none
+            Add(CharacterFrame.TitleContainer)
+        end
     end
     local host = page.host()
     if host then
@@ -181,6 +192,9 @@ local function Leftovers(page)
         end
     end
     if page.extra then for _, f in ipairs(page.extra()) do Add(f) end end
+    -- (Forever's modern page parts - the reputation list and scroll bar
+    -- in the HIGH strata, the pane divider and toggle - are
+    -- Kit.CharacterCover's: quietened by name, never hidden)
     return t
 end
 
@@ -205,10 +219,13 @@ local function PlaceOverCharacter(win)
     -- strip hangs below the panel line, so the page runs down to it.
     local tabsOn = ns.CharTabs and ns.CharTabs.Enabled and ns.CharTabs.Enabled()
     local base = (not tabsOn) and host:GetBottom()
+    -- (Forever can keep a window's edges secret: then the inset as it is)
+    if ns.IsSecret and ns.IsSecret(base) then base = nil end
     if base then
         for i = 1, 5 do
             local tab = _G["CharacterFrameTab" .. i]
             local top = tab and tab:IsShown() and tab:GetTop()
+            if ns.IsSecret and ns.IsSecret(top) then top = nil end
             if top then bottom = math.max(bottom, math.ceil(top - base) + 1) end
         end
     end
@@ -284,6 +301,10 @@ local function Page(page)
         ev:SetScript("OnEvent", function()
             if win:IsVisible() then page.Queue() end
         end)
+
+        -- Forever's modern page parts (the list above the cover, the pane
+        -- chrome): hushed by name with the cover, again on a page rebuild
+        Kit.CharacterCover(win, page.modern or page.key)
 
         -- Silenced only while this page is up: the Character tab still
         -- needs Blizzard's close button when no cover is over it. Fading
@@ -613,12 +634,64 @@ local function StandingRGB(id)
     return Kit.TextRGB("gray")
 end
 
+-- THE FACTION CALLS (2026-11-07). Classic Era and TBC have the old
+-- globals; WoW Forever has only C_Reputation (the list came up "No
+-- reputations yet." there). Each call is the global when the client has
+-- it, else the C_Reputation one with the old shape.
+local CR = C_Reputation
+local Rep = {}
+function Rep.Num()
+    if GetNumFactions then return GetNumFactions() end
+    return CR and CR.GetNumFactions and CR.GetNumFactions() or 0
+end
+function Rep.Info(i)
+    if GetFactionInfo then return GetFactionInfo(i) end
+    local d = CR and CR.GetFactionDataByIndex and CR.GetFactionDataByIndex(i)
+    if type(d) ~= "table" then return nil end
+    return d.name, d.description, d.reaction, d.currentReactionThreshold, d.nextReactionThreshold,
+        d.currentStanding, d.atWarWith, d.canToggleAtWar, d.isHeader, d.isCollapsed, d.isHeaderWithRep,
+        d.isWatched, d.isChild, d.factionID
+end
+function Rep.Inactive(i)
+    if IsFactionInactive then return IsFactionInactive(i) end
+    if CR and CR.IsFactionActive then return not CR.IsFactionActive(i) end
+    return false
+end
+function Rep.Toggle(i, expanded)
+    if expanded then
+        if CollapseFactionHeader then CollapseFactionHeader(i) elseif CR then CR.CollapseFactionHeader(i) end
+    else
+        if ExpandFactionHeader then ExpandFactionHeader(i) elseif CR then CR.ExpandFactionHeader(i) end
+    end
+end
+function Rep.Select(i)
+    if SetSelectedFaction then SetSelectedFaction(i) elseif CR and CR.SetSelectedFaction then CR.SetSelectedFaction(i) end
+end
+function Rep.Selected()
+    if GetSelectedFaction then return GetSelectedFaction() end
+    return CR and CR.GetSelectedFaction and CR.GetSelectedFaction() or 0
+end
+function Rep.AtWar(i)
+    if FactionToggleAtWar then FactionToggleAtWar(i) elseif CR and CR.ToggleFactionAtWar then CR.ToggleFactionAtWar(i) end
+end
+function Rep.SetInactive(i, on)
+    if SetFactionInactive then
+        if on then SetFactionInactive(i) else SetFactionActive(i) end
+    elseif CR and CR.SetFactionActive then
+        CR.SetFactionActive(i, not on)
+    end
+end
+function Rep.Watch(i)
+    if SetWatchedFactionIndex then SetWatchedFactionIndex(i)
+    elseif CR and CR.SetWatchedFactionByIndex then CR.SetWatchedFactionByIndex(i) end
+end
+
 local function RepEntries()
     local all = {}
-    local n = GetNumFactions and GetNumFactions() or 0
+    local n = Rep.Num()
     for i = 1, n do
         local name, description, standingID, barMin, barMax, barValue, atWarWith,
-            canToggleAtWar, isHeader, isCollapsed, _, isWatched, isChild = GetFactionInfo(i)
+            canToggleAtWar, isHeader, isCollapsed, _, isWatched, isChild = Rep.Info(i)
         if name then
             if isHeader then
                 all[#all + 1] = { header = true, index = i, name = name, expanded = not isCollapsed }
@@ -630,7 +703,7 @@ local function RepEntries()
                     standing = standingID, value = (barValue or 0) - lo, max = (barMax or 0) - lo,
                     atWar = atWarWith and true or false, canWar = canToggleAtWar and true or false,
                     watched = isWatched and true or false, child = isChild and true or false,
-                    inactive = IsFactionInactive and IsFactionInactive(i) and true or false,
+                    inactive = Rep.Inactive(i) and true or false,
                 }
             end
         end
@@ -686,9 +759,9 @@ local function RepBuildRow(row)
         local e = self.item
         if not e then return end
         if e.header then
-            if e.expanded then CollapseFactionHeader(e.index) else ExpandFactionHeader(e.index) end
+            Rep.Toggle(e.index, e.expanded)
         else
-            SetSelectedFaction(e.index)
+            Rep.Select(e.index)
             rep.Queue()
         end
     end)
@@ -772,7 +845,7 @@ local function RepDraw(p, keepOffset)
         function(e) return q ~= "" and Kit.Matches(q, e.name) end,
         function(e) return hideInactive and inactiveName ~= nil and e.name == inactiveName end)
 
-    local sel = GetSelectedFaction and GetSelectedFaction() or 0
+    local sel = Rep.Selected() or 0
     local selEntry
     for _, e in ipairs(all) do
         if e.index == sel and not e.header then selEntry = e break end
@@ -829,23 +902,21 @@ local function RepBuild(p)
     local function Index() return d.item and d.item.index end
     d.war = UI.Checkbox(d, AT_WAR or "At war", false, function(on)
         local i = Index()
-        if i then FactionToggleAtWar(i) end
+        if i then Rep.AtWar(i) end
         Sound(on)
         rep.Queue()
     end, { size = F.SMALL, tooltip = REPUTATION_AT_WAR_DESCRIPTION })
     d.war:SetPoint("BOTTOMLEFT", d, "BOTTOMLEFT", 8, 28)
     d.inactive = UI.Checkbox(d, MOVE_TO_INACTIVE or "Inactive", false, function(on)
         local i = Index()
-        if i then
-            if on then SetFactionInactive(i) else SetFactionActive(i) end
-        end
+        if i then Rep.SetInactive(i, on) end
         Sound(on)
         rep.Queue()
     end, { size = F.SMALL, tooltip = REPUTATION_MOVE_TO_INACTIVE })
     d.inactive:SetPoint("LEFT", d.war, "RIGHT", 18, 0)
     d.watch = UI.Checkbox(d, SHOW_FACTION_ON_MAINSCREEN or "Show as experience bar", false, function(on)
         local i = Index()
-        if i then SetWatchedFactionIndex(on and i or 0) end
+        if i then Rep.Watch(on and i or 0) end
         Sound(on)
         rep.Queue()
     end, { size = F.SMALL, tooltip = REPUTATION_SHOW_AS_XP })
@@ -860,6 +931,7 @@ end
 
 Page(rep)
 rep.key = "reputationwin"
+rep.modern = "reputation"   -- its Forever parts (Kit.CharacterParts)
 rep.flag = "_zReputationWin"
 rep.name = "ZacUIReputationWindow"
 rep.title = REPUTATION or "Reputation"
@@ -901,29 +973,31 @@ local HONOR_ROWS = {
 }
 
 local function Num(v) return v and tostring(v) or DASH end
+-- (WoW Forever has none of the Classic honor calls: each reads as nothing)
+local function Ask(fn, ...) if fn then return fn(...) end end
 
 -- The same calls and return orders HonorFrame_Update uses.
 local function HonorValues()
     local v = {}
     local hk, dk, honorPts, standing
-    hk, dk = GetPVPSessionStats()
+    hk, dk = Ask(GetPVPSessionStats)
     v.today = { Num(hk), Num(dk), DASH }
-    hk, dk, honorPts = GetPVPYesterdayStats()
+    hk, dk, honorPts = Ask(GetPVPYesterdayStats)
     v.yesterday = { Num(hk), Num(dk), Num(honorPts) }
-    hk, honorPts = GetPVPThisWeekStats()
+    hk, honorPts = Ask(GetPVPThisWeekStats)
     v.thisweek = { Num(hk), DASH, Num(honorPts) }
-    hk, dk, honorPts, standing = GetPVPLastWeekStats()
+    hk, dk, honorPts, standing = Ask(GetPVPLastWeekStats)
     v.lastweek = { Num(hk), Num(dk), Num(honorPts) }
     v.standing = standing
     local highest
-    hk, dk, highest = GetPVPLifetimeStats()
+    hk, dk, highest = Ask(GetPVPLifetimeStats)
     v.lifetime = { Num(hk), Num(dk), DASH }
     v.highest = highest
     return v
 end
 
 local function HonorDraw(p)
-    local rankName, rankNumber = GetPVPRankInfo(UnitPVPRank("player"))
+    local rankName, rankNumber = Ask(GetPVPRankInfo, Ask(UnitPVPRank, "player"))
     rankNumber = rankNumber or 0
     p.rankName:SetText(rankName or (NONE or "None"))
     p.rankNum:SetText("(" .. (RANK or "Rank") .. " " .. rankNumber .. ")")
@@ -964,7 +1038,7 @@ local function HonorDraw(p)
     end
     p.standing:SetText(Paint((HONOR_STANDING or "Standing") .. ": ", "gray")
         .. ((v.standing and v.standing > 0) and tostring(v.standing) or DASH))
-    local hiName = v.highest and GetPVPRankInfo(v.highest)
+    local hiName = v.highest and Ask(GetPVPRankInfo, v.highest)
     p.highest:SetText(Paint((HONOR_HIGHEST_RANK or "Highest rank") .. ": ", "gray")
         .. (hiName or (NONE or "None")))
 end

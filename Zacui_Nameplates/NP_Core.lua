@@ -248,6 +248,134 @@ local DEFAULTS = {
     castAlerts = {},
 }
 
+-- ============================================================
+-- MATCH PASS (2026-11-07, zui_tests/MATCH_FRAMES_1107.md)
+-- ============================================================
+-- Under ZacUI's own look the shipped numbers are the reference UI's
+-- plates (sizes, colours, the cast bar, the target glow, the debuff
+-- row). An overlay on DEFAULTS, so a fresh table takes them, and a save
+-- still on the OLD shipped value is moved once (d._matchRev, in DB()
+-- below); a value set by hand stays. The Classic look keeps the old.
+-- { path..., new }; the old value is read off DEFAULTS before the overlay
+local MATCH = {
+    { "enemy", "width", 156 }, { "enemy", "height", 17 },
+    { "enemy", "combatWidth", 156 }, { "enemy", "combatHeight", 17 },
+    { "enemy", "castWidth", 156 }, { "enemy", "castHeight", 17 }, { "enemy", "castTextSize", 10 },
+    { "enemy", "nameSize", 12 }, { "enemy", "namePos", "above" }, { "enemy", "nameJustify", "CENTER" },
+    { "enemy", "percentSize", 10 }, { "enemy", "nameColor", { 1, 1, 1, 1 } },
+    { "friendly", "nameSize", 15 },
+    { "reaction", "hostile", { 0.48, 0.082, 0.082 } }, { "reaction", "neutral", { 0.81, 0.72, 0.19 } },
+    { "reaction", "friendly", { 0.314, 0.800, 0.408 } }, { "tapped", { 0.5, 0.5, 0.5 } },
+    { "threat", "tankAggro", { 0.800, 0.137, 0.137 } }, { "threat", "tankNoAggro", { 1.00, 0.22, 0.17 } },
+    { "threat", "tankOther", { 0.188, 0.761, 0.812 } }, { "threat", "dpsAggro", { 1.00, 0.50, 0.00 } },
+    { "threat", "dpsNoAggro", { 0.800, 0.137, 0.137 } }, { "threat", "pulling", { 0.81, 0.72, 0.19 } },
+    { "threat", "solo", { 0.800, 0.137, 0.137 } },
+    { "target", "scale", 1 }, { "target", "nonTargetFade", false }, { "target", "glow", true },
+    { "castbar", "normal", { 0.70, 0.40, 0.90 } }, { "castbar", "channel", { 0.70, 0.40, 0.90 } },
+    { "castbar", "uninterruptible", { 0.45, 0.45, 0.45 } }, { "castbar", "interrupted", { 0.8, 0.0, 0.0 } },
+    { "auras", "enabled", true }, { "auras", "width", 26 }, { "auras", "height", 26 }, { "auras", "max", 5 },
+    { "auras", "countFont", { size = 11 } },
+    { "extras", "targetArrows", false },
+    { "barBg", { 0.12, 0.12, 0.12, 1 } }, { "borderColor", { 0.067, 0.067, 0.067, 1 } },
+}
+local MATCH_OLD = {}
+local function MCopy(v)
+    if type(v) ~= "table" then return v end
+    local t = {}
+    for k, x in pairs(v) do t[k] = MCopy(x) end
+    return t
+end
+local function MSame(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return a == b end
+    for k, v in pairs(b) do
+        local w = a[k]
+        if type(v) == "number" and type(w) == "number" then
+            if math.abs(v - w) > 0.005 then return false end
+        elseif not MSame(w, v) then return false end
+    end
+    for k in pairs(a) do if b[k] == nil then return false end end
+    return true
+end
+-- the old shipped values, read off DEFAULTS at file load (nothing changed)
+for i, e in ipairs(MATCH) do
+    local t = DEFAULTS
+    for j = 1, #e - 2 do t = t and t[e[j]] end
+    if type(t) == "table" then MATCH_OLD[i] = { v = MCopy(t[e[#e - 1]]) } end
+end
+-- THE OVERLAY, decided ONCE from the latched look (2026-11-08): it used to
+-- be decided at file load, where the look had no live answer yet and read
+-- as ZacUI's, so a Classic save got the overlay and its migration. Now it
+-- waits for Core_Look's PLAYER_LOGIN re-read (Look.Settled); a DB() read
+-- before that sees the old defaults and moves nothing. Under a game look
+-- it never applies.
+local matchOn, matchDecided = false, false
+-- THE GAME LOOKS' STOCK STYLE DEFAULTS (2026-11-08): under Classic WoW UI,
+-- Blizzard style and WoW Forever the plates' ZacUI-only style defaults to
+-- the game's own plates; a value set by hand stays, and the plates'
+-- features (threat colours and strip, debuff tracking, priority mobs, the
+-- cast bar, raid marks, quest icons) stay as they are:
+--   the health percent text   the stock plates show no number
+--   the target arrows / box   the stock cue is the plate's own wash
+--   the mob's target's name   ZacUI's extra texts on the plate
+--   friendly class colours    the stock friendly plates are green / blue
+local stockFollowed = false
+NP.STOCK_DEFAULTS = {
+    { "enemy", "percent", false },
+    { "friendly", "percent", false },
+    { "friendly", "barClassColor", false },
+    { "friendly", "nameClassColor", false },
+    { "extras", "targetArrows", false },
+    { "extras", "targetName", false },
+    { "extras", "castTargetName", false },
+}
+local function MatchDecide()
+    if matchDecided then return end
+    local L = ns.Look
+    if L and L.Settled and not L.Settled() then return end
+    matchDecided = true
+    local ok, on = pcall(function() return L and L.Is and L.Is("nameplates", "zacui") end)
+    if not (ok and on) then return end
+    matchOn = true
+    for _, e in ipairs(MATCH) do
+        local t = DEFAULTS
+        for j = 1, #e - 2 do t = t and t[e[j]] end
+        if type(t) == "table" then t[e[#e - 1]] = MCopy(e[#e]) end
+    end
+end
+NP.MATCH, NP.MATCH_OLD = MATCH, MATCH_OLD
+-- the plates wear a game look (Classic WoW UI, Blizzard style, WoW Forever):
+-- the stock plate's art and cues, none of ZacUI's target boxes (2026-11-08,
+-- Zac: "what is with these huge white borders when i target a mob")
+function NP.StockLook()
+    local L = ns.Look
+    local lk = L and L.For and L.For("nameplates")
+    return (lk and lk.id ~= "zacui") and true or false
+end
+function NP.MatchOn() MatchDecide() return matchOn end
+-- a save's values still on the old shipped default move to the new one;
+-- a key the save lacks is left for CopyDefaults (it takes the new one)
+local function MatchMigrate(d)
+    local moved = 0
+    for i, e in ipairs(MATCH) do
+        local rec = MATCH_OLD[i]
+        local t = d
+        for j = 1, #e - 2 do t = type(t) == "table" and t[e[j]] or nil end
+        local k = e[#e - 1]
+        if rec and type(t) == "table" then
+            local cur, old = t[k], rec.v
+            -- (a key whose old default was nil - "the theme's colour" -
+            -- moves while it is still nil)
+            if (old == nil and cur == nil) or (cur ~= nil and old ~= nil and MSame(cur, old)) then
+                t[k] = MCopy(e[#e])
+                moved = moved + 1
+            end
+        end
+    end
+    return moved
+end
+NP.MatchMigrate = MatchMigrate
+
 local function CopyDefaults(src, dst)
     for k, v in pairs(src) do
         if type(v) == "table" then
@@ -269,11 +397,22 @@ end
 -- a different one (a profile switch, the reset button), whenever its
 -- revision is not the current one (a wiped table), and whenever
 -- RefreshAll runs (any settings change).
-local DB_REV = 10        -- keep equal to the last REV migration below; if
+local DB_REV = 11        -- keep equal to the last REV migration below; if
                         -- it falls behind, every read takes the full pass
 local seeded            -- the settings table the last full pass prepared
 
 local function DB()
+    -- (the match overlay, once the look is settled: a table seeded before
+    -- it is seeded again, so its migration runs)
+    if not matchDecided then
+        MatchDecide()
+        if matchDecided then seeded = nil end
+    end
+    -- (the game looks' stock style defaults, once the look is settled)
+    if not stockFollowed and ns.Look and ns.Look.Settled and ns.Look.Settled() then
+        stockFollowed = true
+        seeded = nil
+    end
     local d = ZacUIDB.nameplates
     if d and d == seeded and d._rev == DB_REV then return d end
     ZacUIDB.nameplates = d or {}
@@ -394,6 +533,16 @@ local function DB()
         if d.target then d.target.highlight = false end
         d._rev = 11
     end
+    -- the match pass, once, under ZacUI's look (a table that turns to it
+    -- later is moved then)
+    if matchOn and not d._matchRev then
+        MatchMigrate(d)
+        d._matchRev = 1
+    end
+    -- the game looks' stock style defaults (Core_Look's FollowDefaults)
+    if stockFollowed and ns.Look and ns.Look.FollowDefaults then
+        ns.Look.FollowDefaults(d, DEFAULTS, NP.STOCK_DEFAULTS, "nameplates")
+    end
     CopyDefaults(DEFAULTS, d)
     -- npc colors seed ONCE from the ported Plater table (they are user
     -- data, not defaults - a deleted entry must stay deleted, so no
@@ -426,7 +575,7 @@ function NP.CheckPriority(f)
                 if n ~= "" then prioSet[n] = true end
             end
         end
-        local name = UnitName(f.unit)
+        local name = NP.SafeName(f.unit)
         on = name and prioSet[name:lower()] or false
     end
     f._priority = on and true or false
@@ -442,7 +591,7 @@ function NP.CheckPriority(f)
                 if n ~= "" then noFadeSet[n] = true end
             end
         end
-        local name = UnitName(f.unit)
+        local name = NP.SafeName(f.unit)
         nf = name and noFadeSet[name:lower()] or false
     end
     f._noFade = nf and true or false
@@ -518,7 +667,7 @@ function NP.PriorityCount()
     local total = 0
     for _, f in pairs(NP.ActivePlates()) do
         if f._priority and f.unit and UnitExists(f.unit) and not UnitIsDeadOrGhost(f.unit) then
-            local n = UnitName(f.unit) or "?"
+            local n = NP.SafeName(f.unit) or "?"
             prioCounts[n] = (prioCounts[n] or 0) + 1
             total = total + 1
         end
@@ -549,9 +698,23 @@ function NP.PriorityWarnDemo(on)
     end
 end
 
+-- A unit's GUID and name, or nil while WoW Forever hides them (an enemy's
+-- in a fight comes back as a secret value: no keying, comparing or
+-- splitting it). On the other clients exactly UnitGUID / UnitName.
+function NP.SafeGUID(unit)
+    local g = UnitGUID(unit)
+    if ns.IsSecret(g) then return nil end
+    return g
+end
+function NP.SafeName(unit)
+    local n = UnitName(unit)
+    if ns.IsSecret(n) then return nil end
+    return n
+end
+
 -- npc id out of a unit's guid: Creature-0-xxxx-xxxx-xxxx-NPCID-yyyy
 function NP.NpcIdFromUnit(unit)
-    local guid = unit and UnitGUID(unit)
+    local guid = unit and NP.SafeGUID(unit)
     if not guid then return nil end
     local kind, _, _, _, _, npcId = strsplit("-", guid)
     if kind == "Creature" or kind == "Vehicle" then
@@ -596,8 +759,9 @@ end
 
 local function FontPath()
     -- one font: ZacUI's, whenever one is chosen (the plate font saved in
-    -- fontName counts only while ZacUI has none)
-    local one = ns.OneFace and ns.OneFace()
+    -- fontName counts only while ZacUI has none); the game's own under
+    -- the Classic look (Core_Look)
+    local one = ns.OneFace and ns.OneFace("nameplates")
     if one then return one end
     local d = DB()
     local name = d.fontName
@@ -644,9 +808,15 @@ end
 -- shadowY } - the house font shape) at `size`. An empty spec is exactly
 -- SetNPFont: the plate font, outlined, no shadow - which is what every
 -- plate text wore before the specs existed.
+local MATCH_FONT = { outline = "none", shadow = true }
 local function ApplyNPFont(fs, spec, size)
     if type(spec) ~= "table" or not (spec.face or spec.outline or spec.shadow) then
-        return SetNPFont(fs, size)
+        -- match pass (ZacUI's look): with nothing saved, no outline and a
+        -- black shadow 1 px down-right, the reference's plate text
+        if not (matchOn and not (type(spec) == "table" and spec.shadow == false)) then
+            return SetNPFont(fs, size)
+        end
+        spec = MATCH_FONT
     end
     local flags = "OUTLINE"
     if spec.outline ~= nil and ns.FontOutlineFlags then flags = ns.FontOutlineFlags(spec.outline) end
@@ -673,7 +843,17 @@ local function BarTexture(kind)
     local name = d[kind]
     if name == nil and kind == "threatTexture" then return BarTexture("healthTexture") end
     if name == false then
-        return (ns.ResolveBarTexture and ns.ResolveBarTexture(nil)) or TEX_NORM
+        return (ns.ResolveBarTexture and ns.ResolveBarTexture(nil, "nameplates")) or TEX_NORM
+    end
+    -- the shipped name follows the look (Core_Look): under the Classic look
+    -- it is the game's bar; a texture picked by hand is the player's
+    if name == DEFAULTS[kind] and ns.Look and ns.Look.Is("nameplates", "classic") then
+        return ns.Look.For("nameplates").barTexture
+    end
+    -- HD polish (2026-11-07): under ZacUI's look the shipped name is the
+    -- look's flat fill (a texture picked by hand is drawn as picked)
+    if name == DEFAULTS[kind] and ns.Look and ns.Look.Is("nameplates", "zacui") then
+        return ns.Look.For("nameplates").barTexture or TEX_NORM
     end
     name = ns.NewMediaName and ns.NewMediaName(name) or name
     if name and LOCAL_MEDIA.statusbar[name] then
@@ -684,7 +864,9 @@ local function BarTexture(kind)
         local p = lsm:Fetch("statusbar", name, true)
         if p then return p end
     end
-    return TEX_NORM
+    -- (an unknown name: the look's bar - ZacUI's gradient, or the game's
+    -- under the Classic look)
+    return (ns.Look and ns.Look.For("nameplates").barTexture) or TEX_NORM
 end
 
 -- The fill behind a bar and the 1px edge round it: the theme's window
@@ -708,7 +890,10 @@ local function ChromeExtras(frame, ch, withBg)
         for i, t in ipairs(strips) do
             if size <= 0 then t:Hide() else
                 t:Show()
-                if i <= 2 then t:SetHeight(size) else t:SetWidth(size) end
+                -- physical pixels under ZacUI's look (Core_Pixel, HD polish)
+                if not (ns.Pixel and ns.Pixel.SetEdgeSize(t, size)) then
+                    if i <= 2 then t:SetHeight(size) else t:SetWidth(size) end
+                end
             end
         end
     end
@@ -733,7 +918,11 @@ local function BarChrome(bg, frame)
     end
     if frame and frame._zui_borderTex then
         local b = (ch and ch.borderColor) or d.borderColor
-        if type(b) == "table" then
+        -- a Classic edge (Core_Look) keeps the art's own colour: the border
+        -- colour here is the ZacUI look's
+        if frame._zui_borderTex._zEdge then
+            if ns.TintBorder then ns.TintBorder(frame) end
+        elseif type(b) == "table" then
             for _, t in ipairs(frame._zui_borderTex) do
                 t:SetColorTexture(b[1] or b.r or 0, b[2] or b.g or 0, b[3] or b.b or 0, b[4] or b.a or 1)
             end
@@ -1030,7 +1219,7 @@ local function OnUnitAdded(unit)
     local f = Acquire(base)
     if f.guid and byGUID[f.guid] == f then byGUID[f.guid] = nil end
     f.unit = unit
-    f.guid = UnitGUID(unit)
+    f.guid = NP.SafeGUID(unit)
     f.isFriend = IsFriend(unit)
     active[unit] = f
     if f.guid then byGUID[f.guid] = f end
@@ -1191,7 +1380,13 @@ function NP.ApplyTargetState(f, isTarget, anyTarget, cue, instant)
     end
     -- the neon strips above and below the bar, exactly Plater's
     -- UpdateTargetHighlight; the border itself stays house black
-    NP.SetTargetNeon(f, isTarget and d.target.highlight)
+    -- (under a game look none of ZacUI's own target boxes: the stock
+    -- plate's cue instead, a white wash over the bar - NP_ClassicPlate)
+    local stock = NP.StockLook()
+    NP.SetTargetNeon(f, isTarget and d.target.highlight and not stock)
+    -- the match pass's target cue: a soft glow round the bar (NP_Health)
+    if NP.SetTargetGlow then NP.SetTargetGlow(f, isTarget and d.target.glow and not stock and true or false) end
+    if NP.StockTargetWash then NP.StockTargetWash(f, stock and isTarget) end
     -- Size cue. The frame hangs off a single CENTER anchor on the base
     -- plate, so SetScale grows it about its middle and the name, bar,
     -- cast bar and anything anchored to them (the soft-target arrows
@@ -1274,9 +1469,13 @@ function NP.ApplyCVars()
     end
     NP._cvarsPending = nil
     local d = DB()
-    pcall(SetCVar, "nameplateShowFriendlyNPCs", d.friendlyNpcPlates and 1 or 0)
-    pcall(SetCVar, "nameplateMotion", d.stacking and 1 or 0)
-    pcall(SetCVar, "nameplateMaxDistance", d.maxDistance)
+    -- SETUP2: through ns.CVar (recorded; put back when the plates are off)
+    local function Set(name, value)
+        if ns.CVar then ns.CVar.Set(name, value, "nameplates") else pcall(SetCVar, name, value) end
+    end
+    Set("nameplateShowFriendlyNPCs", d.friendlyNpcPlates and 1 or 0)
+    Set("nameplateMotion", d.stacking and 1 or 0)
+    Set("nameplateMaxDistance", d.maxDistance)
     if C_NamePlate and C_NamePlate.SetNamePlateEnemySize then
         pcall(C_NamePlate.SetNamePlateEnemySize,
             d.clickWidth, d.clickHeight)
@@ -1347,7 +1546,7 @@ driver:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "UPDATE_MOUSEOVER_UNIT" then
         -- 10-20 a second while sweeping a pack: only the plate the
         -- cursor left and the one it is on are touched
-        local g = UnitGUID("mouseover")
+        local g = NP.SafeGUID("mouseover")
         local nf = g and byGUID[g]
         if lastHover and lastHover ~= nf then NP.UpdateHover(lastHover) end
         if nf then NP.UpdateHover(nf) end
@@ -1443,9 +1642,11 @@ Modules.nameplates = function()
     -- Plater is still installed and enabled, ZacUI's engine stands down.
     local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
     if isLoaded and isLoaded("Plater") then
-        Print("nameplates: Plater is running, so ZacUI's nameplate "
+        local line = ("nameplates: Plater is running, so ZacUI's nameplate "
             .. "engine is standing down. Disable or delete Plater to "
             .. "switch over - your profile's look is already ported.")
+        -- after the login popups (Core_Popups), not under them
+        if ns.Popups then ns.Popups.Say(line) else Print(line) end
         return
     end
     DB()

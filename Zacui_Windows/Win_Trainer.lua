@@ -90,8 +90,9 @@ local function Service(i)
     return {
         index = i, name = name or UNKNOWN or "?", sub = sub, kind = kind,
         cost = cost or 0, isProf = isProf and true or false,
-        level = GetTrainerServiceLevelReq(i) or 0,
-        icon = GetTrainerServiceIcon(i),
+        -- (WoW Forever's own trainer never calls these two: asked only if there)
+        level = GetTrainerServiceLevelReq and GetTrainerServiceLevelReq(i) or 0,
+        icon = GetTrainerServiceIcon and GetTrainerServiceIcon(i) or nil,
     }
 end
 
@@ -411,6 +412,7 @@ local function BuildRow(row)
         if not e then return end
         if e.header then
             -- Blizzard's header click, minus the selection it would move.
+            if not (CollapseTrainerSkillLine and ExpandTrainerSkillLine) then return end   -- (not on WoW Forever)
             if e.expanded then CollapseTrainerSkillLine(e.index) else ExpandTrainerSkillLine(e.index) end
             return
         end
@@ -555,6 +557,7 @@ local function Build()
     allButton:SetPoint("TOPRIGHT", win, "TOPRIGHT", -Kit.PAD, y)
     allButton:SetScript("OnClick", function(self)
         -- Blizzard's "All" button: index 0 means every header.
+        if not (CollapseTrainerSkillLine and ExpandTrainerSkillLine) then return end   -- (not on WoW Forever)
         if self._zCollapse then CollapseTrainerSkillLine(0) else ExpandTrainerSkillLine(0) end
     end)
     search = Kit.Search(win, 100, function(text)
@@ -666,6 +669,7 @@ local function Leftovers()
         Add(f.CloseButton)
         Add(f.PortraitContainer)
         Add(f.NineSlice)
+        Add(f.TitleContainer)           -- Forever's modern trainer window only (level 510, over the cover)
         for _, r in ipairs({ f:GetRegions() }) do
             if not r._zui_own then Add(r) end
         end

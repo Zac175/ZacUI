@@ -196,6 +196,8 @@ local function BuildMapPreview(canvas, P)
             f:SetPoint(d.point, map, d.relPoint, d.x, d.y)
             f:SetFrameLevel(map:GetFrameLevel() + 5)
             tex:SetAllPoints()
+            -- (icons standing in for the game's buttons: cropped as icons)
+            ns.Look.CropIcon(tex, e[4], e[4])
         end
         st.icons[k] = f
     end

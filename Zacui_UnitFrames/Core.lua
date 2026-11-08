@@ -98,6 +98,10 @@ end
 -- Saved variables / init
 -- ----------------------------------------------------------------------------
 local function InitDB()
+    -- the match overlay, decided now that the look is latched (Config.lua),
+    -- and the kit's fresh-install spots under a game look (Kit.lua)
+    if ns.ApplyMatchOverlay then ns.ApplyMatchOverlay() end
+    if ns.ApplyKitDefaults then ns.ApplyKitDefaults() end
     -- Settings live in ZacUIDB.unitframes (ZacUI's saved variables, so the
     -- profile system carries them). The first time a ZacUIDB has none, the
     -- old standalone ZacUF settings (ZacUFDB, still loaded by the ZacUF
@@ -113,6 +117,13 @@ local function InitDB()
     end
     ns.db = ZacUIDB.unitframes
     ns.DeepFill(ns.db, ns.defaults)
+    -- ZacUI's Edit Mode unlocks the frames only while it is open; a save
+    -- written in the middle of it (a /reload, an error on the way out)
+    -- came back with the drag handles and sample frames stuck on
+    if ns.db._editUnlocked then
+        ns.db._editUnlocked = nil
+        ns.db.locked = true
+    end
 
     -- One-time migrations for saved variables created before a default changed.
     -- DeepFill only adds missing keys, so values already saved (e.g. the old
@@ -331,7 +342,38 @@ local function InitDB()
         -- choice, so it goes back to off (Options > Raid turns it on).
         if ns.db.raid then ns.db.raid.fitChat = false end
     end
+    -- Portraits follow the look when nothing was chosen (Config.lua,
+    -- ns.PortraitOn, 2026-11-07): the old shipped `false` - every look's
+    -- off - becomes nil, once, under any look; a `true` set by hand stays.
+    if not ns.db._portraitRev then
+        local function free(c)
+            local pc = type(c) == "table" and c.portrait
+            if type(pc) == "table" and pc.enabled == false then pc.enabled = nil end
+        end
+        for _, c in pairs(ns.db.frames or {}) do free(c) end
+        free(ns.db.party); free(ns.db.raid)
+        ns.db._portraitRev = 1
+    end
+    -- The match pass (Config.lua, 2026-11-07): under ZacUI's look, once, every
+    -- saved value still on the OLD shipped default moves to the new one; a
+    -- value set by hand stays. Not marked under another look, so a save
+    -- that turns to ZacUI's look later is moved then.
+    if ns._matchApplied and not ns.db._matchRev then
+        ns.MatchMigrate(ns.db)
+        ns.db._matchRev = 2
+    elseif ns._matchApplied and ns.db._matchRev == 1 then
+        -- (the first pass moved sizes too: they go back, once)
+        ns.MatchRestoreGeometry(ns.db)
+        ns.db._matchRev = 2
+    end
+    -- frames a later build brought back (the focus frame, Extras.lua: put
+    -- into the defaults only on a game that has one) come back filled when
+    -- the v7 clean-up above took an old copy away
+    ns.DeepFill(ns.db.frames, ns.defaults.frames)
+    ns.DeepFill(ns.db.blizzard, ns.defaults.blizzard)
     ns.db._cfgVersion = 21
+    -- the game looks' stock style defaults (Kit.lua, Core_Look)
+    if ns.FollowLookDefaults then ns.FollowLookDefaults() end
 end
 
 -- Re-apply cheap settings (colors, media, text, single-frame size/position) to
@@ -359,6 +401,11 @@ local function Init()
     if ns.HealColors then ns.HealColors:Init() end
     if ns.Heal then ns.Heal:Resolve() end
 
+    -- a fresh install starts each frame where Blizzard's is (ZacUI's
+    -- Core_FreshLayout; nothing on an existing install), read before they go
+    local Z = ns.ZUI
+    if Z and Z.FreshLayout and Z.FreshLayout.Units then pcall(Z.FreshLayout.Units, ns) end
+
     -- Disable Blizzard frames first (out of combat) so ours own the screen.
     if ns.DisableBlizzard then ns.DisableBlizzard() end
 
@@ -375,6 +422,10 @@ local function Init()
         if ns.db.party.enabled then ns.SpawnHeader("party") end
         if ns.db.raid.enabled  then ns.SpawnHeader("raid")  end
     end
+
+    -- the frames only some games have (focus, boss...: Extras.lua and
+    -- theirs), each made only when it is switched on
+    for _, spawn in ipairs(ns.ExtraSpawns or {}) do spawn() end
 
     -- no "loaded" line of its own: ZacUI says it once for all of its parts.
     -- The one thing worth a line is the first-time adoption of old settings.
@@ -445,7 +496,11 @@ SlashCmdList.ZACUF = function(msg)
     elseif cmd == "moveui" or cmd == "move" then
         ns.ToggleMoveMode(); return
     elseif cmd == "reset" then
-        ZacUIDB.unitframes = nil; InitDB(); ns.Print("Settings reset. Type /reload to rebuild frames."); return
+        ZacUIDB.unitframes = nil; InitDB()
+        local Z = ns.ZUI
+        if Z and Z.AskReload then Z.AskReload("Unit frame settings are back to their defaults. The frames are rebuilt after a reload.")
+        else ns.Print("Settings reset. Type /reload to rebuild frames.") end
+        return
     end
 
     -- Fire the Challenging Shout alert on yourself: glow + TTS sanity check

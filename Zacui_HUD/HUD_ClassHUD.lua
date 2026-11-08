@@ -29,6 +29,34 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+
+-- a value WoW Forever hands back hidden (a secret value: no maths on it)
+local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
+
+-- a number the code may do maths on: nil when WoW Forever hands it back
+-- hidden (its secret values)
+local function PlainNumber(v)
+    if v == nil or Hidden(v) then return nil end
+    return v
+end
+
+-- A row entry off its row: your tick (true / false) wins, else Class HUD
+-- v2's spec default (HUD_V2_Specs), else the entry's own default (a game
+-- version's additions start unticked; the old definitions have none).
+local function Off(eng, row, hidden, def)
+    if eng.V2Off then return eng:V2Off(row, hidden, def) end
+    local v = hidden[def.key]
+    if v ~= nil then return v and true or false end
+    return def.defaultHidden and true or false
+end
+-- a tick in a grid is yours for good: true = off, false = on
+local function TickValue(v) return not v end
+-- the trinket and racial row on: your switch, else the spec's (v2)
+local function AuxOn(eng, cfg)
+    if eng.V2AuxOn then return eng:V2AuxOn(cfg) end
+    return cfg.aux.enabled and true or false
+end
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -88,6 +116,11 @@ local itemCD = HUD.NewItemCDTracker()
 -- ============================================================
 local Engine = {}
 Engine.__index = Engine
+-- Class HUD v2 (HUD_V2_*.lua, loaded right after this file) adds its
+-- methods to this same engine and hangs off the V2* hooks below; every
+-- hook is a no-op until those files load, so the HUD draws as it always did.
+HUD.ClassEngine = Engine
+HUD.ClassInstances = {}
 
 local function DefaultsFor(def)
     local d = {
@@ -172,7 +205,10 @@ end
 
 function Engine:ComboPoints()
     if self.sample then return self.S.cp or 0 end
-    return (GetComboPoints and GetComboPoints("player", "target")) or 0
+    local cp = GetComboPoints and GetComboPoints("player", "target")
+    -- (WoW Forever may hide it: no points shown rather than maths on it)
+    if Hidden(cp) then return 0 end
+    return cp or 0
 end
 
 -- The colour settings as { r, g, b, a } arrays, rebuilt (new tables, so
@@ -365,11 +401,12 @@ function Engine:UpdateSpellSnapshot()
     local S = self.S
     for key, sp in pairs(S.spells) do
         if sp.known and sp.name then
-            local start, duration = GetSpellCooldown_C(sp.name)
+            local start, duration, _, _, durObj = GetSpellCooldown_C(sp.name)
             start, duration = start or 0, duration or 0
             local cd = S.cds[key]
             if not cd then cd = {} S.cds[key] = cd end
             cd.start, cd.duration = start, duration
+            cd.durObj = durObj   -- (WoW Forever: a hidden cooldown's swipe)
             cd.real = duration > GCD_MAX
             local us = S.usable[key]
             if not us then us = {} S.usable[key] = us end
@@ -398,7 +435,7 @@ function Engine:UpdateMisc()
         if not t then t = {} S.trinkets[slotIdx] = t end
         t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", slotIdx) or nil
         if GetInventoryItemCooldown then
-            local start, duration = GetInventoryItemCooldown("player", slotIdx)
+            local start, duration = HUD.PlainCD(GetInventoryItemCooldown("player", slotIdx))
             t.start, t.duration = start or 0, duration or 0
         end
     end
@@ -419,31 +456,34 @@ function Engine:OnPowerEvent(event, spellId)
     local S = self.S
     local ptype = UnitPowerType("player") or 0
     local cur = UnitPower("player", ptype) or 0
+    -- WoW Forever can hand back your own power as a hidden value: no maths
+    -- on it, so the regen / energy tick reading sits out until it reads again
+    if Hidden(cur) then self.lastPower = nil return end
     if event == "UNIT_POWER_FREQUENT" then
         if ptype == 0 then
             -- mana: regen ticks only after the five-second rule and not
             -- while hardcasting, so procs cannot hijack the bar
-            if cur >= (UnitPowerMax("player", 0) or 0) then
+            if cur >= (PlainNumber(UnitPowerMax("player", 0)) or 0) then
                 self.lastPower = cur
                 return
             end
-            if cur > self.lastPower and GetTime() >= self.fsrCastAt + 5
+            if self.lastPower and cur > self.lastPower and GetTime() >= self.fsrCastAt + 5
                 and not (UnitCastingInfo and UnitCastingInfo("player")) then
                 S.fsr.start, S.fsr.duration = GetTime(), 2
             end
         elseif ptype == 3 then
             -- energy ticks every 2s; a gain that is not a full bar marks one
-            if cur > self.lastPower and cur < (UnitPowerMax("player", 3) or 100) then
+            if self.lastPower and cur > self.lastPower and cur < (PlainNumber(UnitPowerMax("player", 3)) or 100) then
                 S.tick.start, S.tick.duration = GetTime(), 2
             end
         end
         self.lastPower = cur
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         if spellId == 5019 and S.wand.active then     -- Shoot
-            local speed = UnitRangedDamage and UnitRangedDamage("player") or 0
+            local speed = PlainNumber(UnitRangedDamage and UnitRangedDamage("player") or 0)
             if speed and speed > 0 then S.wand.start, S.wand.duration = GetTime(), speed end
         end
-        if ptype == 0 and cur < self.lastPower then
+        if ptype == 0 and self.lastPower and cur < self.lastPower then
             S.fsr.start, S.fsr.duration = GetTime(), 5
             self.fsrCastAt = GetTime()
         end
@@ -465,12 +505,13 @@ function Engine:OnCombatLogEvent(_, subevent, _, sourceGUID)
 end
 
 -- WoW Forever: the game's own swing event instead (ns.Swings)
-function Engine:OnSwing(hand, now, dur)
+function Engine:OnSwing(hand, now, dur, durObj)
     local S = self.S
+    -- (durObj: WoW Forever's hidden swing time on the game's clock)
     if hand == "mh" then
-        S.swing.start, S.swing.duration = now, dur or 0
+        S.swing.start, S.swing.duration, S.swing.durObj = now, dur or 0, durObj
     elseif hand == "ranged" and self.wantsRanged then
-        S.ranged.start, S.ranged.duration = now, dur or 0
+        S.ranged.start, S.ranged.duration, S.ranged.durObj = now, dur or 0, durObj
     end
 end
 
@@ -504,6 +545,7 @@ function Engine:Elements()
     if self.def.reminders and #self.def.reminders > 0 then
         list[#list + 1] = { key = "Reminders", mover = p .. "Reminders", label = "Reminders", cfg = function(c) return c.reminders end }
     end
+    if self.V2Elements then self:V2Elements(list) end
     if self.bars.swing then
         list[#list + 1] = { key = "Swing", mover = p .. "Swing", label = "Swing Timer", cfg = function(c) return c.resources.pos.swing end }
     end
@@ -534,12 +576,13 @@ function Engine:CreateAnchors()
         Main = { 36, 28 }, AuraRow = { 25, 25 }, DebuffRow = { 26, 26 }, Reminders = { 40, 40 },
         Swing = { 316, 2 }, Ranged = { 316, 2 }, Mana = { 234, 10 }, Power = { 234, 6 },
         Combo = { 66, 10 }, Wand = { 300, 8 }, Texts = { 240, 30 }, Aux = { 30, 30 },
+        Utility = { 28, 28 },
     }
     for _, e in ipairs(self:Elements()) do
         local s = sizes[e.key] or { 26, 26 }
-        self:MakeAnchor(e.key, s[1], s[2])
+        if not self.anchors[e.key] then self:MakeAnchor(e.key, s[1], s[2]) end
     end
-    self:MakeAnchor("GroupHandle", 170, 24)
+    if not self.anchors.GroupHandle then self:MakeAnchor("GroupHandle", 170, 24) end
 end
 
 function Engine:ApplyAnchorPositions()
@@ -553,6 +596,7 @@ function Engine:ApplyAnchorPositions()
     if cfg.group then HUD.PlaceAnchor(self.def.prefix .. "Group", self.holders.GroupHandle, cfg.group) end
     self.anchors.Main:SetScale(cfg.mainRow.scale or 1)
     self.anchors.AuraRow:SetScale(cfg.auraRow.scale or 1)
+    if self.V2Positions then self:V2Positions(cfg) end
 end
 
 function Engine:RegisterMovers()
@@ -661,6 +705,9 @@ local function DrainDriver(self, bar, stateKey, previewValue)
             w.start = GetTime()
             remaining = dur
         end
+        -- (WoW Forever: a hidden swing time runs on the game's clock)
+        if not self.sample and HUD.TimedSwing(b, w.durObj) then return end
+        HUD.UntimedSwing(b)
         local frac = (remaining > 0 and dur > 0) and (remaining / dur) or 0
         b.bar:SetValue(frac)
         if b.UpdateSpark then b:UpdateSpark(frac) end
@@ -737,6 +784,26 @@ function Engine:BuildBars()
                 cur = UnitPower("player", ptype) or 0
                 max = UnitPowerMax("player", ptype) or 100
             end
+            -- a hidden value (WoW Forever): the bar and the number take it as
+            -- it is, with no maths on it
+            if Hidden(cur) or Hidden(max) then
+                if not self2._secretPow then
+                    self2._secretPow = true
+                    self2.lastPower = nil
+                end
+                self2.bar:SetMinMaxValues(0, Hidden(max) and 100 or max)
+                self2.bar:SetValue(cur)
+                self2.text:SetText(cur)
+                local c = eng:Col((ptype == 1) and "rage" or "energy")
+                if self2.lastColor ~= c then
+                    self2.lastColor = c
+                    self2:SetBarColor(c[1], c[2], c[3], 1)
+                end
+                return
+            elseif self2._secretPow then
+                self2._secretPow = nil
+                self2.bar:SetMinMaxValues(0, 1)
+            end
             self2.bar:SetValue(max > 0 and cur / max or 0)
             if cur ~= self2.lastPower then
                 self2.lastPower = cur
@@ -797,7 +864,16 @@ end
 -- layout (same shapes as the Paladin HUD)
 -- ------------------------------------------------------------
 -- Row layouts: HUD.LayoutGrid / HUD.LayoutRow (HUD_Shared), laid out
--- again only when the shown icons or the sizes change.
+-- again only when the shown icons or the sizes change. Every row goes
+-- through these two so Class HUD v2 can lay a row out by a saved layout
+-- (HUD_V2_Rows); with nothing saved they are exactly the shared layouts.
+function Engine:LayoutGrid(row, memo, list, anchor, rowsCfg, space)
+    HUD.LayoutGrid(memo, list, anchor, rowsCfg, space)
+end
+
+function Engine:LayoutRow(row, memo, list, anchor, w, h, space)
+    HUD.LayoutRow(memo, list, anchor, w, h, space)
+end
 
 -- ------------------------------------------------------------
 -- refresh (0.2s core tick)
@@ -827,7 +903,7 @@ function Engine:UpdateMainIcon(icon, def, cfg)
         local us = S.usable[def.spell] or {}
         local inRange = (not def.noRange) and S.inRange[def.spell] or nil
         icon:SetIconTexture(sp.icon)
-        if cd then icon:SetSwipe(cd.start, cd.duration) end
+        if cd then icon:SetSwipe(cd.start, cd.duration, cd.durObj) end
         local desat = (cd and cd.real) or us.noPower or false
         if inRange == 0 then
             desat = true
@@ -837,6 +913,8 @@ function Engine:UpdateMainIcon(icon, def, cfg)
             icon:SetIconColor(1, 1, 1, 1)
         end
         icon:SetDesat(desat)
+        -- the state Class HUD v2 restyles (HUD_V2_Icon); a word, nothing more
+        icon.state = (inRange == 0 and "oor") or (us.noPower and "nopower") or (cd and cd.real and "cooldown") or "ready"
         return true
     end
     local item, count = self:ItemFor(def, cfg)
@@ -847,6 +925,7 @@ function Engine:UpdateMainIcon(icon, def, cfg)
     local start, duration = self:ItemCD(item.id)
     icon:SetSwipe(start, duration)
     icon:SetDesat(duration > GCD_MAX)
+    icon.state = (duration > GCD_MAX) and "cooldown" or "ready"
     return true
 end
 
@@ -857,7 +936,7 @@ function Engine:RefreshMainRow(cfg)
     for _, def in ipairs(self.def.grid) do
         local icon = self.mainIcons[def.key]
         local shown = false
-        if self:On(cfg) and not m.hidden[def.key] then
+        if self:On(cfg) and not Off(self, "main", m.hidden, def) then
             if self.preview then
                 local sp = def.spell and S.spells[def.spell]
                 local first = def.items and def.items[1]
@@ -875,7 +954,7 @@ function Engine:RefreshMainRow(cfg)
         W.SetShownAnimated(icon, shown)
         if shown then self.mainActive[#self.mainActive + 1] = icon end
     end
-    HUD.LayoutGrid(self.memo.main, self.mainActive, self.anchors.Main, m.rows or self.defaults.mainRow.rows, m.spacing or 4)
+    self:LayoutGrid("main", self.memo.main, self.mainActive, self.anchors.Main, m.rows or self.defaults.mainRow.rows, m.spacing or 4)
 end
 
 -- buff row and debuff row share one shape: own aura by resolved name
@@ -893,7 +972,7 @@ function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source
     for _, def in ipairs(list) do
         local icon = icons[def.key]
         local shown = false
-        if self:On(cfg) and rowCfg.enabled ~= false and not rowCfg.hidden[def.key] then
+        if self:On(cfg) and rowCfg.enabled ~= false and not Off(self, source == S.targetDebuffs and "debuffs" or "buffs", rowCfg.hidden, def) then
             if self.preview then
                 icon:SetIconTexture(S.auraIcons[def.key] or 134400)
                 icon:ClearSwipe()
@@ -906,6 +985,7 @@ function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source
                     icon:SetHiddenTexture(b.icon)
                     icon:SetHiddenSwipe("target", b.hidden)
                     icon.auraRef = b
+                    icon.state = "active"
                     shown = true
                 elseif b then
                     icon:SetIconTexture(b.icon or S.auraIcons[def.key])
@@ -915,6 +995,7 @@ function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source
                         icon:ClearSwipe()
                     end
                     icon.auraRef = b
+                    icon.state = "active"
                     shown = true
                 end
             end
@@ -944,7 +1025,7 @@ function Engine:RefreshAuraList(cfg, list, icons, active, rowCfg, anchor, source
         end
     end
     local size = rowCfg.iconSize or 25
-    HUD.LayoutRow(memo, active, anchor, size, size, rowCfg.spacing or 4)
+    self:LayoutRow(memo == self.memo.aura and "buffs" or "debuffs", memo, active, anchor, size, size, rowCfg.spacing or 4)
 end
 
 -- helpers handed to a reminder's check function
@@ -1011,7 +1092,7 @@ function Engine:RefreshReminders(cfg)
         if shown then shownList[#shownList + 1] = icon end
     end
     local size = r.iconSize or 40
-    HUD.LayoutRow(self.memo.remind, shownList, self.anchors.Reminders, size, size, r.spacing or 6)
+    self:LayoutRow("reminders", self.memo.remind, shownList, self.anchors.Reminders, size, size, r.spacing or 6)
 end
 
 function Engine:RefreshResources(cfg)
@@ -1095,7 +1176,7 @@ function Engine:RefreshAux(cfg)
         local icon = self.auxIcons[key]
         local def = icon.def
         local shown = false
-        if self:On(cfg) and a.enabled and a[key] then
+        if self:On(cfg) and AuxOn(self, cfg) and a[key] then
             if def.slot then
                 local t = S.trinkets[def.slot]
                 if t and t.texture then
@@ -1116,7 +1197,7 @@ function Engine:RefreshAux(cfg)
         if shown then shownList[#shownList + 1] = icon end
     end
     local size = a.iconSize or 30
-    HUD.LayoutRow(self.memo.aux, shownList, self.anchors.Aux, size, size, a.spacing or 4)
+    self:LayoutRow("aux", self.memo.aux, shownList, self.anchors.Aux, size, size, a.spacing or 4)
 end
 
 function Engine:Refresh()
@@ -1137,6 +1218,7 @@ function Engine:Refresh()
         if self.anchors.Reminders then self:BuildReminders() end
         self:BuildBars()
         self:BuildAux()
+        if self.V2Build then self:V2Build(cfg) end
         self:ApplyColors()
         self:ApplyAnchorPositions()
     end
@@ -1149,6 +1231,7 @@ function Engine:Refresh()
     self:RefreshReminders(cfg)
     self:RefreshResources(cfg)
     self:RefreshAux(cfg)
+    if self.V2Refresh then self:V2Refresh(cfg) end
 end
 
 function Engine:HideAll()
@@ -1161,6 +1244,7 @@ function Engine:HideAll()
         if b then b:Hide() end
     end
     for _, fs in pairs(self.textFS or {}) do fs:Hide() end
+    if self.V2HideAll then self:V2HideAll() end
 end
 
 function Engine:ApplySizes()
@@ -1182,6 +1266,7 @@ function Engine:ApplySizes()
     if self.tickBar then self.tickBar:SetSize(r.pos.power.w or 234, 2) end
     size(self.wandBar, "Wand", r.pos.wand.w or 300, r.pos.wand.h or 8)
     for _, fs in pairs(self.textFS or {}) do HUD.ApplyFont(fs, r.pos.texts.size or 20, "OUTLINE", "alert") end
+    if self.V2ApplySizes then self:V2ApplySizes(cfg) end
     self:ApplyAnchorPositions()
     self:Refresh()
 end
@@ -1237,13 +1322,18 @@ function Engine:TextTick()
             icon:SetText("p", remaining > 0 and W.FormatTime(remaining, 0) or "")
         end
     end
+    if self.V2TextTick then self:V2TextTick() end
 end
 
 function Engine:CoreTick()
     local cfg = self:Store()
     if not cfg or not cfg.enabled or not self.S.isClass then return end
     local d = self.dirty
-    if d.spells then d.spells = false self:ResolveSpells() end
+    if d.spells then
+        d.spells = false
+        if self.V2MergeCatalogue then self:V2MergeCatalogue() end
+        self:ResolveSpells()
+    end
     if d.bags then d.bags = false self:ScanItems() end
     if d.auras then d.auras = false self:ScanPlayerBuffs() end
     if d.target then d.target = false self:ScanTargetDebuffs() end
@@ -1292,7 +1382,7 @@ local MELEE_RANGED_SUBS = { "SWING_DAMAGE", "SWING_MISSED", "RANGE_DAMAGE", "RAN
 
 function Engine:RegisterHotEvents()
     local ev = self.ev
-    self.lastPower = UnitPower("player", UnitPowerType("player") or 0) or 0
+    self.lastPower = PlainNumber(UnitPower("player", UnitPowerType("player") or 0))
     if not self.onCLEU then
         self.onCLEU = function(...) self:OnCombatLogEvent(...) end
     end
@@ -1347,6 +1437,7 @@ function Engine:OnEvent(event, arg1, arg2, arg3)
         ev:RegisterEvent("UNIT_DISPLAYPOWER")
         local cfg = self:Store()
         if cfg and cfg.enabled then self:StartTicker() end
+        if self.V2Login then self:V2Login(cfg) end
         HUD.Debug(self.def.label .. " core initialized")
     elseif event == "UNIT_POWER_FREQUENT" or event == "UNIT_SPELLCAST_SUCCEEDED" then
         self:OnPowerEvent(event, arg3)
@@ -1360,14 +1451,14 @@ function Engine:OnEvent(event, arg1, arg2, arg3)
     elseif event == "SPELLS_CHANGED" then
         d.spells = true
     elseif event == "UNIT_DISPLAYPOWER" then
-        self.lastPower = UnitPower("player", UnitPowerType("player") or 0) or 0
+        self.lastPower = PlainNumber(UnitPower("player", UnitPowerType("player") or 0))
     elseif event == "PLAYER_REGEN_DISABLED" then
         S.inCombat = true
     elseif event == "PLAYER_REGEN_ENABLED" then
         S.inCombat = false
     elseif event == "START_AUTOREPEAT_SPELL" then
         S.wand.active = true
-        local speed = UnitRangedDamage and UnitRangedDamage("player") or 0
+        local speed = PlainNumber(UnitRangedDamage and UnitRangedDamage("player") or 0)
         S.wand.start = GetTime()
         S.wand.duration = (speed and speed > 0) and math.min(speed, 0.6) or 0.6
     elseif event == "STOP_AUTOREPEAT_SPELL" then
@@ -1376,6 +1467,8 @@ function Engine:OnEvent(event, arg1, arg2, arg3)
     elseif event == "PLAYER_ENTERING_WORLD" then
         d.auras, d.bags, d.spells, d.target = true, true, true, true
         itemCD.MarkDirty()
+    elseif self.V2Event then
+        self:V2Event(event, arg1, arg2, arg3)   -- (Class HUD v2's own events: flags only)
     end
 end
 
@@ -1423,6 +1516,7 @@ function Engine:NewSample(canvas)
     s.debuffIcons, s.debuffActive = {}, {}
     s.remindIcons, s.auxIcons = {}, {}
     s.memo = { main = {}, aura = {}, debuff = {}, remind = {}, aux = {} }
+    if s.V2Init then s:V2Init() end
     -- the timers count down while the canvas is shown (OnUpdate stops
     -- by itself when the dock or the window hides)
     local tick = CreateFrame("Frame", nil, canvas)
@@ -1536,6 +1630,7 @@ function Engine:FillSample(mode)
     -- weapon enchants (the poison / imbue reminders read them)
     S.mhEnchant, S.ohEnchant, S.hasOffhand = false, false, true
     S.mhEnchantLeft, S.ohEnchantLeft = 0, 0
+    if self.V2FillSample then self:V2FillSample(mode, combat) end
 end
 
 -- The sample's pieces, each the size its settings make it, exactly where
@@ -1555,9 +1650,10 @@ function Engine:LayoutSample(cfg)
         Ranged = r.ranged, Swing = r.swing,
         Power = r.power or r.tick, Mana = r.mana or r.fsr,
         Combo = r.combo, Wand = r.wand,
-        Aux = cfg.aux.enabled,
+        Aux = AuxOn(self, cfg),
     }
     local scale = { Main = cfg.mainRow.scale or 1, AuraRow = cfg.auraRow.scale or 1 }
+    if self.V2SampleOn then self:V2SampleOn(on, scale, cfg) end
     local pieces = {}
     for _, e in ipairs(self:Elements()) do
         local a = self.anchors[e.key]
@@ -1577,12 +1673,16 @@ function Engine:PreviewSpec()
         title = self.def.label,
         width = Engine.SAMPLE_W, height = Engine.SAMPLE_H,
         modes = { { id = "combat", label = "In combat" }, { id = "ready", label = "Out of combat" } },
+        -- (Class HUD v2: a spec picker for the sample, where the class has specs)
+        controls = (self.V2PreviewControls and self.def.roles and self.def.roles[1])
+            and function(holder, P) eng:V2PreviewControls(holder, P) end or nil,
         build = function(canvas, P)
             P.store.sample = eng:NewSample(canvas)
         end,
         update = function(canvas, P)
             local s = P.store.sample
             if not s then return end
+            if eng.V2PreviewUpdate then eng:V2PreviewUpdate(s, P) end
             HUD.CheckLook()
             s:FillSample(P.mode or "combat")
             s:Refresh()
@@ -1632,8 +1732,8 @@ function Engine:Tab_General(L, cfg)
     L:Desc("Untick an icon to remove it from the grid.")
     CheckGrid(L, def.grid,
         function(g) return g.label end,
-        function(g) return not cfg.mainRow.hidden[g.key] end,
-        function(g, v) cfg.mainRow.hidden[g.key] = (not v) and true or nil eng:Refresh() end)
+        function(g) return not Off(eng, "main", cfg.mainRow.hidden, g) end,
+        function(g, v) cfg.mainRow.hidden[g.key] = TickValue(v) eng:Refresh() end)
     local hasPotion = false
     for _, g in ipairs(def.grid) do if g.kind == "itemPotion" then hasPotion = true end end
     if hasPotion then
@@ -1650,8 +1750,8 @@ function Engine:Tab_General(L, cfg)
         Check(L, "Show the active buff row", cfg.auraRow.enabled ~= false, function(v) cfg.auraRow.enabled = v eng:Refresh() end)
         CheckGrid(L, def.buffRow,
             function(b) return b.label or S.auraNames[b.key] or b.key end,
-            function(b) return not cfg.auraRow.hidden[b.key] end,
-            function(b, v) cfg.auraRow.hidden[b.key] = (not v) and true or nil eng:Refresh() end)
+            function(b) return not Off(eng, "buffs", cfg.auraRow.hidden, b) end,
+            function(b, v) cfg.auraRow.hidden[b.key] = TickValue(v) eng:Refresh() end)
         L:EndCard()
     end
 
@@ -1661,8 +1761,8 @@ function Engine:Tab_General(L, cfg)
         Check(L, "Show the target debuff row", cfg.debuffRow.enabled ~= false, function(v) cfg.debuffRow.enabled = v eng:Refresh() end)
         CheckGrid(L, def.debuffRow,
             function(b) return b.label or S.auraNames[b.key] or b.key end,
-            function(b) return not cfg.debuffRow.hidden[b.key] end,
-            function(b, v) cfg.debuffRow.hidden[b.key] = (not v) and true or nil eng:Refresh() end)
+            function(b) return not Off(eng, "debuffs", cfg.debuffRow.hidden, b) end,
+            function(b, v) cfg.debuffRow.hidden[b.key] = TickValue(v) eng:Refresh() end)
         L:EndCard()
     end
 
@@ -1692,11 +1792,16 @@ function Engine:Tab_General(L, cfg)
     L:EndCard()
 
     L:Card("Trinkets and racial")
-    Check(L, "Show the trinket and racial row", cfg.aux.enabled, function(v) cfg.aux.enabled = v eng:Refresh() end)
+    Check(L, "Show the trinket and racial row", AuxOn(eng, cfg), function(v)
+        cfg.aux.enabled = v
+        if eng.V2AuxOn and HUD.V2 then HUD.V2.Cfg(cfg, true).aux = v and true or false end
+        eng:Refresh()
+    end)
     Check(L, "Trinket slot 1", cfg.aux.trinket1, function(v) cfg.aux.trinket1 = v eng:Refresh() end, 16)
     Check(L, "Trinket slot 2", cfg.aux.trinket2, function(v) cfg.aux.trinket2 = v eng:Refresh() end, 16)
     Check(L, "Racial ability", cfg.aux.racial, function(v) cfg.aux.racial = v eng:Refresh() end, 16)
     L:EndCard()
+    if self.V2Tab_General then self:V2Tab_General(L, cfg) end
 end
 
 function Engine:Tab_Look(L, cfg)
@@ -1788,6 +1893,7 @@ function Engine:Tab_Look(L, cfg)
     HUD.ColorGrid(L, entries)
     L:EndCard()
 
+    if self.V2Tab_Look then self:V2Tab_Look(L, cfg) end
     HUD.SharedLookCards(L)
 end
 
@@ -1801,6 +1907,7 @@ function Engine:Tab_Text(L, cfg)
             setSize = function(v) r.pos.texts.size = v eng:ApplySizes() end }
     end
     HUD.SharedTextCards(L, alert)
+    if self.V2Tab_Text then self:V2Tab_Text(L, cfg) end
 end
 
 function Engine:Tab_Position(L, cfg)
@@ -1813,6 +1920,7 @@ function Engine:Tab_Position(L, cfg)
     if self.def.buffRow and #self.def.buffRow > 0 then
         HUD.ScaleSlider(L, "Active buff row scale", cfg.auraRow, "scale", function() eng:ApplyAnchorPositions() end)
     end
+    if self.V2Tab_PositionCard then self:V2Tab_PositionCard(L, cfg) end
     L:EndCard()
 end
 
@@ -1827,6 +1935,7 @@ function Engine:Tab_Advanced(L, cfg)
     end, "Puts this HUD's colours back to the defaults.")
     HUD.ResetLookButton(L)
     L:EndCard()
+    if self.V2Tab_Advanced then self:V2Tab_Advanced(L, cfg) end
 end
 
 function Engine:BuildPage(L)
@@ -1868,6 +1977,7 @@ end
 --   powerLabel = "Energy", potionChoice = 13, weaponEnchant = true, keywords = "...",
 -- }
 function HUD.DefineClass(def)
+    if HUD.V2 and HUD.V2.Normalize then HUD.V2.Normalize(def) end
     local self = setmetatable({}, Engine)
     self.def = def
     self.defaults = DefaultsFor(def)
@@ -1894,6 +2004,8 @@ function HUD.DefineClass(def)
     self.remindIcons, self.auxIcons = {}, {}
     -- what each row was last laid out with (HUD.LayoutGrid / LayoutRow)
     self.memo = { main = {}, aura = {}, debuff = {}, remind = {}, aux = {} }
+    if self.V2Init then self:V2Init() end
+    HUD.ClassInstances[#HUD.ClassInstances + 1] = self
 
     -- Frames exist only for the class they serve.
     local isClass = select(2, UnitClass("player")) == def.class

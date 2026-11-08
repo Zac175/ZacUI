@@ -10,6 +10,10 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+
+-- a value WoW Forever hands back hidden (a secret value: no maths on it)
+local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -273,11 +277,12 @@ local GCD_MAX = 1.51
 local function UpdateSpellSnapshot()
     for key, sp in pairs(S.spells) do
         if sp.known and sp.name then
-            local start, duration = GetSpellCooldown_C(sp.name)
+            local start, duration, _, _, durObj = GetSpellCooldown_C(sp.name)
             start, duration = start or 0, duration or 0
             local cd = S.cds[key]
             if not cd then cd = {} S.cds[key] = cd end
             cd.start, cd.duration = start, duration
+            cd.durObj = durObj   -- (WoW Forever: a hidden cooldown's swipe)
             cd.real = duration > GCD_MAX
             local us = S.usable[key]
             if not us then us = {} S.usable[key] = us end
@@ -307,13 +312,18 @@ local fsrCastAt = -10
 
 local function OnManaEvent(event, spellId)
     local cur = UnitPower("player", 0) or 0
+    -- hidden (WoW Forever): the five-second-rule reading sits out
+    if Hidden(cur) then cur = nil end
+    if not cur and event == "UNIT_POWER_FREQUENT" then lastMana = nil return end
     if event == "UNIT_POWER_FREQUENT" then
-        if cur >= (UnitPowerMax("player", 0) or 0) then
+        local mx = UnitPowerMax("player", 0)
+        if Hidden(mx) then mx = nil end
+        if cur >= (mx or 0) then
             lastMana = cur
             return
         end
         -- Regen ticks only after the 5s rule, not while hardcasting (same rule as the paladin bar).
-        if cur > lastMana and GetTime() >= fsrCastAt + 5
+        if lastMana and cur > lastMana and GetTime() >= fsrCastAt + 5
             and not (UnitCastingInfo and UnitCastingInfo("player")) then
             S.fsr.start, S.fsr.duration = GetTime(), 2
         end
@@ -322,11 +332,12 @@ local function OnManaEvent(event, spellId)
         -- Wand tracking (Shoot restarts the swing bar at ranged speed)
         if spellId == SHOOT_ID then
             local speed = UnitRangedDamage and UnitRangedDamage("player") or 0
+            if Hidden(speed) then speed = nil end
             if S.wand.active and speed and speed > 0 then
                 S.wand.start, S.wand.duration = GetTime(), speed
             end
         end
-        if cur < lastMana then
+        if cur and lastMana and cur < lastMana then
             S.fsr.start, S.fsr.duration = GetTime(), 5
             fsrCastAt = GetTime()
         end
@@ -664,7 +675,7 @@ local function UpdateMainIcon(V, icon, def)
         local us = VS.usable[def.spell] or {}
         local inRange = (not def.noRange) and VS.inRange[def.spell] or nil
         icon:SetIconTexture(sp.icon)
-        if cd then icon:SetSwipe(cd.start, cd.duration) end
+        if cd then icon:SetSwipe(cd.start, cd.duration, cd.durObj) end
         local desat = (cd and cd.real) or us.noPower or false
         local tint = nil
         if inRange == 0 then
@@ -1172,6 +1183,7 @@ ev:RegisterEvent("PLAYER_LOGIN")
 -- Hot events live only while the HUD runs (see StartTicker/StopTicker).
 RegisterHotEvents = function()
     lastMana = UnitPower("player", 0) or 0
+    if Hidden(lastMana) then lastMana = nil end
     ev:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
     ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     ev:RegisterEvent("BAG_UPDATE_DELAYED")
@@ -1192,6 +1204,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         end
         playerGUID = UnitGUID("player")
         lastMana = UnitPower("player", 0) or 0
+        if Hidden(lastMana) then lastMana = nil end
         S.inCombat = InCombatLockdown() or UnitAffectingCombat("player")
 
         ev:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1219,6 +1232,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
     elseif event == "START_AUTOREPEAT_SPELL" then
         S.wand.active = true
         local speed = UnitRangedDamage and UnitRangedDamage("player") or 0
+        if Hidden(speed) then speed = nil end   -- (hidden on WoW Forever)
         -- WA-style short wind-up: the first Shoot lands quickly, then real swings take over.
         S.wand.start = GetTime()
         S.wand.duration = (speed and speed > 0) and math.min(speed, 0.6) or 0.6

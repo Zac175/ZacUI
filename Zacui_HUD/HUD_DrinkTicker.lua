@@ -16,6 +16,10 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+
+-- a value WoW Forever hands back hidden (a secret value: no maths on it)
+local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -64,7 +68,10 @@ local ENERGIZE_EVENTS = {
 
 local function OnPowerUpdate()
     local cur = UnitPower("player", 0) or 0
-    if cur > lastMana then
+    -- hidden (WoW Forever): no maths on it, so the tick clock waits for a
+    -- reading it can use
+    if Hidden(cur) then lastMana = nil return end
+    if lastMana and cur > lastMana then
         local now = GetTime()
         -- Non-regen gain? The drink's own periodic energize is ALSO on the
         -- tick clock, so gains while drinking are trusted.
@@ -253,7 +260,11 @@ local function Tick()
         show = not (InCombatLockdown() or UnitAffectingCombat("player"))
     else -- smart: show while drinking or mana not full
         local cur, max = UnitPower("player", 0), UnitPowerMax("player", 0)
-        show = hasDrinkBuff or (max > 0 and cur < max)
+        if Hidden(cur) or Hidden(max) then
+            show = true   -- hidden (WoW Forever): can't tell full from not, so show it
+        else
+            show = hasDrinkBuff or (max > 0 and cur < max)
+        end
     end
     SetBarShown(show and true or false)
 end
@@ -289,6 +300,7 @@ ev:RegisterEvent("PLAYER_LOGIN")
 local function OnPlayerAuras() auraDirty = true end   -- the 0.5 s tick reads it
 RegisterHotEvents = function()
     lastMana = UnitPower("player", 0) or 0
+    if Hidden(lastMana) then lastMana = nil end
     auraDirty = true
     ev:RegisterUnitEvent("UNIT_POWER_UPDATE", "player")
     ns.PlayerAuras.On("DrinkTicker", OnPlayerAuras)

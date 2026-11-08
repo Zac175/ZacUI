@@ -54,13 +54,24 @@ end
 -- fullscreen one. Skinning first strips chrome that is about to be
 -- replaced by chrome nobody then touches - which is exactly how the map
 -- ended up flat dark inside a carved wooden picture frame.
+-- The reveal, the HD tiles and the pins are Classic Era's Azeroth data:
+-- on a game version whose map is not that Azeroth (Core_Flavor's
+-- "maps_data" row: Retail) those three steps are not taken at all, and
+-- the window, skin, group dots and battlefield map run on their own.
+local function DataOn()
+    return not (ns.FeatureOn and not ns.FeatureOn("maps_data"))
+end
+Maps.DataOn = DataOn
+
 local function ApplyAll()
     wipe(order)
     Step("frame", MapsFrame.Apply)
     Step("skin", MapsSkin.Apply)
-    Step("reveal", MapsReveal.Apply)
-    Step("hd", MapsHD.Apply)
-    Step("pins", MapsIcons.Apply)
+    if DataOn() then
+        Step("reveal", MapsReveal.Apply)
+        Step("hd", MapsHD.Apply)
+        Step("pins", MapsIcons.Apply)
+    end
     Step("group", MapsGroup.Apply)
     Step("battlefield", MapsBattlefield.Apply)
 end
@@ -71,8 +82,8 @@ end
 function Maps.Refresh()
     if not ZacUIDB.modules or not ZacUIDB.modules.maps then return end
     ApplyAll()
-    if MapsReveal.Repaint then MapsReveal.Repaint() end
-    if MapsIcons.Refresh then MapsIcons.Refresh() end
+    if DataOn() and MapsReveal.Repaint then MapsReveal.Repaint() end
+    if DataOn() and MapsIcons.Refresh then MapsIcons.Refresh() end
 end
 
 -- A LOOK setting changed (a colour, a font, a pin size): repaint what is

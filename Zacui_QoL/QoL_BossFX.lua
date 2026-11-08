@@ -289,7 +289,8 @@ local function ReadCVar(name)
 end
 
 local function WriteCVar(name, value)
-    pcall(SetCVar, name, value)
+    -- SETUP2: through ns.CVar (recorded; put back when Quality of life is off)
+    if ns.CVar then ns.CVar.Set(name, value, "qol") else pcall(SetCVar, name, value) end
 end
 
 -- Which particle cvar the game is drawing with right now: the raid

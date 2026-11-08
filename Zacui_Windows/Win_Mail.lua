@@ -849,6 +849,8 @@ function Leftovers()
             end
         end
     end
+    -- Forever: whatever of the modern inbox page draws above the cover
+    if win then Kit.AboveCover(InboxFrame, win, leftovers) end
     return leftovers
 end
 

@@ -1431,7 +1431,11 @@ local function OnCount()
     Plan()
 end
 
-local events = CreateFrame("Frame")
+-- (where there is no buff limit, Core_Flavor's buff_remover, nothing
+-- here loads: no frames, no events, the page has no Buffs tab; the saved
+-- ticks and linked macros are left exactly as they are)
+local OFF_HERE = ns.FeatureOn and not ns.FeatureOn("buff_remover")
+local events = OFF_HERE and ns.FlavorNullFrame or CreateFrame("Frame")
 local cleanupLater = false
 local macroSyncPending = false
 local formSyncPending = false
@@ -1685,6 +1689,7 @@ end
 
 -- PLAYER_ENTERING_WORLD comes after the apply pass at login, so
 -- QoL.enabled is settled by then (the same as the raid modes).
+if not OFF_HERE then
 local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_ENTERING_WORLD")
 boot:SetScript("OnEvent", function(self)
@@ -1693,3 +1698,4 @@ boot:SetScript("OnEvent", function(self)
     -- a moment later, so the macros are surely in
     C_Timer.After(3, function() OneTimeSetups(0) end)
 end)
+end

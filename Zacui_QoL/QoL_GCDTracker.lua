@@ -149,7 +149,7 @@ local function Slot(row, i)
     UI.PaintBox(s)                 -- the strips take the border colour here, not on creation
     s.icon = s:CreateTexture(nil, "ARTWORK")
     s.icon:SetAllPoints()
-    s.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    ZacUI.Look.CropIcon(s.icon)
     s.cross = s:CreateTexture(nil, "OVERLAY")
     s.cross:SetAllPoints()
     s.cross:SetTexture(CROSS)
@@ -388,7 +388,8 @@ local function Tick()
     end
     -- the GCD bar
     if live then
-        local st, du = GetSpellCooldown(GCD_SPELL)
+        local st, du = GetSpellCooldown(ns.GCDSpell and ns.GCDSpell() or GCD_SPELL)
+        if ns.Hidden(st, du) then st, du = nil, nil end   -- (hidden on WoW Forever: no bar)
         if st and du and du > 0 and du <= 2 and st + du > now then
             GT.SetGCD(live, d, (now - st) / du)
         else

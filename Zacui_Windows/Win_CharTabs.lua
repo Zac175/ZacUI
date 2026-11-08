@@ -130,6 +130,9 @@ function Strip:Layout()
         t.visual:SetLabel(self:Label(t.index))
     end
     local total = self.frame:GetWidth()
+    -- (Forever can keep a window's width - and so the strip's, anchored
+    -- to it - secret: then the window's known width)
+    if ns.IsSecret and ns.IsSecret(total) then total = nil end
     if not total or total < 50 then total = self.fallbackWidth(host) end
     local n = #shown
     local w = n > 0 and math.floor((total - (n - 1) * TAB_GAP) / n) or 0
@@ -252,7 +255,9 @@ end
 local function WidthInside(insetName)
     return function(host)
         local ins = ns.GetPanelInset(insetName, host)
-        return (host:GetWidth() or 338) - (ins.l or 0) - (ins.r or 0)
+        local w = host:GetWidth()
+        if ns.IsSecret and ns.IsSecret(w) then w = nil end
+        return (w or 338) - (ins.l or 0) - (ins.r or 0)
     end
 end
 
@@ -391,6 +396,9 @@ end
 -- ============================================================
 Modules.chartabswin = function()
     if not CharacterFrame then return end
+    -- (the character sheet's tabs go with ZacUI's character sheet: not on
+    -- a game version whose sheet is not the Classic one, Core_Flavor)
+    if ns.FeatureOn and not ns.FeatureOn("win_character") then return end
     Setup(charStrip)
 end
 

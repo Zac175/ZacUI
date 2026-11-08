@@ -11,6 +11,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local S = ns.MapStitch
 local mod = ns:GetModule("worldmap")
 local L = ns.L
@@ -297,12 +298,21 @@ local function Uncap()
 	capped = {}
 	for name, value in pairs(UNCAP) do
 		local ok, was = pcall(GetCVar, name)
-		if ok and was and was ~= value then capped[name] = was SetCVarSafe(name, value) end
+		if ok and was and was ~= value then
+			capped[name] = was
+			-- SETUP2: a hold through ZacUI's CVar record too (an uninstall mid-run hands it back)
+			local CV = _G.ZacUI and _G.ZacUI.CVar
+			if CV then CV.Hold(name, value, "Zacui_WorldMap") else SetCVarSafe(name, value) end
+		end
 	end
 	mod.db.benchCapped = next(capped) and capped or nil   -- (a /reload mid-run: put back at the next login)
 end
 local function Recap()
-	for name, was in pairs(capped or mod.db.benchCapped or {}) do SetCVarSafe(name, was) end
+	local CV = _G.ZacUI and _G.ZacUI.CVar
+	for name, was in pairs(capped or mod.db.benchCapped or {}) do
+		-- SETUP2: the record's release first; a hold it does not know (a reload in between) from what was kept
+		if not (CV and CV.Release(name, "Zacui_WorldMap")) then SetCVarSafe(name, was) end
+	end
 	capped, mod.db.benchCapped = nil, nil
 end
 

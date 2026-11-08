@@ -79,7 +79,28 @@ function M:Font(name)
     if one then return one end
     return fetch("font", name, DEFAULT_FONT)
 end
-function M:Statusbar(name) return fetch("statusbar", name, DEFAULT_BAR) end
+-- Under ZacUI's Classic look (Core_Look, part "unitframes") a texture the
+-- lists do not know falls back on the look's bar file rather than the
+-- first registered one; a name they know still wins.
+function M:Statusbar(name)
+    local Z = _G.ZacUI
+    local look = Z and Z.Look and Z.Look.For("unitframes")
+    if look and look.id ~= "zacui" then
+        if LSM and name then
+            local path = LSM:Fetch("statusbar", name, true)
+            if path then return path end
+        end
+        if name and FALLBACK.statusbar[name] then return FALLBACK.statusbar[name] end
+        return look.barTexture
+    end
+    -- HD polish (2026-11-07): under ZacUI's look the shipped "Blizzard"
+    -- bar (the 2004 gloss, Config.lua's default) is the look's flat fill;
+    -- any other texture named is the player's and is drawn as named
+    if look and (name == nil or name == "Blizzard") and look.barTexture then
+        return look.barTexture
+    end
+    return fetch("statusbar", name, DEFAULT_BAR)
+end
 
 local function listOf(mediatype)
     local set, out = {}, {}

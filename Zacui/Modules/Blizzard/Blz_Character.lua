@@ -19,6 +19,42 @@ local ZUI = ns.ZUI
 
 Modules.character = function()
     SkinPanel(CharacterFrame, { tabs = "CharacterFrameTab", tabCount = 5 })
+    -- Forever: side tabs of the modern shape down the window's edge get the
+    -- same flat look as the social window's (Blz_Windows SkinSideTab)
+    if _G.ZACUI_IS_FOREVER and CharacterFrame and ns.SkinSideTab then
+        for _, child in ipairs({ CharacterFrame:GetChildren() }) do
+            if child.SelectedTexture and child.Icon and child.Background then ns.SkinSideTab(child) end
+        end
+    end
+    -- Forever's Currency page (Blizzard_TokenUI/Camelot: a ScrollBox of
+    -- pooled rows): each row flat as it is handed out - the header's bar
+    -- picture goes for a flat backing (its +/- state icon stays), an
+    -- entry's hover and selected pictures become flat washes; the
+    -- currency icon, name, count and watched check are left as they are.
+    local tf = _G.TokenFrame
+    local box = tf and rawget(tf, "ScrollBox")
+    if _G.ZACUI_MODERN and type(box) == "table" and ScrollUtil and ScrollUtil.AddInitializedFrameCallback
+        and not tf._zTokenRows then
+        tf._zTokenRows = true
+        -- (the callback comes as (owner, row, data) on a new row and as
+        -- (row, data) over the existing ones)
+        local function SkinRow(a, b)
+            local row = (type(b) == "table" and b.GetRegions) and b or a
+            if type(row) ~= "table" or not row.GetRegions or row._zTokenSkin then return end
+            row._zTokenSkin = true
+            local bh = rawget(row, "BackgroundHighlight")
+            if type(bh) == "table" and bh.TextureRegions then
+                for _, t in ipairs(bh.TextureRegions) do t:SetColorTexture(1, 1, 1, 0.08) end
+            elseif rawget(row, "Name") and rawget(row, "StateIcon") then
+                -- a header: its bar pictures are the row's own plain regions
+                for _, r in ipairs({ row:GetRegions() }) do
+                    if r.IsObjectType and r:IsObjectType("Texture") and r ~= row.StateIcon then r:SetAlpha(0) end
+                end
+                SkinBackdrop(row, "elementBg", 0.9)
+            end
+        end
+        ScrollUtil.AddInitializedFrameCallback(box, SkinRow, tf, true)
+    end
     if PaperDollFrame then StripTextures(PaperDollFrame) end
 
     local slots = {

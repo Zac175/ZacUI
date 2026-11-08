@@ -17,6 +17,10 @@ do
 	ns.flavorOff = (Z and Z.PartOff and Z.PartOff("Zacui_WorldMap")) and true or false
 end
 if not ns.flavorOff then _G.ZacuiWorldMap = ns end
+-- (and nothing of the part loads there: every file returns at its top;
+-- Map/Launcher.lua keeps the game's AddOns-list entry, which the .toc
+-- names, saying why)
+if ns.flavorOff then return end
 
 ns.name = ADDON
 ns.version = (C_AddOns and C_AddOns.GetAddOnMetadata or GetAddOnMetadata)(ADDON, "Version") or "dev"

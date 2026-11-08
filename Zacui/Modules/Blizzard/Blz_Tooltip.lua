@@ -135,7 +135,7 @@ function TipLook.StyleBar(bar, cfg)
     if cfg.barTexture then
         bar:SetStatusBarTexture(ns.ResolveBarTexture(cfg.barTexture))
     else
-        bar:SetStatusBarTexture((ns.Media and ns.Media.BarPath(TEX_NORM)) or TEX_NORM)
+        bar:SetStatusBarTexture((ns.Media and ns.Media.BarPath(ns.Media.HouseBar())) or TEX_NORM)
     end
     bar:SetHeight(TipLook.BarHeight(cfg))
     if not bar._zui_text then
@@ -501,7 +501,8 @@ Modules.tooltip = function()
             if UnitIsUnit and UnitIsUnit(tu, "player") then
                 tt:AddLine("Target: |cffff3333<< YOU >>|r", t.r, t.g, t.b)
             else
-                local tn = UnitName(tu)
+                -- (WoW Forever: the surname as Core_Names says)
+                local tn = ns.UnitDisplayName and ns.UnitDisplayName(tu) or UnitName(tu)
                 if tn then
                     tt:AddLine("Target: " .. HexRGB(UnitColor(tu)) .. tn .. "|r",
                         t.r, t.g, t.b)
@@ -556,7 +557,9 @@ Modules.tooltip = function()
                         -- the bar runs 0-100 for a unit whose real health
                         -- the client keeps from us; then the percent alone
                         local u = self._zui_unit
-                        if u and UnitHealthMax and UnitHealthMax(u) and UnitHealthMax(u) > 100 then
+                        -- (WoW Forever: test for hidden values before comparing)
+                        if u and UnitHealthMax and not ns.Hidden(UnitHealth(u), UnitHealthMax(u))
+                            and UnitHealthMax(u) and UnitHealthMax(u) > 100 then
                             cur, maxv = UnitHealth(u), UnitHealthMax(u)
                         end
                         fs:SetText(TipLook.HealthText(cur, maxv, cfg))
@@ -635,7 +638,14 @@ Modules.tooltip = function()
     -- from the aura data
     local function InstanceHook(tt, unit, auraInstanceID)
         local get = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
-        local data = get and unit and auraInstanceID and get(unit, auraInstanceID)
+        local data
+        if _G.ZACUI_MODERN then
+            -- (WoW Forever and Retail can refuse the read outright: no line then)
+            local ok, r = pcall(function() return get and unit and auraInstanceID and get(unit, auraInstanceID) end)
+            data = ok and r or nil
+        else
+            data = get and unit and auraInstanceID and get(unit, auraInstanceID)
+        end
         -- (WoW Forever may hide the aura's id in combat: no line then)
         if data and ns.IsSecret and ns.IsSecret(data.spellId) then return end
         AddSpellID(tt, data and data.spellId)

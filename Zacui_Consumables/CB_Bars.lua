@@ -102,9 +102,11 @@ function Live.NewBox(parent)
     box.edge = B.Strips(box, "BORDER")
     box.accent = box:CreateTexture(nil, "BORDER", nil, 1)
     box.accent:SetTexture(FLAT)
-    box.accent:SetPoint("TOPLEFT", 1, -1)
-    box.accent:SetPoint("TOPRIGHT", -1, -1)
-    box.accent:SetHeight(1)
+    -- (one physical pixel, inside the edge, under ZacUI's look: HD polish)
+    local px = ZacUI.Pixel and ZacUI.Pixel.One(box) or 1
+    box.accent:SetPoint("TOPLEFT", px, -px)
+    box.accent:SetPoint("TOPRIGHT", -px, -px)
+    if ZacUI.Pixel then ZacUI.Pixel.Edge(box.accent, "TOP", box) else box.accent:SetHeight(1) end
     return box
 end
 

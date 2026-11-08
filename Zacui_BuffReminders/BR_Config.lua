@@ -349,7 +349,7 @@ local function BuffCard(L, def)
             function(v) BR.SetOpt(key, "greedMode", v) ns.RefreshConfig() end,
             "Hides the reminder while the long 400 AP Battle Shout on you has more than three minutes left.")
         L:Dependent({ UI.Checkbox(L.current, "Also when specced into Improved Cleave", BR.Opt(key, "greedSkipIfImpCleave"),
-            function(v) BR.SetOpt(key, "greedSkipIfImpCleave", v and true or false) end) }, BR.Opt(key, "greedMode"), 1, 20)
+            function(v) BR.SetOpt(key, "greedSkipIfImpCleave", v and true or false) end) }, BR.Opt(key, "greedMode"), 1, 20, "Stay quiet while my own long (15-min) Battle Shout is still up")
         Check(L, "Show the attack power when buffed", BR.Opt(key, "showAPValue"), function(v) BR.SetOpt(key, "showAPValue", v) end)
         Check(L, "Show it in the warrior HUD's buff row instead", BR.Opt(key, "hudDock"),
             function(v) BR.SetOpt(key, "hudDock", v) Fresh() if ns.WarriorHUD and ns.WarriorHUD.Display
@@ -423,7 +423,7 @@ local function Tab_general(L)
                 selectedValue = function() return tc.bloodrageStyle or "both" end,
                 onSelect = function(v) tc.bloodrageStyle = v end })
         end, { width = 160 })
-        L:Dependent({ f }, tc.showBloodrage ~= false, 1, (M.CHECK or 14) + 8)
+        L:Dependent({ f }, tc.showBloodrage ~= false, 1, (M.CHECK or 14) + 8, "Show who is Bloodraging")
     end
     Drop(L, "Time left shows as", { { text = "None", value = "none" }, { text = "Bar", value = "bar" },
         { text = "Timer", value = "timer" }, { text = "Both", value = "both" } },
@@ -457,7 +457,7 @@ local function Tab_general(L)
     local sp = UI.SoundSpecPicker(L.current, { width = UI.CardInnerWidth(L), get = sg, set = ss,
         defaults = { sound = ic.soundKey or "WR: Warning", channel = "Master" } })
     L:Add(sp, 6)
-    UI.SetEnabled(sp, ic.playSound and true or false)
+    UI.SetEnabled(sp, ic.playSound and true or false, 'Needs "Play a sound when a warning starts" turned on.')
     Check(L, "Say the buff's name", ic.speak, function(v) ic.speak = v end,
         "Spoken once as the warning starts, in the voice set on the Overview page.")
     L:EndCard()
@@ -467,14 +467,14 @@ local function Tab_look(L)
     local ic, tc = IC(), TC()
     L:Card("Reminder icon")
     Slider(L, "Icon size", 20, 80, 1, ic.iconSize or 40, Px, function(v) ic.iconSize = v end)
-    Slider(L, "Opacity", 0.1, 1, 0.1, ic.opacity or 0.7, Pct, function(v) ic.opacity = v end)
+    Slider(L, "Opacity", 0.1, 1, 0.1, (Icon and Icon.Opacity) and Icon.Opacity(ic) or (ic.opacity or 0.7), Pct, function(v) ic.opacity = v end)
     Slider(L, "Border thickness", 0, 4, 1, tonumber(ic.borderSize) or 1, Px, function(v) ic.borderSize = v end)
     Colour(L, "icon", "background", "Background")
     Colour(L, "icon", "normalBorder", "Border when everyone has it")
     Colour(L, "icon", "missingBorder", "Border when someone is missing it")
     local names = Check(L, "Show the missing names", ic.showMissingNames, function(v) ic.showMissingNames = v ns.RefreshConfig() end)
     L:Dependent({ UI.Checkbox(L.current, "Shorten names (first 3 letters)", ic.shortenNames,
-        function(v) ic.shortenNames = v and true or false end) }, ic.showMissingNames, 1, 20)
+        function(v) ic.shortenNames = v and true or false end) }, ic.showMissingNames, 1, 20, "Show the missing names")
     Drop(L, "Names sit", { { text = "Right", value = "right" }, { text = "Left", value = "left" },
         { text = "Above", value = "above" }, { text = "Below", value = "below" } },
         function() return ic.namesPosition or "right" end, function(v) ic.namesPosition = v end, 140)
@@ -518,7 +518,15 @@ local function Others(list, self)
     return out
 end
 local function FontAccess(tbl, key)
-    return function() return tbl()[key] end, function(spec) tbl()[key] = spec end
+    return function()
+        -- (the icon's fonts: what the look draws - match pass)
+        if tbl == IC and Icon and Icon.FontSpec then
+            local v = Icon.FontSpec(tbl(), key)
+            if type(v) == "table" and ns.CopySetting then return ns.CopySetting(v) end
+            return v
+        end
+        return tbl()[key]
+    end, function(spec) tbl()[key] = spec end
 end
 
 local function Tab_text(L)
@@ -617,7 +625,7 @@ local function Tab_pos(L)
     L:Add(UI.FrameLayerPicker(L.current, { width = UI.CardInnerWidth(L), get = fg, set = fs,
         defaults = { strata = "MEDIUM", level = 0, scale = 1, clamp = true } }), 6)
     local lg, ls = ns.CustomAccess(IC, "layout", nil)
-    L:Add(UI.LayoutPicker(L.current, { width = UI.CardInnerWidth(L), get = lg, set = ls, defaults = Icon.LAYOUT_DEF,
+    L:Add(UI.LayoutPicker(L.current, { width = UI.CardInnerWidth(L), get = lg, set = ls, defaults = (Icon.LayoutDefaults and Icon.LayoutDefaults()) or Icon.LAYOUT_DEF,
         fields = { grow = true, wrap = true, perLine = true, spacingX = true, spacingY = true, max = true, reverse = true },
         maxItems = 6 }), 6)
     L:Desc("How several icons sit (a priest's three, say).")
@@ -681,7 +689,7 @@ local function Tab_adv(L)
         ns.RefreshConfig()
     end })
     L:Row(off, M.BUTTON_H + 6)
-    UI.SetEnabled(off, (rcIcon or rcTracker) and true or false)
+    UI.SetEnabled(off, (rcIcon or rcTracker) and true or false, "Readycheck's reminder is already off.")
     L:EndCard()
 
     L:Card("Reset")

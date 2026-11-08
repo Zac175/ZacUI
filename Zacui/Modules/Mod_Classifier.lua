@@ -50,6 +50,15 @@ local function IsButtonChrome(sig)
     return false
 end
 
+-- THE MODERN TAB (WoW Forever, 2026-11-07). Forever's windows use the
+-- Mainline tab template, which has no LeftDisabled piece: its tell is the
+-- keyed LeftActive art. Without it those tabs fell to the panel-button
+-- rule below and kept Blizzard's overlapping layout. Only on the Forever
+-- client, so Classic Era's and TBC's tabs are routed exactly as before.
+local function MainlineTab(frame)
+    return _G.ZACUI_MODERN and rawget(frame, "LeftActive") ~= nil and rawget(frame, "MiddleActive") ~= nil
+end
+
 local function ClassifyAndSkin(frame)
     if ZUI.skinned[frame] then return end
 
@@ -101,7 +110,7 @@ local function ClassifyAndSkin(frame)
             SkinArrowButton(frame, "up")
         elseif sig and sig:find("scrolldownbutton") then
             SkinArrowButton(frame, "down")
-        elseif name and _G[name .. "LeftDisabled"] and name:find(".Tab%d+$")
+        elseif name and (_G[name .. "LeftDisabled"] or MainlineTab(frame)) and name:find(".Tab%d+$")
             and not name:find("^AuctionFrameTab")
             and frame.GetFontString and frame:GetFontString()
             and IsButtonChrome(sig) and ns.SkinBottomTabs then

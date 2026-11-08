@@ -29,7 +29,8 @@ local function LSM() return LibStub and LibStub("LibSharedMedia-3.0", true) end
 function Meter.FontPath()
     -- one font: ZacUI's, whenever one is chosen (the meter's own counts
     -- only while ZacUI has none)
-    local one = ns.OneFace and ns.OneFace()
+    -- (the meter's own look: under the Classic look, the game's font)
+    local one = ns.OneFace and ns.OneFace("meter")
     if one then return one end
     local d = ZacUIDB and ZacUIDB.meter
     local n = d and d.font
@@ -59,9 +60,23 @@ function Meter.TexPath(n, default)
     end
     return default
 end
+-- (2026-11-07 polish, Zac: "just look at how elesmere does it hd things
+-- up and polish it") with no texture picked the bars are a flat fill -
+-- look.barFlat, on; off, the faded bar they wore before
+Meter.TEX_FLAT = ns.FLAT or "Interface\\Buttons\\WHITE8X8"
 function Meter.BarPath()
     local d = ZacUIDB and ZacUIDB.meter
-    return Meter.TexPath(d and d.bar, Meter.TEX_BAR)
+    local pick = d and d.bar
+    if pick == nil or pick == "" then
+        -- (2026-11-08) a game look with no bar picked: that look's own
+        -- fill (the Classic look's is the game's status bar)
+        local L = ns.Look
+        local ok, l = false, nil
+        if L and L.For then ok, l = pcall(L.For, "meter") end
+        if ok and type(l) == "table" and l.id ~= "zacui" and l.barTexture then return l.barTexture end
+    end
+    if (pick == nil or pick == "") and not (d and d.barFlat == false) then return Meter.TEX_FLAT end
+    return Meter.TexPath(pick, Meter.TEX_BAR)
 end
 
 -- ============================================================
@@ -173,11 +188,21 @@ end
 -- ============================================================
 local format, floor = string.format, math.floor
 
-local function NoToK(n) return format("%.1f", n) end
+-- (feature cluster 3) the four bodies live in Core_Numbers (styles
+-- details1 / details / details2 / details0), byte for byte, and a value
+-- the client hides from addons (WoW Forever in combat) formats there
+-- through the client's own AbbreviateNumbers instead of throwing; this
+-- file keeps the old bodies for a core without the formatter.
+local Num = ns.Numbers
+local function NoToK(n)
+    if Num then return Num.Format(n, "details1") end
+    return format("%.1f", n)
+end
 
 -- ps_abbreviation = 2. Boundaries use > (not >=) exactly like the
 -- original - 1000000 renders as "1000.0K" there and so it does here.
 local function ToK(n)
+    if Num then return Num.Format(n, "details") end
     if n > 999999999 then return format("%.2f", n / 1000000000) .. "B"
     elseif n > 1000000 then return format("%.2f", n / 1000000) .. "M"
     elseif n > 999 then return format("%.1f", n / 1000) .. "K" end
@@ -186,6 +211,7 @@ end
 
 -- ps_abbreviation = 3 (kept selectable in config).
 local function ToK2(n)
+    if Num then return Num.Format(n, "details2") end
     if n > 999999999 then return format("%.2f", n / 1000000000) .. "B"
     elseif n > 999999 then return format("%.2f", n / 1000000) .. "M"
     elseif n > 99999 then return floor(n / 1000) .. "K"
@@ -195,6 +221,7 @@ end
 
 -- ps_abbreviation = 4.
 local function ToK0(n)
+    if Num then return Num.Format(n, "details0") end
     if n > 999999999 then return format("%.1f", n / 1000000000) .. "B"
     elseif n > 999999 then return format("%.1f", n / 1000000) .. "M"
     elseif n > 999 then return floor(n / 1000) .. "K" end

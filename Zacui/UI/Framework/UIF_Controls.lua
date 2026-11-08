@@ -80,6 +80,7 @@ local M = {
     TRACK_H     = 6,
     THUMB       = 14,
     SCROLL_W    = 16,
+    WHEEL       = 24,   -- a wheel notch in a scroll area (eased: ScrollArea)
     TITLEBAR    = 30,
     ROW_H       = 28,   -- sidebar nav row
     SIDEBAR_W   = 186,
@@ -96,6 +97,164 @@ local F = {  -- font sizes by role
     NAV    = 12,
     NAVSUB = 11,
 }
+
+-- ============================================================
+-- THE SETTINGS WINDOW'S LOOK (match pass, 2026-11-07)
+-- ============================================================
+-- The /zui window is built to EllesmereUI's options window, number for
+-- number (zui_tests/MATCH_OPTIONS_1107.md has every value with the line
+-- it was read from; ours is our own code, theirs is all rights reserved).
+-- Everything built while UI._zSettings is on (Config_Window's page builds,
+-- Config_Search's index builds) reads these instead of M / F; ZacUI's
+-- other windows keep M / F and look as they did. Colours: white at a
+-- stepped alpha over a warm near-black, the accent the only hue (ZacUI's
+-- gold, from the palette). A colour picked in the palette editor still
+-- wins over the shipped value (UI.SCol).
+local S = {
+    -- the window
+    W = 1300, H = 946, MIN_W = 1000, MIN_H = 640, MAX_W = 1600, MAX_H = 1100,
+    SIDEBAR = 295, HEADER = 138, TABS = 40, FOOTER = 82,
+    PAD = 45, TOP_PAD = 10, SIDE = 20, CARD_GAP = 10, SECTION = 40,
+    -- the sidebar
+    NAV_TOP = 114, NAV_ROW = 40, NAV_ICON_W = 45, NAV_ICON_H = 32, NAV_LEFT = 20, NAV_GAP = 10,
+    GROUP_ROW = 28, CHILD_ROW = 28, GROUP_GAP = 10, CHILD_X = 36,
+    SB_TOP = 13, SB_H = 28, SB_BOT = 6, SB_INSET = 20,
+    -- rows
+    ROW = 36, ROW_CTL = 50, ROW_V = 9,
+    -- controls
+    CHECK = 18, CHECK_PAD = 2, CHECK_GAP = 10,
+    TOGGLE_W = 40, TOGGLE_H = 20, KNOB_PAD = 2, TOGGLE_DUR = 0.075,
+    TRACK_W = 160, TRACK_MIN = 80, TRACK_H = 4, THUMB = 14, VALUE_W = 40, VALUE_H = 26, TRACK_GAP = 12,
+    SLIDER_W = 400, FIELD_W = 400, DD_W = 170, DD_H = 30, DD_ROW = 26, DD_ROWS = 18,
+    BTN_H = 32, BTN_W = 180, EDIT_H = 28, SWATCH = 24, SWATCH_GAP = 8,
+    FOOT_BTN_W = 180, FOOT_BTN_H = 36, FOOT_CLOSE_W = 160, FOOT_PAD = 24, FADE = 0.10,
+    WHEEL = 60, LERP = 12,
+    -- type (physical px at a pixel-perfect scale)
+    F_TITLE = 36, F_DESC = 14, F_TAB = 16, F_NAV = 14, F_GROUP = 15, F_SECTION = 12,
+    F_LABEL = 14, F_VALUE = 13, F_HINT = 12,
+    -- colours and alphas
+    BG = { r = 0.069, g = 0.058, b = 0.047 },
+    BORDER_A = 0.05, DIM_A = 0.53, SECTION_A = 0.41, OFF_A = 0.3,
+    ROW_ODD = 0.10, ROW_EVEN = 0.20, SIDEBAR_A = 0.20, HEAD_BAND_A = 0.10, HEAD_DIV_A = 0.06,
+    SECTION_RULE_A = 0.02,
+    NAV_EN = 0.60, NAV_HOVER = 0.86, NAV_OFF = 0.11, NAV_OFF_HOVER = 0.39, NAV_HL = 0.06,
+    NAV_GLOW = 0.15, NAV_HOVER_GLOW = 0.03, NAV_HOVER_IND = 0.25, NAV_EDGE = 0.5,
+    HOVER_TINT = { r = 0.85, g = 0.95, b = 0.90 }, EDGE_TINT = { r = 0.7, g = 0.7, b = 0.7 },
+    INPUT = { r = 0.030, g = 0.023, b = 0.018 }, INPUT_A = 0.35, INPUT_BRD_A = 0.10,
+    SL_TRACK_A = 0.22, SL_FILL_A = 0.75, SL_INPUT_A = 0.40, SL_INPUT_BRD_A = 0.12,
+    TG_OFF = { r = 0.267, g = 0.267, b = 0.267 }, TG_OFF_A = 0.65, TG_ON_A = 0.75, KNOB_OFF_A = 0.5,
+    CB_BOX = { r = 0.112, g = 0.105, b = 0.098 }, CB_BRD_A = 0.05, CB_ACT_BRD_A = 0.15, CB_REST = 0.8,
+    BTN_BG = { r = 0.089, g = 0.080, b = 0.072 }, BTN_BG_A = 0.6, BTN_BG_HA = 0.65,
+    BTN_BRD_A = 0.30, BTN_BRD_HA = 0.45, BTN_TXT_A = 0.55, BTN_TXT_HA = 0.70,
+    FOOT_BG_A = 0.92, FOOT_BRD_A = 0.4, FOOT_BRD_HA = 0.6, FOOT_TXT_A = 0.5, FOOT_TXT_HA = 0.7, CLOSE_A = 0.7,
+    DD_BG = { r = 0.103, g = 0.095, b = 0.088 }, DD_BG_A = 0.9, DD_BG_HA = 0.98,
+    DD_BRD_A = 0.20, DD_BRD_HA = 0.30, DD_TXT_A = 0.50, DD_TXT_HA = 0.60, DD_HL_A = 0.08, DD_SEL_A = 0.04,
+    SCROLL_TRACK_A = 0.02, SCROLL_THUMB_A = 0.27, NAV_TRACK_A = 0.03, NAV_THUMB_A = 0.25,
+    -- the window follows ZacUI's one font option; true locks it to the HD face
+    FONT_LOCK = false,
+}
+UI.S = S
+
+-- Inside a settings build? (a count, so a build inside a build is fine)
+UI._zSettingsDepth = 0
+function UI.InSettings() return UI._zSettings == true end
+-- Runs fn(...) with the settings look on, then puts back what was there.
+function UI.SettingsBuild(fn, ...)
+    local was = UI._zSettings
+    UI._zSettings = true
+    local ok, a, b, c = pcall(fn, ...)
+    UI._zSettings = was
+    if not ok then error(a, 0) end
+    return a, b, c
+end
+
+-- Type in the settings window: ZacUI's 9-13 px sizes are three larger
+-- (labels 11 -> 14, descriptions 10 -> 13, as EllesmereUI's 14 / 13).
+local function SZ(size)
+    if UI._zSettings and type(size) == "number" and size >= 9 and size <= 13 then return size + 3 end
+    return size
+end
+UI.SettingsSize = SZ
+
+local WHITE = { r = 1, g = 1, b = 1, a = 1 }
+local SET_TEXT = {
+    text = { normal = 1, gray = S.DIM_A, disabled = S.OFF_A },
+    ui = { text = 1 },
+}
+-- A colour in the settings window: the palette editor's pick if there is
+-- one, else the window's own (white at its alpha for text), else the
+-- palette's shipped value.
+function UI.SCol(cat, key)
+    local p = ZacUIDB and ZacUIDB.palette and ZacUIDB.palette[cat]
+    if p and p[key] then return p[key] end
+    local a = SET_TEXT[cat] and SET_TEXT[cat][key]
+    if a then return { r = 1, g = 1, b = 1, a = a } end
+    return GetColor(cat, key)
+end
+local SCol = UI.SCol
+local function Accent() return GetColor("ui", "accent") end
+
+-- ROUND ART (2026-11-08): EllesmereUI draws its toggles and slider tracks
+-- as pills and its knobs and thumbs as circles. Ours: plain white
+-- anti-aliased discs (Media/Icons/disc<n>, zui_tests/icons/make_icons.py
+-- "discs"), each in a power-of-two canvas; a pill is a disc's two halves
+-- for its ends with a flat middle between them. Tinted by vertex colour.
+local DISC_SIZES = { 4, 6, 8, 10, 12, 14, 16, 20, 24, 32 }
+local DISC_PATH = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\disc"
+local function DiscOf(n)
+    n = math.floor((n or 16) + 0.5)
+    for _, s in ipairs(DISC_SIZES) do if s >= n then return s end end
+    return 32
+end
+local function Canvas(s) local c = 1 while c < s do c = c * 2 end return c end
+-- part: nil (the whole disc), "left" or "right" (its half)
+function UI.DiscArt(tex, n, part)
+    local s = DiscOf(n)
+    local c = Canvas(s)
+    local o = (c - s) / 2
+    local l, r, t, b = o / c, (o + s) / c, o / c, (o + s) / c
+    if part == "left" then r = (o + s / 2) / c elseif part == "right" then l = (o + s / 2) / c end
+    tex:SetTexture(DISC_PATH .. s)
+    tex:SetTexCoord(l, r, t, b)
+end
+-- A pill on `host` (filling it: h = the host's height): three textures,
+-- the ends half a height wide. pill:Color(r, g, b, a); pill:Show(on).
+function UI.Pill(host, layer, sub, h)
+    local p = {}
+    local function T(part)
+        local t = host:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
+        t._zui_own = true
+        return t
+    end
+    p.l, p.m, p.r = T(), T(), T()
+    p.m:SetTexture(FLAT)
+    function p:Size(hh)
+        hh = math.max(2, hh or host:GetHeight() or 4)
+        local half = hh / 2
+        UI.DiscArt(self.l, hh, "left")
+        UI.DiscArt(self.r, hh, "right")
+        self.l:ClearAllPoints()
+        self.l:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+        self.l:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", 0, 0)
+        self.l:SetWidth(half)
+        self.r:ClearAllPoints()
+        self.r:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, 0)
+        self.r:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+        self.r:SetWidth(half)
+        self.m:ClearAllPoints()
+        self.m:SetPoint("TOPLEFT", self.l, "TOPRIGHT", 0, 0)
+        self.m:SetPoint("BOTTOMRIGHT", self.r, "BOTTOMLEFT", 0, 0)
+    end
+    function p:Color(r, g, b, a)
+        self.l:SetVertexColor(r, g, b, a) self.m:SetVertexColor(r, g, b, a) self.r:SetVertexColor(r, g, b, a)
+    end
+    function p:Show(on)
+        self.l:SetShown(on) self.m:SetShown(on) self.r:SetShown(on)
+    end
+    p:Size(h)
+    return p
+end
+UI.SWhite = WHITE
 
 -- ============================================================
 -- PAINT
@@ -127,6 +286,7 @@ local function FontDress(fs, size, outline, fixedSize)
     local cfg = ZacUIDB and ZacUIDB.font or {}
     local delta = fixedSize and 0 or (cfg.delta or 0)
     local path = ResolveFontPath(cfg.name)
+    if rawget(fs, "_zSet") and S.FONT_LOCK and ns.MEDIA_FONT_HD then path = ns.MEDIA_FONT_HD end
     local flags = outline
     if flags == nil then
         flags = (cfg.outline == "NONE") and "" or "OUTLINE"
@@ -147,7 +307,18 @@ UI._zFontDress = FontDress
 
 local function FontApply(fs, size, opts)
     opts = opts or {}
-    FontDress(fs, size, opts.outline)
+    -- in the settings window: three larger, white at its alpha (UI.SCol);
+    -- outlined as ZacUI's font option says (Zac likes the black edge on
+    -- text, 2026-11-08); fixed for the string's life, so a font change
+    -- redressing it later keeps them
+    local outline = opts.outline
+    if UI._zSettings then
+        size = SZ(size or F.LABEL)
+        fs._zSet = true
+    else
+        fs._zSet = nil
+    end
+    FontDress(fs, size, outline)
     if opts.justify then fs:SetJustifyH(opts.justify) end
     if opts.width then
         fs:SetWidth(opts.width)
@@ -158,13 +329,27 @@ local function FontApply(fs, size, opts)
 
     fs._zPaintCat, fs._zPaintKey = opts.cat or "text", opts.key or "normal"
     fs._zPaint = function(self)
-        local c = GetColor(self._zPaintCat, self._zPaintKey)
+        local c = (rawget(self, "_zSet") and SCol or GetColor)(self._zPaintCat, self._zPaintKey)
         self:SetTextColor(c.r, c.g, c.b, c.a or 1)
     end
     fs:_zPaint()
     return fs
 end
 UI._zFontApply = FontApply
+
+-- A string made in the settings window at an exact size (the window's
+-- own type scale: 36 titles, 16 tabs...), no mapping.
+function UI.SFont(parent, size, opts)
+    local was = UI._zSettings
+    UI._zSettings = false
+    opts = opts or {}
+    local fs = UI.Font(parent, size, opts)
+    UI._zSettings = was
+    fs._zSet = true
+    if S.FONT_LOCK then FontDress(fs, size, opts.outline) end
+    fs:_zPaint()
+    return fs
+end
 
 function UI.Font(parent, size, opts)
     opts = opts or {}
@@ -272,10 +457,17 @@ function UI.Border(frame, cat, key, alpha)
         if side == "TOP" or side == "BOTTOM" then
             t:SetPoint(side .. "LEFT")
             t:SetPoint(side .. "RIGHT")
-            t:SetHeight(M.BORDER)
         else
             t:SetPoint("TOP" .. side)
             t:SetPoint("BOTTOM" .. side)
+        end
+        -- M.BORDER physical pixels under the ZacUI look (Core_Pixel),
+        -- M.BORDER units otherwise, as before
+        if ns.Pixel then
+            ns.Pixel.Edge(t, side, frame, M.BORDER)
+        elseif side == "TOP" or side == "BOTTOM" then
+            t:SetHeight(M.BORDER)
+        else
             t:SetWidth(M.BORDER)
         end
         strips[#strips + 1] = t
@@ -320,6 +512,8 @@ function UI.Hover(frame, normalKey, hoverKey, cat)
     cat = cat or "button"
     frame._zNormalKey, frame._zHoverKey, frame._zHoverCat = normalKey, hoverKey, cat
     frame:HookScript("OnEnter", function(self)
+        -- the settings window's widgets paint their own hover (_zSet)
+        if rawget(self, "_zSet") then return end
         if self._zDisabled or self._zActive then return end
         local c = GetColor(self._zHoverCat, self._zHoverKey)
         if self._zFill then self._zFill:SetVertexColor(c.r, c.g, c.b, c.a or 1) end
@@ -329,6 +523,7 @@ function UI.Hover(frame, normalKey, hoverKey, cat)
         end
     end)
     frame:HookScript("OnLeave", function(self)
+        if rawget(self, "_zSet") then return end
         if self._zDisabled or self._zActive then return end
         -- a tab's resting label is grey, not the text default
         if self._zTab then return self:_zPaint() end
@@ -369,7 +564,88 @@ local function PaintTab(self)
     end
 end
 
+-- THE SETTINGS WINDOW'S BUTTONS (UI.S): rest and hover a 0.1 s fade
+-- apart (self._zP, 0..1), as EllesmereUI's. Plain: the button colours;
+-- "footer": the dark footer button; "close": the accent one. A tab: no
+-- box, a 16 px label at three alphas and a 2 px accent line text + 14
+-- wide under the open one.
+local function Lerp(a, b, t) return a + (b - a) * t end
+local function Strips(self, r, g, b, a)
+    if self._zBorder then for _, t in ipairs(self._zBorder) do t:SetVertexColor(r, g, b, a) end end
+end
+local function PaintSetButton(self)
+    local t = self._zDisabled and 0 or (self._zP or 0)
+    local fs = self._zText
+    if self._zTab then
+        if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
+        Strips(self, 0, 0, 0, 0)
+        local u = self._zUnderline
+        if u then
+            local a = Accent()
+            u:SetVertexColor(a.r, a.g, a.b, 1)
+            u:SetShown(self._zActive and true or false)
+            local tw = fs and math.ceil(fs:GetStringWidth() or 0) or 0
+            u:ClearAllPoints()
+            u:SetPoint("BOTTOM", self, "BOTTOM", 0, 0)
+            u:SetWidth(tw + 14)
+        end
+        if fs then
+            local ta = self._zDisabled and S.OFF_A or self._zActive and 1 or Lerp(S.DIM_A, S.NAV_HOVER, t)
+            fs:SetTextColor(1, 1, 1, ta)
+        end
+        return
+    end
+    local st, a = self._zStyle, Accent()
+    local k = self._zDisabled and 0.5 or 1
+    local bg, ba, br, bgc, bb, tr, tc
+    if st == "footer" or st == "close" then
+        bgc, ba = S.BG, S.FOOT_BG_A
+    else
+        bgc, ba = S.BTN_BG, Lerp(S.BTN_BG_A, S.BTN_BG_HA, t)
+    end
+    if st == "close" or (self._zActive and st ~= "footer") then
+        br, tr = a, a
+        bb, tc = Lerp(S.CLOSE_A, 1, t), Lerp(S.CLOSE_A, 1, t)
+    elseif st == "footer" then
+        br, tr = WHITE, WHITE
+        bb, tc = Lerp(S.FOOT_BRD_A, S.FOOT_BRD_HA, t), Lerp(S.FOOT_TXT_A, S.FOOT_TXT_HA, t)
+    else
+        br, tr = WHITE, WHITE
+        bb, tc = Lerp(S.BTN_BRD_A, S.BTN_BRD_HA, t), Lerp(S.BTN_TXT_A, S.BTN_TXT_HA, t)
+    end
+    if self._zFill then self._zFill:SetVertexColor(bgc.r, bgc.g, bgc.b, ba) end
+    Strips(self, br.r, br.g, br.b, bb * k)
+    if fs then fs:SetTextColor(tr.r, tr.g, tr.b, tc * k) end
+end
+UI.PaintSetButton = PaintSetButton
+
+-- The 0.1 s hover fade: an OnUpdate only while it moves.
+local function FadeStep(self, dt)
+    local want = self._zHot and 1 or 0
+    local p = self._zP or 0
+    local step = (dt or 0.016) / S.FADE
+    if p < want then p = math.min(want, p + step) else p = math.max(want, p - step) end
+    self._zP = p
+    self:_zPaint()
+    if p == want then self:SetScript("OnUpdate", nil) end
+end
+function UI.FadeHover(f)
+    f:HookScript("OnEnter", function(self)
+        self._zHot = true
+        if not self._zDisabled then self:SetScript("OnUpdate", FadeStep) end
+    end)
+    f:HookScript("OnLeave", function(self)
+        self._zHot = nil
+        self:SetScript("OnUpdate", FadeStep)
+    end)
+    f:HookScript("OnHide", function(self)
+        self._zHot, self._zP = nil, 0
+        self:SetScript("OnUpdate", nil)
+    end)
+end
+
 local function PaintButton(self)
+    if rawget(self, "_zSet") then return PaintSetButton(self) end
     if self._zTab then return PaintTab(self) end
     local key = self._zNormalKey
     if self._zDisabled then
@@ -396,11 +672,19 @@ end
 
 function UI.Button(parent, text, opts)
     opts = opts or {}
+    local set = UI._zSettings
     local b = CreateFrame("Button", nil, parent)
-    b:SetSize(opts.width or M.BUTTON_W, opts.height or M.BUTTON_H)
+    local defH = set and (opts.tab and S.TABS or S.BTN_H) or M.BUTTON_H
+    b:SetSize(opts.width or M.BUTTON_W, opts.height or defH)
     UI.Fill(b, "button", "bg")
     UI.Border(b, "ui", "border")
-    b._zText = UI.Font(b, opts.size or F.LABEL, { text = text })
+    if set then
+        b._zSet = true
+        b._zStyle = opts.style
+        b._zText = UI.SFont(b, opts.tab and S.F_TAB or (opts.size and SZ(opts.size)) or S.F_VALUE, { text = text })
+    else
+        b._zText = UI.Font(b, opts.size or F.LABEL, { text = text })
+    end
     b._zText:SetPoint("CENTER", 0, 0)
     b._zNormalKey = "bg"
     b._zPaint = PaintButton
@@ -410,7 +694,7 @@ function UI.Button(parent, text, opts)
     local function FitLabel(self)
         local fs = self._zText
         if fs:GetNumPoints() ~= 1 or self._zWrapped then return end
-        local need = math.ceil(fs:GetStringWidth() or 0) + 16
+        local need = math.ceil(fs:GetStringWidth() or 0) + (set and 24 or 16)
         if need > (self:GetWidth() or 0) then self:SetWidth(need) end
     end
     FitLabel(b)
@@ -425,9 +709,9 @@ function UI.Button(parent, text, opts)
         fs:SetWordWrap(true)
         self._zWrapped = true
         self:SetWidth(w)
-        local h = math.max(opts.height or M.BUTTON_H, math.ceil(fs:GetStringHeight() or 0) + 8)
+        local h = math.max(opts.height or defH, math.ceil(fs:GetStringHeight() or 0) + 8)
         self:SetHeight(h)
-        self._zExtraH = h - (opts.height or M.BUTTON_H)
+        self._zExtraH = h - (opts.height or defH)
     end
     -- back to one line (a pooled button handed to a page with more room)
     local bj0 = b._zText:GetJustifyH()
@@ -442,25 +726,31 @@ function UI.Button(parent, text, opts)
 
     -- Additive white lift on hover, and a real pushed texture underneath
     -- it. A flat fill gives no depth cue, so without the pushed state a
-    -- click on a dark button reads as a missed click.
-    local hover = b:CreateTexture(nil, "HIGHLIGHT")
-    hover._zui_own = true
-    hover:SetAllPoints()
-    hover:SetColorTexture(1, 1, 1, 0.05)
-    hover:SetBlendMode("ADD")
+    -- click on a dark button reads as a missed click. (The settings
+    -- window's buttons fade between two looks instead, as EllesmereUI's
+    -- do, and have no pushed state.)
+    if set then
+        UI.FadeHover(b)
+    else
+        local hover = b:CreateTexture(nil, "HIGHLIGHT")
+        hover._zui_own = true
+        hover:SetAllPoints()
+        hover:SetColorTexture(1, 1, 1, 0.05)
+        hover:SetBlendMode("ADD")
 
-    local pushed = b:CreateTexture(nil, "ARTWORK")
-    pushed._zui_own = true
-    pushed:SetAllPoints()
-    pushed:SetColorTexture(0, 0, 0, 0.35)
-    b:SetPushedTexture(pushed)
+        local pushed = b:CreateTexture(nil, "ARTWORK")
+        pushed._zui_own = true
+        pushed:SetAllPoints()
+        pushed:SetColorTexture(0, 0, 0, 0.35)
+        b:SetPushedTexture(pushed)
+    end
 
     if opts.tab then
         b._zTab = true
         local u = b:CreateTexture(nil, "OVERLAY", nil, 7)
         u._zui_own = true
         u:SetTexture(FLAT)
-        u:SetHeight(2)
+        if ns.Pixel then ns.Pixel.Edge(u, "BOTTOM", b, 2) else u:SetHeight(2) end
         u:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 1, 1)
         u:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -1, 1)
         u:Hide()
@@ -471,9 +761,13 @@ function UI.Button(parent, text, opts)
         self._zActive = on and true or nil
         self:_zPaint()
     end
-    function b:SetDisabled(on)
+    -- why: what the player has to do first ("Needs X turned on", UIF_Pickers'
+    -- UI.WHY_*), shown on hover while it is greyed
+    function b:SetDisabled(on, why)
         self._zDisabled = on and true or nil
+        self._zWhy = on and why or nil
         if on then self:Disable() else self:Enable() end
+        if self._zWhy and not self._zTipHooked then UI.Tooltip(self, self._zText:GetText(), nil) end
         self:_zPaint()
     end
     function b:SetLabel(t) self._zText:SetText(t) FitLabel(self) end
@@ -484,14 +778,17 @@ function UI.Button(parent, text, opts)
     return b
 end
 
--- Chromeless X, two rotated bars. The one piece of ZacUI furniture that
--- deliberately has no box around it.
+-- Chromeless X: ZacUI's own close icon (Media/Icons/close, drawn for
+-- ZacUI, 2026-11-07 - it replaced two rotated bars), tinted by the
+-- palette. The one piece of ZacUI furniture that deliberately has no box
+-- around it. The icon's glyph spans 12/32 of it, so at 0.95 of the button
+-- it is as wide as the bars were.
+ns.ICON_CLOSE = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\close"
 function UI.CloseX(parent, size, onClick)
     local b = CreateFrame("Button", nil, parent)
     size = size or 22
     b:SetSize(size, size)
-    local len, thick = math.floor(size * 0.5), 2
-    local function Bar(rot)
+    local function Bar()
         local t = b:CreateTexture(nil, "ARTWORK")
         -- MARKED AS OURS, and this is not bookkeeping for its own sake.
         -- Two things read this flag: the skin sweep, which blanks every
@@ -503,14 +800,23 @@ function UI.CloseX(parent, size, onClick)
         -- next round of investigation after art that was never there.
         -- A diagnostic that miscounts is worse than no diagnostic.
         t._zui_own = true
-        t:SetSize(len, thick)
+        local s = math.floor(size * 0.95 + 0.5)
+        t:SetSize(s, s)
         t:SetPoint("CENTER")
-        t:SetTexture(FLAT)
-        t:SetRotation(math.rad(rot))
+        t:SetTexture(ns.ICON_CLOSE)
         return t
     end
-    b._zA, b._zB = Bar(45), Bar(-45)
+    -- (one icon; _zB is the same texture so callers that paint both work)
+    b._zA = Bar()
+    b._zB = b._zA
+    b._zSet = UI._zSettings or nil
     b._zPaint = function(self)
+        if rawget(self, "_zSet") then
+            -- the settings window: white, 0.53 at rest, full under the mouse
+            local a = self._zHot and 1 or S.DIM_A
+            self._zA:SetVertexColor(1, 1, 1, a)
+            return
+        end
         local c = GetColor("button", self._zHot and "xHover" or "xNormal")
         self._zA:SetVertexColor(c.r, c.g, c.b, 1)
         self._zB:SetVertexColor(c.r, c.g, c.b, 1)
@@ -566,7 +872,26 @@ function UI.PaintTick(t)
     return ck or GetColor("checkbox", "check")
 end
 
+-- the settings window's checkbox (UI.S): an 18 px box, the tick an accent
+-- square 2 px in; unticked and not hovered the box is at 0.8
+local function PaintSetCheck(self)
+    local on, hot = self._zChecked, self._zHot and not self._zOff
+    local k = (on or hot) and 1 or S.CB_REST
+    local c = S.CB_BOX
+    self._zFill:SetVertexColor(c.r, c.g, c.b, k)
+    local a = Accent()
+    if on then
+        for _, t in ipairs(self._zBorder) do t:SetVertexColor(a.r, a.g, a.b, S.CB_ACT_BRD_A) end
+    else
+        for _, t in ipairs(self._zBorder) do t:SetVertexColor(1, 1, 1, S.CB_BRD_A * k) end
+    end
+    local ck = PickedCheck() or a
+    self._zCheck:SetVertexColor(ck.r, ck.g, ck.b, 1)
+    if self._zText then self._zText:SetTextColor(1, 1, 1, k) end
+end
+
 local function PaintCheck(self)
+    if rawget(self, "_zSet") then return PaintSetCheck(self) end
     local bg, bk
     if self._zHot and not self._zOff then
         bg, bk = GetColor("button", "hover"), GetColor("checkbox", "hoverBorder")
@@ -583,60 +908,72 @@ end
 
 function UI.Checkbox(parent, label, checked, onToggle, opts)
     opts = opts or {}
+    local set = UI._zSettings
+    local CK, GAP = set and S.CHECK or M.CHECK, set and S.CHECK_GAP or 7
     local host = CreateFrame("Button", nil, parent)
-    host:SetHeight(M.CHECK)
+    host:SetHeight(CK)
 
     local box = CreateFrame("Frame", nil, host)
-    box:SetSize(M.CHECK, M.CHECK)
+    box:SetSize(CK, CK)
     box:SetPoint("LEFT")
     UI.Fill(box, "checkbox", "bg")
     UI.Border(box, "checkbox", "border")
 
     local check = box:CreateTexture(nil, "ARTWORK")
     check._zui_own = true
-    check:SetSize(M.CHECK - 4, M.CHECK - 4)
-    check:SetPoint("CENTER")
-    check:SetTexture(TEX_CHECK)
+    if set then
+        -- EllesmereUI's tick: a solid square, CHECK_PAD in from the edge
+        check:SetTexture(FLAT)
+        check:SetPoint("TOPLEFT", box, "TOPLEFT", S.CHECK_PAD, -S.CHECK_PAD)
+        check:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -S.CHECK_PAD, S.CHECK_PAD)
+    else
+        check:SetSize(M.CHECK - 4, M.CHECK - 4)
+        check:SetPoint("CENTER")
+        check:SetTexture(TEX_CHECK)
+    end
     check:SetShown(checked and true or false)
 
     host._zFill, host._zBorder = box._zFill, box._zBorder
     host._zCheck = check
+    host._zSet = set or nil
+    -- (a whole box-and-label: two of them can share a settings row)
+    host._zHalf = set or nil
     host._zText = UI.Font(host, opts.size or F.LABEL, { text = label })
-    host._zText:SetPoint("LEFT", box, "RIGHT", 7, 0)
+    host._zText:SetPoint("LEFT", box, "RIGHT", GAP, 0)
     host._zPaint = PaintCheck
-    host:SetWidth(M.CHECK + 7 + math.max(10, host._zText:GetStringWidth()))
+    host:SetWidth(CK + GAP + math.max(10, host._zText:GetStringWidth()))
     -- A label too long for its room wraps under itself, the box at its
     -- first line, instead of running past the card. _zExtraH is the height
     -- the wrap added (the Layout adds it to the row).
     function host:_zFit(maxW)
         local fs = self._zText
-        local room = math.floor(maxW - M.CHECK - 7)
+        local room = math.floor(maxW - CK - GAP)
         if room < 30 or (fs:GetStringWidth() or 0) <= room + 0.5 then return end
         fs:ClearAllPoints()
-        fs:SetPoint("TOPLEFT", box, "TOPRIGHT", 7, 1)
+        fs:SetPoint("TOPLEFT", box, "TOPRIGHT", GAP, 1)
         fs:SetWidth(room)
         fs:SetJustifyH("LEFT")
         fs:SetWordWrap(true)
         box:ClearAllPoints()
         box:SetPoint("TOPLEFT")
-        local h = math.max(M.CHECK, math.ceil(fs:GetStringHeight() or M.CHECK) - 1)
+        local h = math.max(CK, math.ceil(fs:GetStringHeight() or CK) - 1)
         self:SetHeight(h)
-        self:SetWidth(M.CHECK + 7 + room)
-        self._zExtraH = h - M.CHECK
+        self:SetWidth(CK + GAP + room)
+        self._zExtraH = h - CK
     end
     local justify0 = host._zText:GetJustifyH()
     local wrap0 = host._zText.CanWordWrap and host._zText:CanWordWrap()
     function host:_zUnfit()
         local fs = self._zText
         fs:ClearAllPoints()
-        fs:SetPoint("LEFT", box, "RIGHT", 7, 0)
+        fs:SetPoint("LEFT", box, "RIGHT", GAP, 0)
         fs:SetWidth(0)
         if justify0 then fs:SetJustifyH(justify0) end
         if wrap0 ~= nil then fs:SetWordWrap(wrap0) end
         box:ClearAllPoints()
         box:SetPoint("LEFT")
-        self:SetHeight(M.CHECK)
-        self:SetWidth(M.CHECK + 7 + math.max(10, fs:GetStringWidth()))
+        self:SetHeight(CK)
+        self:SetWidth(CK + GAP + math.max(10, fs:GetStringWidth()))
     end
     local room = opts.width or UI.Room(parent)
     if room then host:_zFit(room) end
@@ -667,13 +1004,338 @@ function UI.Checkbox(parent, label, checked, onToggle, opts)
 end
 
 -- ============================================================
+-- TOGGLE (match pass 2026-11-07, UI.S)
+-- ============================================================
+-- EllesmereUI's switch, on a row: the label on the left, a 40 x 20 track
+-- on the right (off #444 at 0.65, on the accent at 0.75) with a 16 px knob
+-- two in from its end (white 0.5 off, 1.0 on), sliding over 0.075 s.
+--   UI.Toggle(parent, label, on, onToggle, { width, tooltip })
+-- Same calls as a checkbox (SetChecked / GetChecked / Click).
+function UI.Toggle(parent, label, on, onToggle, opts)
+    opts = opts or {}
+    local width = math.max(opts.width or 0, S.FIELD_W)
+    local room = UI.Room(parent)
+    if room and width > room then width = room end
+    local host = CreateFrame("Button", nil, parent)
+    host:SetSize(width, S.TOGGLE_H + 4)
+    host._zSet, host._zHalf = true, true
+    local track = CreateFrame("Frame", nil, host)
+    track:SetSize(S.TOGGLE_W, S.TOGGLE_H)
+    track:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+    -- EllesmereUI's pill track and round knob (our disc art, UI.Pill)
+    local pill = UI.Pill(track, "ARTWORK", 0, S.TOGGLE_H)
+    local knob = track:CreateTexture(nil, "ARTWORK", nil, 2)
+    knob._zui_own = true
+    local d = S.TOGGLE_H - 2 * S.KNOB_PAD
+    UI.DiscArt(knob, d)
+    knob:SetSize(d, d)
+    host._zText = UI.Font(host, F.LABEL, { text = label })
+    host._zText:SetPoint("LEFT", host, "LEFT", 0, 0)
+    host._zText:SetPoint("RIGHT", track, "LEFT", -12, 0)
+    host._zText:SetJustifyH("LEFT")
+    host._zText:SetWordWrap(false)
+    UI.TruncTip(host._zText, host)
+    local p = on and 1 or 0
+    local function Apply()
+        local a = Accent()
+        local off = S.TG_OFF
+        pill:Color(Lerp(off.r, a.r, p), Lerp(off.g, a.g, p), Lerp(off.b, a.b, p), Lerp(S.TG_OFF_A, S.TG_ON_A, p))
+        knob:ClearAllPoints()
+        knob:SetPoint("TOPLEFT", track, "TOPLEFT",
+            math.floor(Lerp(S.KNOB_PAD, S.TOGGLE_W - S.KNOB_PAD - d, p) + 0.5), -S.KNOB_PAD)
+        knob:SetVertexColor(1, 1, 1, Lerp(S.KNOB_OFF_A, 1, p))
+        host._zText:SetTextColor(1, 1, 1, 1)
+    end
+    local function Slide(self, dt)
+        local want = self._zChecked and 1 or 0
+        local step = (dt or 0.016) / S.TOGGLE_DUR
+        if p < want then p = math.min(want, p + step) else p = math.max(want, p - step) end
+        Apply()
+        if p == want then self:SetScript("OnUpdate", nil) end
+    end
+    host._zPaint = function() Apply() end
+    function host:SetChecked(v)
+        self._zChecked = v and true or false
+        p = self._zChecked and 1 or 0
+        self:SetScript("OnUpdate", nil)
+        Apply()
+    end
+    function host:GetChecked() return self._zChecked end
+    function host:_zFit(w) self:SetWidth(math.max(120, w)) end
+    host:SetScript("OnClick", function(self)
+        self._zChecked = not self._zChecked
+        if onToggle then onToggle(self._zChecked) end
+        Changed("toggle")
+        local M2 = ns.Motion
+        if M2 and M2.Enabled and not M2.Enabled() then
+            p = self._zChecked and 1 or 0
+            Apply()
+        else
+            self:SetScript("OnUpdate", Slide)
+        end
+    end)
+    host:SetChecked(on)
+    if opts.tooltip then UI.Tooltip(host, label, opts.tooltip) end
+    return host
+end
+
+-- ============================================================
 -- SLIDER
 -- ============================================================
 -- The track is OUR texture, not the slider's: Blizzard's slider art on
 -- this client draws a bevelled groove that cannot be flattened, only
 -- hidden. The Slider widget survives purely as the drag handler.
+-- THE SETTINGS WINDOW'S SLIDER (UI.S): one line, EllesmereUI's row - the
+-- label on the left, a 4 px track (fill in the accent, a 14 px accent grip
+-- on a block of the window colour), and a box on the right you can type the
+-- value into. Same API as the plain one (slider, valueText, SetValue,
+-- _zSetQuiet, _zFit...).
+local function NumberIn(text)
+    local n = tonumber(((text or ""):gsub(",", ".")):match("%-?%d+%.?%d*"))
+    return n
+end
+local function SetSlider(parent, opts)
+    local lo, hi = opts.min or 0, opts.max or 1
+    -- the width it was given (a page that places it by hand counts on
+    -- it); a row of the layout widens it to half a row (Config_Base)
+    local width = opts.width or S.SLIDER_W
+    local room = UI.Room(parent)
+    if room and width > room then width = room end
+    local host = CreateFrame("Frame", nil, parent)
+    host:SetSize(width, S.VALUE_H + 4)
+    host._zSet, host._zHalf = true, true
+
+    local step = opts.step or 1
+    local decimals = 0
+    do
+        local sstr = string.format("%.6f", step):gsub("0+$", "")
+        local dot = sstr:find("%.")
+        if dot then decimals = #sstr - dot end
+    end
+    local function Snap(v)
+        v = lo + math.floor((v - lo) / step + 0.5) * step
+        v = math.max(lo, math.min(hi, v))
+        if decimals > 0 then v = tonumber(string.format("%." .. decimals .. "f", v)) or v end
+        return v
+    end
+    local fmt = opts.format or function(v)
+        if decimals > 0 then return string.format("%." .. decimals .. "f", v) end
+        return tostring(math.floor(v + 0.5))
+    end
+
+    -- the value box, on the right
+    local box = CreateFrame("Frame", nil, host)
+    UI.Fill(box, "ui", "elementBg")
+    UI.Border(box, "ui", "border")
+    box._zSet = true
+    box:SetSize(S.VALUE_W, S.VALUE_H)
+    box:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+    local value = CreateFrame("EditBox", nil, box)
+    value:SetAllPoints(box)
+    value:SetAutoFocus(false)
+    value:SetJustifyH("CENTER")
+    value:SetMaxLetters(12)
+    value:SetFontObject("GameFontHighlightSmall")
+    value._zSet = true
+    FontDress(value, S.F_VALUE, "")
+    if value.SetTextInsets then value:SetTextInsets(3, 3, 0, 0) end
+
+    -- the track, left of the box
+    -- (EllesmereUI's: a 4 px pill, the filled part a pill in the accent up
+    -- to the thumb's middle, a round thumb on a disc of the window colour)
+    local track = CreateFrame("Frame", nil, host)
+    track:SetHeight(S.TRACK_H)
+    local trackPill = UI.Pill(track, "BACKGROUND", 1, S.TRACK_H)
+    local fill = CreateFrame("Frame", nil, track)
+    fill:SetPoint("TOPLEFT", track, "TOPLEFT", 0, 0)
+    fill:SetPoint("BOTTOMLEFT", track, "BOTTOMLEFT", 0, 0)
+    fill:SetWidth(S.TRACK_H)
+    local fillPill = UI.Pill(fill, "ARTWORK", 0, S.TRACK_H)
+    host._zFillBar = fill
+
+    local slider = CreateFrame("Slider", nil, host)
+    slider:SetOrientation("HORIZONTAL")
+    slider:SetPoint("TOPLEFT", track, "TOPLEFT", 0, 8)
+    slider:SetPoint("BOTTOMRIGHT", track, "BOTTOMRIGHT", 0, -8)
+    slider:SetFrameLevel(track:GetFrameLevel() + 2)
+    slider:SetMinMaxValues(lo, hi)
+    slider:SetValueStep(step)
+    slider:SetObeyStepOnDrag(true)
+    slider:SetValue(opts.value or lo)
+    local thumb = slider:CreateTexture(nil, "OVERLAY", nil, 2)
+    thumb._zui_own = true
+    thumb:SetSize(S.THUMB, S.THUMB)
+    slider:SetThumbTexture(thumb)
+    UI.DiscArt(thumb, S.THUMB)
+    -- the disc of window colour under the grip: hides the fill's end
+    local block = slider:CreateTexture(nil, "OVERLAY", nil, 1)
+    block._zui_own = true
+    UI.DiscArt(block, S.THUMB)
+    block:SetAllPoints(thumb)
+
+    local label
+    if opts.label then
+        label = UI.Font(host, F.LABEL, { text = opts.label })
+        label:SetPoint("LEFT", host, "LEFT", 0, 0)
+        label:SetJustifyH("LEFT")
+        label:SetWordWrap(false)
+        UI.TruncTip(label, host)
+        host._zLabelFS = label
+    end
+
+    local function PlaceFill(v)
+        local w = track:GetWidth() or 0
+        local k = (hi > lo) and math.max(0, math.min(1, ((v or lo) - lo) / (hi - lo))) or 0
+        -- to the thumb's middle (the client keeps the thumb inside the
+        -- track: its middle runs from half a thumb in to half a thumb short)
+        local fw = S.THUMB / 2 + k * math.max(0, w - S.THUMB)
+        fill:SetWidth(math.max(S.TRACK_H, math.floor(fw + 0.5)))
+        fill:SetShown(k > 0)
+    end
+    track:SetScript("OnSizeChanged", function() PlaceFill(slider:GetValue()) end)
+
+    -- the parts across the width: box, gap, track (160, less when tight),
+    -- gap, the label in what is left (cut short with a tooltip)
+    local BASE_H = S.VALUE_H + 4
+    local function Lay(w)
+        local bw = S.VALUE_W
+        local txt = value:GetText() or ""
+        local need = math.ceil((txt ~= "" and (#txt * S.F_VALUE * 0.55)) or 0) + 10
+        if need > bw then bw = math.min(90, need) end
+        box:SetWidth(bw)
+        local lw = label and math.ceil(label:GetStringWidth() or 0) or 0
+        local left = w - bw - S.TRACK_GAP
+        local tw = S.TRACK_W
+        box:ClearAllPoints()
+        track:ClearAllPoints()
+        if label and lw + S.TRACK_GAP + S.TRACK_MIN > left then
+            -- too narrow for one line (a picker's column): the label on a
+            -- line of its own, the track and the box under it
+            label:ClearAllPoints()
+            label:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+            label:SetWidth(math.max(20, w))
+            local lh = math.ceil(label:GetStringHeight() or S.F_LABEL)
+            local h = lh + 4 + S.VALUE_H
+            host:SetHeight(h)
+            host._zExtraH = h - BASE_H
+            box:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+            track:SetPoint("RIGHT", box, "LEFT", -S.TRACK_GAP, 0)
+            track:SetWidth(math.max(20, left))
+        else
+            if label then
+                label:ClearAllPoints()
+                label:SetPoint("LEFT", host, "LEFT", 0, 0)
+                local spare = left - lw - S.TRACK_GAP - tw
+                if spare < 0 then tw = math.max(S.TRACK_MIN, tw + spare) end
+                label:SetWidth(math.max(20, left - tw - S.TRACK_GAP))
+            else
+                tw = math.max(S.TRACK_MIN, left)
+            end
+            host:SetHeight(BASE_H)
+            host._zExtraH = nil
+            box:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+            track:SetPoint("RIGHT", box, "LEFT", -S.TRACK_GAP, 0)
+            track:SetWidth(tw)
+        end
+        PlaceFill(slider:GetValue())
+    end
+    local function Show(v) value:SetText(fmt(v)) PlaceFill(v) end
+    Show(opts.value or lo)
+    Lay(width)
+    function host:_zFit(w)
+        w = math.max(140, w)
+        self:SetWidth(w)
+        Lay(w)
+    end
+    host._zFitLabel = function(w) Lay(w) end
+    function host:_zUnfit()
+        self:SetSize(width, BASE_H)
+        self._zExtraH = nil
+        Lay(width)
+    end
+
+    local last = opts.value
+    slider:SetScript("OnValueChanged", function(self, v)
+        v = Snap(v)
+        if not value:HasFocus() then Show(v) else PlaceFill(v) end
+        if v ~= last then
+            last = v
+            if opts.onChange then opts.onChange(v) end
+            Changed("slider")
+        end
+    end)
+    -- typed: Enter (or leaving the box) sets it, Escape puts it back
+    local function Commit(self)
+        local n = NumberIn(self:GetText())
+        if n then slider:SetValue(Snap(n)) end
+        Show(Snap(slider:GetValue() or lo))
+    end
+    value:SetScript("OnEnterPressed", function(self) Commit(self) self:ClearFocus() end)
+    value:SetScript("OnEscapePressed", function(self) Show(Snap(slider:GetValue() or lo)) self:ClearFocus() end)
+    value:SetScript("OnEditFocusGained", function(self)
+        self:SetTextColor(1, 1, 1, 1)
+        if self.HighlightText then self:HighlightText() end
+    end)
+    value:SetScript("OnEditFocusLost", function(self)
+        Commit(self)
+        host:_zPaint()
+    end)
+
+    host._zPaint = function(self)
+        local a = Accent()
+        local off = self._zOff
+        trackPill:Color(1, 1, 1, S.SL_TRACK_A)
+        fillPill:Color(a.r, a.g, a.b, S.SL_FILL_A)
+        -- (the thumb stays the accent, hovered or not, as EllesmereUI's)
+        thumb:SetVertexColor(a.r, a.g, a.b, 1)
+        block:SetVertexColor(S.BG.r, S.BG.g, S.BG.b, 1)
+        local c = S.INPUT
+        box._zFill:SetVertexColor(c.r, c.g, c.b, S.SL_INPUT_A)
+        for _, s in ipairs(box._zBorder or {}) do s:SetVertexColor(1, 1, 1, S.SL_INPUT_BRD_A) end
+        if not value:HasFocus() then value:SetTextColor(1, 1, 1, S.DIM_A) end
+        if label then label:SetTextColor(1, 1, 1, 1) end
+        local _ = off
+    end
+    box._zPaint = function() host:_zPaint() end
+    slider:HookScript("OnEnter", function() host._zHot = true host:_zPaint() end)
+    slider:HookScript("OnLeave", function() host._zHot = nil host:_zPaint() end)
+    slider:HookScript("OnMouseDown", function() host._zDrag = true host:_zPaint() end)
+    slider:HookScript("OnMouseUp", function() host._zDrag = nil host:_zPaint() end)
+    if slider.EnableMouseWheel then
+        slider:EnableMouseWheel(true)
+        slider:SetScript("OnMouseWheel", function(self, delta)
+            if IsShiftKeyDown and IsShiftKeyDown() then
+                self:SetValue(Snap((self:GetValue() or lo) + delta * step))
+                return
+            end
+            local p = host:GetParent()
+            for _ = 1, 20 do
+                if not p then break end
+                local fn = p.GetScript and p:GetScript("OnMouseWheel")
+                if fn and p.IsMouseWheelEnabled and p:IsMouseWheelEnabled() then fn(p, delta) return end
+                p = p.GetParent and p:GetParent()
+            end
+        end)
+    end
+    host.slider, host.valueText, host.valueBox = slider, value, box
+    function host:SetValue(v) slider:SetValue(v) end
+    host._zSetQuiet = function(v)
+        local x = v or lo
+        local fn = slider:GetScript("OnValueChanged")
+        slider:SetScript("OnValueChanged", nil)
+        slider:SetValue(x)
+        slider:SetScript("OnValueChanged", fn)
+        last = v
+        Show(x)
+    end
+    host._zPoolRefit = function(self) Lay(self:GetWidth() or width) end
+    host:_zPaint()
+    return host
+end
+
 function UI.Slider(parent, opts)
     opts = opts or {}
+    if UI._zSettings then return SetSlider(parent, opts) end
     local width = opts.width or M.SLIDER_W
     local room = UI.Room(parent)
     if room and width > room then width = room end
@@ -749,6 +1411,7 @@ function UI.Slider(parent, opts)
     if opts.label then
         label = UI.Font(host, F.SMALL, { text = opts.label, cat = "text", key = "gray" })
         label:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+        host._zLabelFS = label   -- (the name a dimmed slider's reason shows under)
     end
     -- A label longer than the slider (less room for the value) wraps over
     -- more lines and the slider grows taller; the track stays at the bottom.
@@ -894,23 +1557,26 @@ function UI.Dropdown(parent, opts)
     local width = opts.width or 200
     local room = UI.Room(parent)
     if room and width > room then width = math.max(60, room) end
+    local set = UI._zSettings
     local dd = CreateFrame("Button", nil, parent)
-    dd:SetSize(width, M.DROPDOWN_H)
+    dd:SetSize(width, set and S.DD_H or M.DROPDOWN_H)
     function dd:_zFit(w) self:SetWidth(math.max(60, w)) end
     UI.Fill(dd, "button", "bg")
     UI.Border(dd, "ui", "border")
     dd._zNormalKey = "bg"
+    dd._zSet = set or nil
 
-    dd._zText = UI.Font(dd, F.LABEL, { justify = "LEFT" })
-    dd._zText:SetPoint("LEFT", 7, 0)
-    dd._zText:SetPoint("RIGHT", -20, 0)
+    -- (settings window: the value at 13 px, 12 in; the arrow 17 from the right)
+    dd._zText = set and UI.SFont(dd, S.F_VALUE, { justify = "LEFT" }) or UI.Font(dd, F.LABEL, { justify = "LEFT" })
+    dd._zText:SetPoint("LEFT", set and 12 or 7, 0)
+    dd._zText:SetPoint("RIGHT", set and -27 or -20, 0)
     dd._zText:SetWordWrap(false)
     UI.TruncTip(dd._zText, dd)      -- a long choice shows whole on hover
 
     local arrow = dd:CreateTexture(nil, "ARTWORK")
     arrow._zui_own = true
-    arrow:SetSize(9, 9)
-    arrow:SetPoint("RIGHT", -6, 0)
+    arrow:SetSize(set and 10 or 9, set and 10 or 9)
+    arrow:SetPoint("RIGHT", set and -12 or -6, 0)
     arrow:SetTexture(TEX_ARROW)
 
     local menu = CreateFrame("Frame", nil, UIParent)
@@ -923,12 +1589,14 @@ function UI.Dropdown(parent, opts)
     menu._zPaint = PaintBox
     menu:_zPaint()
 
-    local ROW = 19
+    local ROW = set and S.DD_ROW or 19
     -- A long list scrolls instead of running off the screen: only this
     -- many rows exist, the wheel slides an offset through the items, and
     -- a thin rail on the right shows where you are. LibSharedMedia's
     -- texture list was the menu that finally forced this.
-    local MAX_ROWS = 18
+    -- (settings window: EllesmereUI's 26 px rows; up to 18 of them, as
+    -- ZacUI's lists always showed, rather than their 200 px cap)
+    local MAX_ROWS = set and S.DD_ROWS or 18
     local rows = {}
     local open = false
     local offset = 0
@@ -944,6 +1612,7 @@ function UI.Dropdown(parent, opts)
         open = false
         menu:Hide()
         arrow:SetTexCoord(0, 1, 0, 1)
+        if dd._zSet and dd._zPaint then dd:_zPaint() end
         if UI._openDropdown == dd then UI._openDropdown = nil end
     end
     dd.Close = Close
@@ -975,25 +1644,53 @@ function UI.Dropdown(parent, opts)
                 row.hl:SetAllPoints()
                 row.hl:SetTexture(FLAT)
                 row.hl:Hide()
-                row.label = UI.Font(row, F.LABEL, { justify = "LEFT" })
-                row.label:SetPoint("LEFT", 6, 0)
+                if set then
+                    row.label = UI.SFont(row, S.F_VALUE, { justify = "LEFT" })
+                    row.label:SetPoint("LEFT", 8, 0)
+                else
+                    row.label = UI.Font(row, F.LABEL, { justify = "LEFT" })
+                    row.label:SetPoint("LEFT", 6, 0)
+                end
                 row.label:SetPoint("RIGHT", -16, 0)
                 row.label:SetWordWrap(false)
                 row.tick = UI.Font(row, F.SMALL, { text = "*", cat = "dropdown", key = "selected" })
                 row.tick:SetPoint("RIGHT", -5, 0)
                 row:SetScript("OnEnter", function(self)
+                    if set then
+                        -- white 0.08 under the mouse, the label full white
+                        self.hl:SetVertexColor(1, 1, 1, S.DD_HL_A)
+                        self.hl:Show()
+                        self.label:SetTextColor(1, 1, 1, 1)
+                        return
+                    end
                     local c = GetColor("dropdown", "itemHover")
                     self.hl:SetVertexColor(c.r, c.g, c.b, c.a or 1)
                     self.hl:Show()
                 end)
-                row:SetScript("OnLeave", function(self) self.hl:Hide() end)
+                row:SetScript("OnLeave", function(self)
+                    if set then
+                        self.hl:SetVertexColor(1, 1, 1, S.DD_SEL_A)
+                        self.hl:SetShown(self._zSel and true or false)
+                        self.label:SetTextColor(1, 1, 1, S.DIM_A)
+                        return
+                    end
+                    self.hl:Hide()
+                end)
                 rows[i] = row
             end
-            row:SetPoint("TOPLEFT", menu, "TOPLEFT", 2, -2 - (i - 1) * ROW)
+            row:SetPoint("TOPLEFT", menu, "TOPLEFT", set and 1 or 2, (set and -4 or -2) - (i - 1) * ROW)
             row.label:SetText(text)
             row.label._zPaintCat, row.label._zPaintKey = "dropdown", "itemText"
             row.label:_zPaint()
             row.tick:SetShown(selected ~= nil and val == selected)
+            if set then
+                -- the chosen one: white 0.04 behind it, no tick
+                row._zSel = (selected ~= nil and val == selected) or nil
+                row.tick:Hide()
+                row.label:SetTextColor(1, 1, 1, S.DIM_A)
+                row.hl:SetVertexColor(1, 1, 1, S.DD_SEL_A)
+                row.hl:SetShown(row._zSel and true or false)
+            end
             -- opts.decorate(row, item, value, text): a picker dresses its
             -- rows (each font in its own face, a sample of each texture).
             -- Rows are reused as the list scrolls, so it runs every build.
@@ -1007,7 +1704,7 @@ function UI.Dropdown(parent, opts)
             row:Show()
         end
         for i = shown + 1, #rows do rows[i]:Hide() end
-        menu:SetSize(width, math.max(shown, 1) * ROW + 4)
+        menu:SetSize(dd:GetWidth() or width, math.max(shown, 1) * ROW + (set and 7 or 4))
 
         -- position rail: thumb-length proportional, slid by offset
         if total > shown then
@@ -1069,7 +1766,28 @@ function UI.Dropdown(parent, opts)
     menu:SetScript("OnHide", function() open = false end)
 
     UI.Hover(dd, "bg", "hover")
+    if set then
+        -- the menu: the dropdown's fill at 0.98, a white 0.20 edge
+        menu._zPaint = function(self)
+            local c = S.DD_BG
+            self._zFill:SetVertexColor(c.r, c.g, c.b, S.DD_BG_HA)
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(1, 1, 1, S.DD_BRD_A) end
+        end
+        menu:_zPaint()
+        dd:HookScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
+        dd:HookScript("OnLeave", function(self) self._zHot = nil self:_zPaint() end)
+    end
     dd._zPaint = function(self)
+        if set then
+            local hot = (self._zHot or open) and not self._zOff
+            local c = S.DD_BG
+            self._zFill:SetVertexColor(c.r, c.g, c.b, hot and S.DD_BG_HA or S.DD_BG_A)
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(1, 1, 1, hot and S.DD_BRD_HA or S.DD_BRD_A) end
+            local ta = hot and S.DD_TXT_HA or S.DD_TXT_A
+            self._zText:SetTextColor(1, 1, 1, ta)
+            arrow:SetVertexColor(1, 1, 1, ta)
+            return
+        end
         PaintBox(self)
         local a = GetColor("dropdown", "arrow")
         arrow:SetVertexColor(a.r, a.g, a.b, 1)
@@ -1218,7 +1936,7 @@ local function CtxBuild(m, level, items)
                 rule = m:CreateTexture(nil, "ARTWORK")
                 rule._zui_own = true
                 rule:SetTexture(FLAT)
-                rule:SetHeight(1)
+                if ns.Pixel then ns.Pixel.Edge(rule, "TOP", m) else rule:SetHeight(1) end
                 m.rules[sep] = rule
             end
             rule:ClearAllPoints()
@@ -1346,19 +2064,38 @@ end
 -- ============================================================
 function UI.EditBox(parent, opts)
     opts = opts or {}
+    local set = UI._zSettings
     local host = UI.Box(parent, "ui", "elementBg")
     local width = opts.width or 180
     local room = UI.Room(parent)
     if room and width > room then width = math.max(60, room) end
-    host:SetSize(width, opts.height or M.EDIT_H)
+    -- (settings window: EllesmereUI's search field - 28 high, the input
+    -- colour at 0.35, a white 0.10 edge, the accent while typing, 13 px
+    -- text 10 in)
+    host:SetSize(width, set and math.max(opts.height or 0, S.EDIT_H) or (opts.height or M.EDIT_H))
     function host:_zFit(w) self:SetWidth(math.max(60, w)) end
+    local INSET = set and 10 or 6
 
     local eb = CreateFrame("EditBox", nil, host)
-    eb:SetPoint("TOPLEFT", 6, -2)
-    eb:SetPoint("BOTTOMRIGHT", -6, 2)
+    eb:SetPoint("TOPLEFT", INSET, -2)
+    eb:SetPoint("BOTTOMRIGHT", -INSET, 2)
     eb:SetAutoFocus(false)
     eb:SetFontObject("GameFontHighlightSmall")
-    FontDress(eb, F.LABEL, "")
+    if set then
+        host._zSet, eb._zSet = true, true
+        FontDress(eb, S.F_VALUE, "")
+        host._zPaint = function(self)
+            local c = S.INPUT
+            self._zFill:SetVertexColor(c.r, c.g, c.b, S.INPUT_A)
+            local focus = self._zBorderKey == "accent"
+            local a = focus and Accent() or WHITE
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(a.r, a.g, a.b, focus and 0.8 or S.INPUT_BRD_A) end
+            eb:SetTextColor(1, 1, 1, 0.9)
+        end
+        host:_zPaint()
+    else
+        FontDress(eb, F.LABEL, "")
+    end
     eb:SetText(opts.text or "")
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     eb:SetScript("OnEnterPressed", function(self)
@@ -1387,14 +2124,20 @@ function UI.EditBox(parent, opts)
 
     local hint
     if opts.hint then
-        hint = UI.Font(host, F.LABEL, { text = opts.hint, cat = "text", key = "gray", justify = "LEFT" })
-        hint:SetPoint("LEFT", 7, 0)
+        if set then
+            hint = UI.SFont(host, S.F_HINT, { text = opts.hint, justify = "LEFT" })
+            hint:SetTextColor(1, 1, 1, 0.30)
+            hint._zPaint = function(self) self:SetTextColor(1, 1, 1, 0.30) end
+        else
+            hint = UI.Font(host, F.LABEL, { text = opts.hint, cat = "text", key = "gray", justify = "LEFT" })
+        end
+        hint:SetPoint("LEFT", INSET + 1, 0)
         -- held inside the box: a hint longer than the box is cut short
         -- (its tooltip shows the whole of it), never drawn past the edge
-        hint:SetPoint("RIGHT", host, "RIGHT", -7, 0)
+        hint:SetPoint("RIGHT", host, "RIGHT", -(INSET + 1), 0)
         hint:SetWordWrap(false)
         UI.TruncTip(hint, eb)
-        hint:SetAlpha(0.7)
+        if not set then hint:SetAlpha(0.7) end
         local function Sync()
             hint:SetShown((eb:GetText() or "") == "")
         end
@@ -1414,7 +2157,7 @@ function UI.EditBox(parent, opts)
     local wantClear = opts.clear
     if wantClear == nil then wantClear = opts.hint ~= nil end
     if wantClear then
-        local x = UI.CloseX(host, 14, function()
+        local x = UI.CloseX(host, set and 20 or 14, function()
             eb:SetText("")
             if opts.onChange then opts.onChange("") end
             if opts.onEnter then opts.onEnter("") end
@@ -1429,7 +2172,7 @@ function UI.EditBox(parent, opts)
             x:SetShown(has)
             -- Make room for it only while it is there; an always-narrow
             -- box wastes its last twenty pixels on nothing.
-            eb:SetPoint("BOTTOMRIGHT", has and -20 or -6, 2)
+            eb:SetPoint("BOTTOMRIGHT", has and -24 or -INSET, 2)
         end
         eb:HookScript("OnTextChanged", SyncClear)
         SyncClear()
@@ -1515,7 +2258,12 @@ end
 -- Classic ScrollFrame + our own Slider. The modern ScrollBox stack is not
 -- reliably present on 11509 and brings a template dependency we do not
 -- need for a settings list.
-function UI.ScrollArea(parent)
+-- opts.style "settings" / "nav" (the settings window, UI.S): EllesmereUI's
+-- thin bar - a 4 px white 0.02 track and a 4 px white 0.27 thumb (nav:
+-- 3 px, 0.03 / 0.25), at least 30 tall, in a 16 px hit strip; 60 per wheel
+-- notch, eased `cur + diff * min(1, 12 * dt)` to whole pixels.
+function UI.ScrollArea(parent, opts)
+    local style = type(opts) == "table" and opts.style or nil
     local scroll = CreateFrame("ScrollFrame", nil, parent)
     local child = CreateFrame("Frame", nil, scroll)
     child:SetSize(1, 1)
@@ -1531,22 +2279,36 @@ function UI.ScrollArea(parent)
     -- comes up full while the mouse is on it, while it is dragged and for
     -- a moment after every scroll - the same in every scroll area.
     local track = CreateFrame("Frame", nil, bar)
-    track:SetPoint("TOPLEFT", 5, 0)
-    track:SetPoint("BOTTOMRIGHT", -5, 0)
+    local thin = style and (style == "nav" and 3 or 4) or nil
+    if thin then
+        track:SetWidth(thin)
+        track:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -(M.SCROLL_W - thin) / 2, 0)
+        track:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -(M.SCROLL_W - thin) / 2, 0)
+    else
+        track:SetPoint("TOPLEFT", 5, 0)
+        track:SetPoint("BOTTOMRIGHT", -5, 0)
+    end
     track:SetFrameLevel(math.max(0, bar:GetFrameLevel() - 1))
     UI.Fill(track, "scrollbar", "track")
-    UI.Border(track, "ui", "border", 0.4)
+    if not thin then UI.Border(track, "ui", "border", 0.4) end
     track._zPaint = PaintBox
     track:_zPaint()
 
     local thumb = bar:CreateTexture(nil, "OVERLAY")
     thumb._zui_own = true
-    thumb:SetTexture(TEX_THUMB)
-    thumb:SetSize(M.SCROLL_W - 10, 42)
+    thumb:SetTexture(thin and FLAT or TEX_THUMB)
+    thumb:SetSize(thin or (M.SCROLL_W - 10), thin and 60 or 42)
     bar:SetThumbTexture(thumb)
     local REST, LIT = 0.5, 1
     local lit, serial = false, 0
     local function PaintThumb()
+        if thin then
+            local ta, ka = S.SCROLL_TRACK_A, S.SCROLL_THUMB_A
+            if style == "nav" then ta, ka = S.NAV_TRACK_A, S.NAV_THUMB_A end
+            track._zFill:SetVertexColor(1, 1, 1, ta)
+            thumb:SetVertexColor(1, 1, 1, (lit or bar._zHot or bar._zDrag) and math.min(1, ka + 0.2) or ka)
+            return
+        end
         local tc = GetColor("scrollbar", "thumb")
         local on = lit or bar._zHot or bar._zDrag
         thumb:SetVertexColor(tc.r, tc.g, tc.b, (tc.a or 1) * (on and LIT or REST))
@@ -1569,14 +2331,83 @@ function UI.ScrollArea(parent)
     bar:HookScript("OnMouseDown", function() bar._zDrag = true PaintThumb() end)
     bar:HookScript("OnMouseUp", function() bar._zDrag = nil PaintThumb() end)
 
-    bar:SetScript("OnValueChanged", function(self, v) scroll:SetVerticalScroll(v) end)
+    -- SMOOTH WHEEL (finish pass). A notch is M.WHEEL units (24, was 34),
+    -- eased out over about 0.15 s, every step on a whole physical pixel
+    -- under the ZacUI look (ns.Pixel) so text never shimmers between two.
+    -- The OnUpdate is set only while it glides and taken off on arrival;
+    -- a drag of the bar or a jump (search, a page change) cancels it.
+    -- With animations off (Appearance > Motion) a notch jumps, as before.
+    local target, gliding, own, lastSet = nil, false, false, nil
+    local function Snap(v)
+        local P = ns.Pixel
+        if P and P.On and P.On() and P.Snap then return P.Snap(v, child) end
+        return v
+    end
+    local function Stop()
+        target = nil
+        if gliding then gliding = false scroll:SetScript("OnUpdate", nil) end
+    end
+    local function Glide(_, dt)
+        if not target then Stop() return end
+        local v = bar:GetValue()
+        -- moved by someone else since the last step (a drag, a jump - a page
+        -- may own the bar's OnValueChanged): that wins
+        if lastSet and math.abs(v - lastSet) > 0.01 then Stop() return end
+        -- the page may have grown or shrunk under it
+        local minV, maxV = bar:GetMinMaxValues()
+        target = math.max(minV, math.min(maxV, target))
+        local nv
+        if thin then
+            nv = v + (target - v) * math.min(1, S.LERP * (dt or 0.016))
+        else
+            nv = v + (target - v) * (1 - math.exp(-(dt or 0.016) * 18))
+        end
+        own = true
+        if math.abs(target - nv) < (thin and 0.3 or 0.5) then
+            bar:SetValue(target)
+            own = false
+            Stop()
+            return
+        end
+        nv = Snap(nv)
+        -- (a snap that lands back where it was still moves one pixel on)
+        if nv == v then nv = v + ((target > v) and 1 or -1) * math.min(math.abs(target - v), (ns.Pixel and ns.Pixel.One and ns.Pixel.One(child)) or 1) end
+        bar:SetValue(nv)
+        lastSet = bar:GetValue()
+        own = false
+    end
+    bar:SetScript("OnValueChanged", function(self, v)
+        if not own and target then Stop() end
+        scroll:SetVerticalScroll(v)
+    end)
     scroll:EnableMouseWheel(true)
     scroll:SetScript("OnMouseWheel", function(_, delta)
         local minV, maxV = bar:GetMinMaxValues()
-        local v = bar:GetValue() - delta * 34
-        bar:SetValue(math.max(minV, math.min(maxV, v)))
+        local from = target or bar:GetValue()
+        local v = math.max(minV, math.min(maxV, from - delta * (thin and S.WHEEL or M.WHEEL or 24)))
+        local Motion = ns.Motion
+        if (Motion and Motion.Enabled and not Motion.Enabled()) or not scroll:IsVisible() then
+            Stop()
+            bar:SetValue(v)
+        else
+            target = v
+            if not gliding then
+                gliding = true
+                lastSet = bar:GetValue()
+                scroll:SetScript("OnUpdate", Glide)
+            end
+        end
         if maxV > 0 then Flash() end
     end)
+    scroll:HookScript("OnHide", function()
+        -- put away mid-glide: land where it was going
+        if target then
+            local t = target
+            Stop()
+            bar:SetValue(t)
+        end
+    end)
+    function scroll:Gliding() return gliding end
 
     -- Range is recomputed from the measured content, not from a running
     -- total kept by the caller: pages build at different rates and a
@@ -1590,7 +2421,7 @@ function UI.ScrollArea(parent)
         bar:SetShown(maxScroll > 1)
         if maxScroll > 1 then
             local frac = view / h
-            thumb:SetHeight(math.max(28, math.floor(view * frac)))
+            thumb:SetHeight(math.max(thin and 30 or 28, math.floor(view * frac)))
         end
     end
 
@@ -1606,8 +2437,85 @@ end
 -- A card is a titled section. Its border is deliberately softer than a
 -- widget's - a page of eight hard black rectangles reads as a grid, and
 -- the eye stops finding the headings.
+-- In the settings window (UI.S) a card is EllesmereUI's section: no box,
+-- a 40 px head with the title at 12 px, white 0.41 and a white
+-- 0.02 rule under it, then rows (Config_Base lays their alternating bands).
+local function SetCard(parent, title, y, opts)
+    local card = CreateFrame("Frame", nil, parent)
+    card._zSet = true
+    card:SetPoint("TOPLEFT", S.PAD, y)
+    card:SetPoint("RIGHT", parent, "RIGHT", -S.PAD, 0)
+    card:SetHeight(opts.height or 50)
+    UI.Fill(card, "ui", "cardBg")
+    -- (kept, see-through: the settings tests and search know a card by it)
+    local accent = card:CreateTexture(nil, "ARTWORK")
+    accent._zui_own = true
+    accent:SetTexture(FLAT)
+    accent:SetWidth(1)
+    accent:SetPoint("TOPLEFT")
+    accent:SetPoint("BOTTOMLEFT")
+    card._zAccent = accent
+    local rule
+    if title then
+        card._zTitleText = title
+        -- (as written: other code and the suites read a card by its title)
+        card._zTitle = UI.SFont(card, S.F_SECTION, { text = title, justify = "LEFT" })
+        card._zTitle._zPaint = function(self) self:SetTextColor(1, 1, 1, S.SECTION_A) end
+        card._zTitle:SetPoint("BOTTOMLEFT", card, "TOPLEFT", 1, -S.SECTION + 8)
+        rule = card:CreateTexture(nil, "ARTWORK")
+        rule._zui_own = true
+        rule:SetTexture(FLAT)
+        if ns.Pixel then ns.Pixel.Edge(rule, "TOP", card) else rule:SetHeight(1) end
+        rule:SetPoint("TOPLEFT", card, "TOPLEFT", 0, -(S.SECTION - 1))
+        rule:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, -(S.SECTION - 1))
+        card._zRule = rule
+        local room = UI.Room(card, 0)
+        if room and (card._zTitle:GetStringWidth() or 0) > room + 0.5 then
+            local one = card._zTitle:GetStringHeight() or S.F_SECTION
+            card._zTitle:SetWidth(room)
+            card._zTitle:SetWordWrap(true)
+            card._zTitleExtra = math.max(0, math.ceil((card._zTitle:GetStringHeight() or one) - one))
+            card._zTitle:ClearAllPoints()
+            card._zTitle:SetPoint("TOPLEFT", card, "TOPLEFT", 1, -(S.SECTION - 8 - one))
+            rule:ClearAllPoints()
+            rule:SetPoint("TOPLEFT", card, "TOPLEFT", 0, -(S.SECTION - 1 + card._zTitleExtra))
+            rule:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, -(S.SECTION - 1 + card._zTitleExtra))
+        end
+        local t = card._zTitle
+        -- (back to how it was built - wrapped or not - on reuse)
+        local bw, bx = card._zTitleExtra and room or 0, card._zTitleExtra
+        local bwrap = t.CanWordWrap and t:CanWordWrap()
+        local tp = { t:GetPoint(1) }
+        local rp1, rp2 = { rule:GetPoint(1) }, { rule:GetPoint(2) }
+        function card:_zUnfit()
+            t:SetWidth(bw)
+            if bwrap ~= nil then t:SetWordWrap(bwrap) end
+            t:ClearAllPoints()
+            t:SetPoint(tp[1], tp[2], tp[3], tp[4], tp[5])
+            rule:ClearAllPoints()
+            rule:SetPoint(rp1[1], rp1[2], rp1[3], rp1[4], rp1[5])
+            rule:SetPoint(rp2[1], rp2[2], rp2[3], rp2[4], rp2[5])
+            self._zTitleExtra = bx
+        end
+    end
+    card._zPaint = function(self)
+        self._zFill:SetVertexColor(0, 0, 0, 0)
+        self._zAccent:SetVertexColor(0, 0, 0, 0)
+        if rule then rule:SetVertexColor(1, 1, 1, S.SECTION_RULE_A) end
+        if self._zTitle then self._zTitle:_zPaint() end
+    end
+    -- rows meet the section's foot: no padding of its own
+    function card:SetContentHeight(h)
+        self:SetHeight(math.max(1, h))
+        return self:GetHeight()
+    end
+    card:_zPaint()
+    return card
+end
+
 function UI.Card(parent, title, y, opts)
     opts = opts or {}
+    if UI._zSettings then return SetCard(parent, title, y, opts) end
     local card = CreateFrame("Frame", nil, parent)
     card:SetPoint("TOPLEFT", M.MARGIN, y)
     card:SetPoint("RIGHT", parent, "RIGHT", -M.MARGIN, 0)
@@ -1664,7 +2572,42 @@ function UI.Card(parent, title, y, opts)
     return card
 end
 
+-- In the settings window the page's title is EllesmereUI's header: the
+-- name at 36, white, 45 in and 35 down, the line under it at 14 / 0.53
+-- (two lines at most), 138 tall (Config_Window pins it above the tabs).
+local function SetPageHeader(parent, title, subtitle, y)
+    local f = CreateFrame("Frame", nil, parent)
+    f._zSet = true
+    f:SetPoint("TOPLEFT", 0, y)
+    f:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+    local t = UI.SFont(f, S.F_TITLE, { text = title })
+    t:SetPoint("TOPLEFT", f, "TOPLEFT", S.PAD, -35)
+    t._zPaint = function(self) self:SetTextColor(1, 1, 1, 1) end
+    local s
+    local h = S.HEADER
+    if subtitle then
+        s = UI.SFont(f, S.F_DESC, { text = subtitle })
+        s:SetPoint("TOPLEFT", t, "BOTTOMLEFT", 2, -12)
+        s:SetPoint("RIGHT", f, "RIGHT", -S.PAD, 0)
+        s:SetJustifyH("LEFT")
+        s:SetWordWrap(true)
+        if s.SetMaxLines then s:SetMaxLines(2) end
+        s._zPaint = function(self) self:SetTextColor(1, 1, 1, S.DIM_A) end
+        local need = 35 + math.ceil(t:GetStringHeight() or S.F_TITLE) + 12 + math.ceil(s:GetStringHeight() or S.F_DESC) + 16
+        h = math.max(h, need)
+    end
+    f:SetHeight(h)
+    f._zPaint = function(self)
+        t:_zPaint()
+        if s then s:_zPaint() end
+    end
+    f:_zPaint()
+    f._zTitleFS, f._zSubFS = t, s
+    return f, y - f:GetHeight()
+end
+
 function UI.PageHeader(parent, title, subtitle, y)
+    if UI._zSettings then return SetPageHeader(parent, title, subtitle, y) end
     local f = CreateFrame("Frame", nil, parent)
     f:SetPoint("TOPLEFT", M.MARGIN, y)
     f:SetPoint("RIGHT", parent, "RIGHT", -M.MARGIN, 0)
@@ -1689,7 +2632,7 @@ function UI.PageHeader(parent, title, subtitle, y)
     local rule = f:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    if ns.Pixel then ns.Pixel.Edge(rule, "BOTTOM", f) else rule:SetHeight(1) end
     rule:SetPoint("BOTTOMLEFT")
     rule:SetPoint("BOTTOMRIGHT")
     f._zRule = rule
@@ -1774,6 +2717,17 @@ function UI.Swatch(parent, cat, key, onChange)
     UI.Fill(sw, cat, key)
     UI.Border(sw, "ui", "border")
     sw._zPaint = PaintBox
+    if UI._zSettings then
+        -- EllesmereUI's swatch: 24 square, a white 1 px edge
+        sw:SetSize(S.SWATCH, S.SWATCH)
+        sw._zBorderCat, sw._zBorderKey, sw._zBorderAlpha = "text", "normal", 1
+        sw._zPaint = function(self)
+            PaintBox(self)
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(1, 1, 1, self._zHot and 1 or 0.85) end
+        end
+        sw:HookScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
+        sw:HookScript("OnLeave", function(self) self._zHot = nil self:_zPaint() end)
+    end
 
     sw:SetScript("OnClick", function(self)
         local cur = GetColor(cat, key)
@@ -1803,6 +2757,11 @@ function UI.Tooltip(frame, title, body)
     if frame._zTipHooked then return end
     frame._zTipHooked = true
     frame:HookScript("OnEnter", function(self)
+        -- greyed with a reason: the reason first (UIF_Pickers UI.ShowWhy)
+        if self._zDisabled and self._zWhy and UI.ShowWhy then
+            UI.ShowWhy(self, self._zTipTitle, self._zWhy, self._zTipBody)
+            return
+        end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         local t = GetColor("tooltip", "title")
         GameTooltip:AddLine(self._zTipTitle, t.r, t.g, t.b)
@@ -2786,6 +3745,38 @@ function UI.Window(name, width, height, title, opts)
     f:_zPaint()
     if name then tinsert(UISpecialFrames, name) end
     f:SetScript("OnMouseDown", function(self) self:Raise() end)
+
+    -- THE SETTINGS WINDOW (opts.bare, UI.S): EllesmereUI's shell - no
+    -- title bar; the window's colour, a white 0.05 edge, the whole window
+    -- a drag surface (f.titleBar spans it: the caller's chrome sits on
+    -- it), a 40 px close box 14 in and 11 down.
+    if opts.bare then
+        f._zSet = true
+        f._zPaint = function(self)
+            local c = S.BG
+            self._zFill:SetVertexColor(c.r, c.g, c.b, 1)
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(1, 1, 1, S.BORDER_A) end
+        end
+        f:_zPaint()
+        local bar = CreateFrame("Frame", nil, f)
+        bar:SetAllPoints(f)
+        bar:SetFrameLevel(f:GetFrameLevel() + 1)
+        bar:EnableMouse(true)
+        bar:RegisterForDrag("LeftButton")
+        bar:SetScript("OnDragStart", function() f:StartMoving() end)
+        bar:SetScript("OnDragStop", function()
+            f:StopMovingOrSizing()
+            if f._zOnMoved then f._zOnMoved() end
+        end)
+        local close = UI.CloseX(bar, 40, function() UI.CloseWindow(f) end)
+        close._zSet = true
+        close._zA:SetSize(38, 38)
+        close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -11)
+        close:SetFrameLevel(f:GetFrameLevel() + 30)
+        close:_zPaint()
+        f.titleBar, f.titleText, f.closeButton, f.headerHeight = bar, nil, close, 0
+        return f
+    end
 
     -- A main window asks for the hero header (opts.hero); everything else
     -- gets the plain 30px bar. Either way f.headerHeight says how tall.

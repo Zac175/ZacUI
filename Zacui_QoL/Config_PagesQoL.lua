@@ -141,7 +141,19 @@ local function BossParticlesCard(L, QoL)
         .. "(Viscidus slime, Ouro residue). Blank or 0 means none.")
 
     local card = L.current
+    -- the linger column: right of the longest boss name at this type size
     local LINGER_X = 270
+    do
+        local probe = UI.Font(card, F.LABEL, { text = "" })
+        local widest = 0
+        for _, boss in ipairs(shown.bosses) do
+            probe:SetText(boss.name)
+            widest = math.max(widest, math.ceil(probe:GetStringWidth() or 0))
+        end
+        probe:SetText("")
+        probe:Hide()
+        LINGER_X = math.max(LINGER_X, widest + 70)
+    end
     local hdr = UI.Font(card, F.SMALL, { text = "linger (s)", cat = "text", key = "gray" })
     hdr:SetPoint("TOPLEFT", card, "TOPLEFT", LINGER_X, card._y)
     card._y = card._y - math.max(16, math.ceil(hdr:GetStringHeight() or 12) + 4)
@@ -177,6 +189,22 @@ local function BossParticlesCard(L, QoL)
         .. "change. If a boss never triggers, this shows the id to fix "
         .. "in QoL_BossFX.lua.")
     L:EndCard()
+end
+
+-- where there is no buff limit (Core_Flavor, buff_remover) the page has
+-- no Buffs tab, so its words do not find the page either; the same for
+-- the Snowball button's words where it is not needed (snowball)
+if ns.FeatureOn and not ns.FeatureOn("buff_remover") and ns.FindMenuItem then
+    local item = ns.FindMenuItem("qol")
+    if item and type(item.keywords) == "string" then
+        item.keywords = item.keywords:gsub("%s*buff remover cancelaura", "")
+    end
+end
+if ns.FeatureOn and not ns.FeatureOn("snowball") and ns.FindMenuItem then
+    local item = ns.FindMenuItem("qol")
+    if item and type(item.keywords) == "string" then
+        item.keywords = item.keywords:gsub("%s*snowball snow airborne jump", "")
+    end
 end
 
 -- ============================================================
@@ -1709,6 +1737,10 @@ RegisterPage("QoL", function(L)
             "From your own gold, silently skipped when you can't afford it. "
             .. "Shift skips.")
         BindCheck(L, d, "repairSummary", "  ... print the cost", nil)
+        if type(CanGuildBankRepair) == "function" then
+            BindCheck(L, d, "repairGuild", "  ... from the guild bank's funds first",
+                "When your guild lets you repair from its bank and today's allowance covers it. Off by default.")
+        end
         L:EndCard()
 
         -- ============================================================
@@ -1888,7 +1920,7 @@ RegisterPage("QoL", function(L)
             Kid(mg, "MuteYawns", "Tiger yawns"),
             Kid(mg, "MuteReady", "Ready check and level-up"),
             Kid(mg, "MutePiccolo", "Piccolo of the Flaming Fire", "Also mutes warlock Seduction."),
-        }, mg.enabled, 2)
+        }, mg.enabled, 2, nil, "Mute game sounds")
         local mm = d.muteMount
         L:Gap(4)
         BindCheck(L, mm, "enabled", "Mute mount sounds", nil)
@@ -1896,7 +1928,7 @@ RegisterPage("QoL", function(L)
             Kid(mm, "MuteMechSteps", "Mechanical steps"),
             Kid(mm, "MuteStriders", "Mechanostriders"),
             Kid(mm, "MuteHorsesteps", "Horse hooves"),
-        }, mm.enabled, 2)
+        }, mm.enabled, 2, nil, "Mute mount sounds")
         L:EndCard()
 
     end
@@ -1905,7 +1937,7 @@ RegisterPage("QoL", function(L)
     -- a tab of their own (they shared "Combat helpers" until the
     -- 2026-11-01 look pass): each draws something on screen, so each
     -- has a live preview and the full set of look and motion settings
-    L:Tabs({
+    local tabs = {
         { id = "auto", label = "Automation", build = Tab_auto },
         { id = "gcd", label = "GCD tracker", build = function(TL) GCDTab(TL, QoL) end },
         { id = "timers", label = "Pull timers", build = function(TL) TimersTab(TL, QoL) end },
@@ -1914,5 +1946,15 @@ RegisterPage("QoL", function(L)
         { id = "buffs", label = "Buffs", build = function(TL) BuffsTab(TL, QoL) end },
         { id = "macros", label = "Macros", build = function(TL) MacrosTab(TL, QoL) end },
         { id = "loot", label = "Loot", build = function(TL) LootTab(TL, QoL) end },
-    })
+    }
+    -- no Buffs tab where there is no buff limit, no Snowball tab where the
+    -- button is not needed (Core_Flavor: buff_remover, snowball)
+    for i = #tabs, 1, -1 do
+        local t = tabs[i]
+        if (t.id == "buffs" and ns.FeatureOn and not ns.FeatureOn("buff_remover"))
+            or (t.id == "snowball" and ns.FeatureOn and not ns.FeatureOn("snowball")) then
+            table.remove(tabs, i)
+        end
+    end
+    L:Tabs(tabs)
 end)

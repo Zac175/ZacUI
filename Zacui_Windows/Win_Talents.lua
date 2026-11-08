@@ -33,6 +33,9 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's talents are not the Classic trees):
+-- this window stands down here, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_talents") then return end
 
 -- shared state from earlier ZacUI files
 local FLAT = ns.FLAT
@@ -561,7 +564,7 @@ local function BuildTree(index)
     icon._zui_own = true
     icon:SetSize(20, 20)
     icon:SetPoint("LEFT", 6, 0)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(icon)
     SharpenIcon(icon)
     tree.icon = icon
 
@@ -709,7 +712,7 @@ local function PaintSpecIcon(entry)
     local pts, _, icons, n, total = SpecPoints(spec.pet, spec.talentGroup)
     local primary = PrimaryTab(pts, n)
     local tex = entry.icon
-    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(tex)
     if primary > 0 and icons[primary] then
         tex:SetTexture(icons[primary])
     elseif n > 1 and total > 0 and TALENT_HYBRID_ICON then

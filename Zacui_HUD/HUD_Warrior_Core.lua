@@ -11,6 +11,7 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -574,16 +575,20 @@ local FRESH = 0.08              -- a read younger than this is current
 local spellStamp = {}           -- key -> GetTime() of its last read
 
 local function ReadSpell(key, sp, now, attackable)
-    local start, duration, enable = GetSpellCooldown_C(sp.name)
+    local start, duration, enable, _, durObj = GetSpellCooldown_C(sp.name)
+    -- (hidden on WoW Forever: read as ready)
+    if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 1 end
     start, duration = start or 0, duration or 0
     local cd = S.cds[key]
     if not cd then cd = {} S.cds[key] = cd end
     cd.start, cd.duration, cd.enable = start, duration, enable
+    cd.durObj = durObj   -- (WoW Forever: a hidden cooldown's swipe, on the game's clock)
     cd.real = duration > GCD_MAX               -- ignore pure GCD
     local us = S.usable[key]
     if not us then us = {} S.usable[key] = us end
     if IsUsableSpell_C then
         local usable, noPower = IsUsableSpell_C(sp.name)
+        if ns.Hidden(usable, noPower) then usable, noPower = true, false end   -- (WoW Forever)
         us.usable, us.noPower = usable and true or false, noPower and true or false
     else
         us.usable, us.noPower = true, false
@@ -656,18 +661,27 @@ local function UpdateMisc()
     -- NB: bare calls only - `and`-wrapping truncates multiple returns.
     local base, posBuff, negBuff
     if UnitAttackPower then base, posBuff, negBuff = UnitAttackPower("player") end
-    S.ap = (base or 0) + (posBuff or 0) + (negBuff or 0)
+    -- WoW Forever can hand your attack power back hidden (secret values):
+    -- no maths on it, so the last plain reading stays
+    if issecretvalue ~= nil and (issecretvalue(base) or issecretvalue(posBuff) or issecretvalue(negBuff)) then
+        S.ap = S.ap or 0
+    else
+        S.ap = (base or 0) + (posBuff or 0) + (negBuff or 0)
+    end
 
     local t = S.trinket13
     t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", 13) or nil
     if GetInventoryItemCooldown then
         local start, duration, enable = GetInventoryItemCooldown("player", 13)
+        -- (hidden on WoW Forever: read as ready)
+        if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 1 end
         t.start, t.duration, t.enable = start or 0, duration or 0, enable or 0
     end
     -- Offhand weapon present? (second return of UnitAttackSpeed)
     if UnitAttackSpeed then
         local _, ohSpeed = UnitAttackSpeed("player")
-        S.swing.hasOH = ohSpeed ~= nil
+        -- (WoW Forever may hide it: a hidden speed still means an offhand; no test on it)
+        if ns.IsSecret(ohSpeed) then S.swing.hasOH = true else S.swing.hasOH = ohSpeed ~= nil end
     else
         S.swing.hasOH = false
     end
@@ -759,11 +773,12 @@ end
 -- bar over at the game's swing time; Heroic Strike and Cleave are a
 -- main-hand swing there too. A parry of yours brings the next main-hand
 -- swing sooner, as the combat log's parry did.
-local function OnSwing(hand, now, dur)
+local function OnSwing(hand, now, dur, durObj)
     if hand == "parry" then ParryHaste(now) return end
     if hand ~= "mh" and hand ~= "oh" then return end
     local t = (hand == "oh") and S.swing.oh or S.swing.mh
     t.start, t.duration = now, dur or 0
+    t.durObj = durObj   -- (WoW Forever: the hidden swing time on the game's clock)
 end
 
 -- The Overpower window: the last time any target dodged one of your

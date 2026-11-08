@@ -29,6 +29,9 @@ local GetColor = ns.GetColor
 local Kit = ns.Kit
 local Modules = ns.Modules
 local UI = ns.UI
+-- WoW Forever: every rank from its own book data (Win_SpellbookForever;
+-- nil on every other game, where nothing below changes)
+local FB = ns.SpellbookForever
 
 local M, F = UI.M, UI.F
 
@@ -43,6 +46,20 @@ local schoolButtons = {}
 
 local function Enabled()
     return ZacUIDB and ZacUIDB.modules and ZacUIDB.modules.spellbookwin ~= false
+end
+
+-- WHERE THE BOOK LIVES. Classic Era and TBC: SpellBookFrame, and the
+-- cover is its child. WoW Forever has the modern book instead (2026-11-07,
+-- Zac: "these menus are not styled"): PlayerSpellsFrame (load on demand),
+-- whose SpellBookFrame page sits at frame level 100 under a title bar at
+-- 510 - so the cover hangs on PlayerSpellsFrame above all of that
+-- (minLevel) and follows the page's own show and hide. Talents (N) are
+-- another page of the same window and show as Blizzard's when picked.
+local MODERN = false
+local function Host()
+    if SpellBookFrame then return SpellBookFrame end
+    MODERN = PlayerSpellsFrame ~= nil and PlayerSpellsFrame.SpellBookFrame ~= nil
+    return MODERN and PlayerSpellsFrame or nil
 end
 
 -- ============================================================
@@ -105,7 +122,9 @@ local function Rows()
         if not Kit.Matches(query, e.name, e.rank, e.school) then return end
         data[#data + 1] = e
     end
-    if book == BOOK_PET then
+    if FB then
+        for _, e in ipairs(FB.Entries(book == BOOK_PET, school)) do Add(e) end
+    elseif book == BOOK_PET then
         local n = HasPetSpells and HasPetSpells() or 0
         for slot = 1, n or 0 do Add(Entry(slot, BOOK_PET, PET or "Pet", 0)) end
     else
@@ -172,8 +191,13 @@ local function BuildSchools()
     all:Show()
 
     local prev = all
-    for t = 1, GetNumSpellTabs() do
-        local tabName, tex = GetSpellTabInfo(t)
+    -- (Forever: only the lines its own book shows; the line's index is the school)
+    local lines = FB and FB.Lines() or nil
+    local valid = lines and {} or nil
+    for t = 1, lines and #lines or GetNumSpellTabs() do
+        local tabName, tex
+        if lines then tabName, tex = lines[t].name, lines[t].icon
+        else tabName, tex = GetSpellTabInfo(t) end
         local b = schoolButtons[t + 1]
         if not b then
             b = Kit.IconButton(schoolBar, 24, tex, tabName, nil, nil)
@@ -186,7 +210,8 @@ local function BuildSchools()
             schoolButtons[t + 1] = b
         end
         b.icon:SetTexture(tex)
-        b._zSchool = t
+        b._zSchool = lines and lines[t].index or t
+        if valid then valid[b._zSchool] = true end
         -- The tooltip title is captured at creation; keep it current.
         b._zTitle = tabName
         b:ClearAllPoints()
@@ -194,7 +219,9 @@ local function BuildSchools()
         b:Show()
         prev = b
     end
-    if school > GetNumSpellTabs() then school = 0 end
+    if valid then
+        if school ~= 0 and not valid[school] then school = 0 end
+    elseif school > GetNumSpellTabs() then school = 0 end
     PaintSchools()
 end
 
@@ -202,6 +229,8 @@ end
 -- ROWS
 -- ============================================================
 local function CastName(e)
+    -- (Forever: the spell id, so a lower rank casts that rank)
+    if e.castValue then return e.castValue end
     if e.rank and e.rank ~= "" and e.book == BOOK_SPELL then
         return e.name .. "(" .. e.rank .. ")"
     end
@@ -212,7 +241,13 @@ local function UpdateCooldown(row)
     local e = row.item
     local cd = row.icon.cooldown
     if not e or not cd then return end
-    local start, duration, enable = GetSpellCooldown(e.slot, e.book)
+    local start, duration, enable
+    if _G.ZACUI_MODERN then
+        -- (the modern client has no spellbook-slot form: its GetSpellCooldown takes the spell)
+        if e.spellID then start, duration, enable = GetSpellCooldown(e.spellID) end
+    else
+        start, duration, enable = GetSpellCooldown(e.slot, e.book)
+    end
     if CooldownFrame_Set then
         CooldownFrame_Set(cd, start or 0, duration or 0, enable or 0)
     elseif start and duration and duration > 0 then
@@ -225,6 +260,7 @@ end
 local function RowTooltip(row)
     local e = row.item
     if not e then return end
+    if FB then return FB.Tooltip(row, e) end
     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
     if GameTooltip.SetSpellBookItem then
         GameTooltip:SetSpellBookItem(e.slot, e.book)
@@ -274,7 +310,7 @@ local function BuildRow(row)
         local e = self.item
         if not e then return end
         if IsModifiedClick("CHATLINK") then
-            local link = GetSpellLink and (GetSpellLink(e.slot, e.book) or (e.spellID and GetSpellLink(e.spellID)))
+            local link = GetSpellLink and ((not _G.ZACUI_MODERN and GetSpellLink(e.slot, e.book)) or (e.spellID and GetSpellLink(e.spellID)))
             local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
             if link and insert then insert(link) end
         end
@@ -283,7 +319,9 @@ local function BuildRow(row)
     row:SetScript("OnDragStart", function(self)
         local e = self.item
         if not e or e.passive then return end
-        if PickupSpellBookItem then
+        if FB then
+            FB.Pickup(e)
+        elseif PickupSpellBookItem then
             pcall(PickupSpellBookItem, e.slot, e.book)
         elseif PickupSpell then
             pcall(PickupSpell, e.slot, e.book)
@@ -354,7 +392,8 @@ function Refresh(keepOffset)
         return
     end
     win._zStale = nil
-    local hasPet = HasPetSpells and HasPetSpells()
+    local hasPet
+    if FB then hasPet = FB.PetCount() else hasPet = HasPetSpells and HasPetSpells() end
     bookTabs:SetShownKey("pet", hasPet and hasPet > 0)
     if book == BOOK_PET and not (hasPet and hasPet > 0) then
         book = BOOK_SPELL
@@ -403,11 +442,13 @@ end
 -- ============================================================
 local function Build()
     if win then return win end
-    win = Kit.Cover(SpellBookFrame, {
+    local host = Host()
+    win = Kit.Cover(host, {
         name = "ZacUISpellbookWindow",
         title = SPELLBOOK or "Spellbook",
-        insetName = "SpellBookFrame",
-        onClose = function() HideUIPanel(SpellBookFrame) end,
+        insetName = MODERN and "PlayerSpellsFrame" or "SpellBookFrame",
+        onClose = function() HideUIPanel(host) end,
+        minLevel = MODERN and 700 or nil,
     })
     win:SetIcon("Interface\\Icons\\INV_Misc_Book_09")
 
@@ -441,7 +482,9 @@ local function Build()
         -- Blizzard's own "Show all spell ranks" checkbox is this cvar; the
         -- client re-sends the book filtered by it and SPELLS_CHANGED
         -- brings the list round.
-        SetCVar("ShowAllSpellRanks", on and "1" or "0")
+        -- SETUP2: through ns.CVar (recorded; put back when the window is off)
+        if ns.CVar then ns.CVar.Set("ShowAllSpellRanks", on and "1" or "0", "spellbookwin")
+        else SetCVar("ShowAllSpellRanks", on and "1" or "0") end
         Queue(false)
     end, "Every rank of every spell, not just the highest.")
     chipRanks:SetPoint("RIGHT", chipPassive, "LEFT", -4, 0)
@@ -511,7 +554,7 @@ local function Build()
     -- OnShow - so both paths sync from here.
     local function SyncBook()
         if not win:IsVisible() then return end
-        local want = (SpellBookFrame.bookType == BOOK_PET) and "pet" or "spell"
+        local want = (not MODERN and SpellBookFrame.bookType == BOOK_PET) and "pet" or "spell"
         if InCombatLockdown() then
             UpdateStatus()
             return
@@ -527,7 +570,7 @@ local function Build()
         end
     end
     win:HookScript("OnShow", SyncBook)
-    if SpellBookFrame.Update then
+    if not MODERN and SpellBookFrame.Update then
         hooksecurefunc(SpellBookFrame, "Update", SyncBook)
     end
 
@@ -535,7 +578,7 @@ local function Build()
     -- children), so an addon's HideUIPanel on it is refused in combat.
     -- A secure "click" action on Blizzard's own close button runs their
     -- handler with secure credentials instead, so the X always works.
-    local blizzClose = _G.SpellBookCloseButton
+    local blizzClose = _G.SpellBookCloseButton or (MODERN and host.CloseButton) or nil
     if blizzClose then
         local sx = CreateFrame("Button", nil, win.titleBar, "SecureActionButtonTemplate")
         sx:SetAllPoints(win.closeButton)
@@ -567,11 +610,14 @@ local function BlizzardLeftovers()
     for i = 1, 3 do t[#t + 1] = _G["SpellBookFrameTabButton" .. i] end
     t[#t + 1] = _G.SpellBookTabFlashFrame
     t[#t + 1] = _G.SpellBookCloseButton
+    -- the modern window's parts above the cover (the maximise arrow at
+    -- level 5510, the help-plate button in the HIGH strata)
+    if MODERN and win then Kit.AboveCover(PlayerSpellsFrame, win, t) end
     return t
 end
 
 local function Apply()
-    if not SpellBookFrame then return end
+    if not Host() then return end
     if InCombatLockdown() then return end
     if Enabled() then
         Build()
@@ -590,8 +636,35 @@ end
 -- ============================================================
 -- MODULE
 -- ============================================================
+local function HookModern()
+    if ns._zSpellbookWin or not Host() then return end
+    ns._zSpellbookWin = true
+    -- the window's own frame in ZacUI's look for its other pages (Talents)
+    if ns.SkinModernWindow then pcall(ns.SkinModernWindow, PlayerSpellsFrame) end
+    local page = PlayerSpellsFrame.SpellBookFrame
+    -- the cover is PlayerSpellsFrame's child, so it shows with the book
+    -- page and hides when Talents takes its place (or the window closes)
+    page:HookScript("OnShow", function()
+        if InCombatLockdown() then return end
+        Apply()
+        if win and win:IsShown() then Kit.Silence(BlizzardLeftovers()) end
+    end)
+    page:HookScript("OnHide", function()
+        if win and not InCombatLockdown() then
+            win:Hide()
+            Kit.Unsilence(BlizzardLeftovers())
+        end
+    end)
+    if page:IsVisible() and not InCombatLockdown() then Apply() end
+end
+
 Modules.spellbookwin = function()
-    if not SpellBookFrame or ns._zSpellbookWin then return end
+    if not SpellBookFrame then
+        -- WoW Forever: the modern book, loaded on demand
+        if ns.RegisterLoD then ns.RegisterLoD("Blizzard_PlayerSpells", HookModern) end
+        return
+    end
+    if ns._zSpellbookWin then return end
     ns._zSpellbookWin = true
     Apply()
     SpellBookFrame:HookScript("OnShow", function()

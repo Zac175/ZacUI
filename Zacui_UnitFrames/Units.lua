@@ -11,13 +11,14 @@ local ADDON, ns = ...
 local CHANGE_EVENT = {
     target     = "PLAYER_TARGET_CHANGED",
     softtarget = "PLAYER_SOFT_ENEMY_CHANGED",
+    focus      = "PLAYER_FOCUS_CHANGED",   -- TBC / Forever (Focus.lua; never spawned where there is none)
 }
 
 -- Case matters: LibGetFrame's patterns are case-sensitive ("Player", not
 -- "player").
 local WA_NAME_SUFFIX = {
     player = "Player", target = "Target", targettarget = "TargetTarget", pet = "Pet",
-    softtarget = "SoftTarget",
+    softtarget = "SoftTarget", focus = "Focus", focustarget = "FocusTarget",
 }
 
 local function applyPosition(frame, cfg)
@@ -53,7 +54,7 @@ local function setMoverState(frame, key, unlocked)
             frame:Hide()
         else
             local bc = ns.db.frames.target.borderColor
-            frame:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4] or 1)
+            frame:SetBackdropBorderColor(ns.UI:FrameBorderColor(frame, bc))
             RegisterAttributeDriver(frame, "state-visibility",
                 "[@target,exists] hide; [@softenemy,exists] show; hide")
             ns.UpdateAll(frame)
@@ -68,12 +69,64 @@ local function setMoverState(frame, key, unlocked)
     else
         frame.moverTex:Hide(); frame.mover:Hide()
         local bc = ns.db.frames[key].borderColor
-        frame:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4] or 1)
+        frame:SetBackdropBorderColor(ns.UI:FrameBorderColor(frame, bc))
         if frame.unit ~= "player" then RegisterUnitWatch(frame) end
         if UnitExists(frame.unit) then frame:Show() end
         ns.UpdateAll(frame)
     end
 end
+
+-- One handler for every unit button (the boss and party-target buttons
+-- of Extras.lua share it): each event to its painter.
+local function OnUnitEvent(self, event, arg1, arg2)
+    if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
+        ns.UpdateHealth(self)
+    elseif event == "UNIT_HEAL_PREDICTION" then
+        ns.UpdateHealPrediction(self)
+    elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
+        ns.UpdatePower(self)
+    elseif event == "UNIT_NAME_UPDATE" then
+        ns.UpdateName(self)
+    elseif event == "UNIT_AURA" then
+        ns.AuraDirty(self, arg2)     -- marks it; arg2 (the payload) lets a buff-only tick skip the walk
+    elseif event == "UNIT_FLAGS" or event == "UNIT_FACTION"
+        or event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED"
+        or event == "PLAYER_FLAGS_CHANGED"
+        or event == "INCOMING_RESURRECT_CHANGED" then
+        ns.UpdateIndicators(self)
+    elseif event == "RAID_TARGET_UPDATE" then
+        ns.UpdateRaidMarker(self)
+    elseif string.find(event, "SPELLCAST", 1, true) then
+        ns.CastbarEvent(self, event, arg1, arg2)
+    else -- PLAYER_ENTERING_WORLD / target change / UNIT_PET
+        ns.UpdateAll(self)
+    end
+end
+ns.UnitOnEvent = OnUnitEvent
+
+-- A unit with no change event of its own (target of target, focus
+-- target): a light poll, only while the frame is shown. The full pass
+-- (auras, name, indicators, castbar) when the unit behind the frame
+-- changed and once a second besides; the other four polls are health
+-- and power.
+local function PollOnUpdate(self, e)
+    self.elapsed = self.elapsed + e
+    if self.elapsed >= 0.2 then
+        self.elapsed = 0
+        if self:IsShown() and self.unit and UnitExists(self.unit) then
+            local guid = UnitGUID(self.unit)
+            self._pollN = (self._pollN or 0) + 1
+            if guid ~= self._pollGUID or self._pollN >= 5 then
+                self._pollGUID, self._pollN = guid, 0
+                ns.UpdateAll(self)
+            else
+                ns.UpdateHealth(self)
+                ns.UpdatePower(self)
+            end
+        end
+    end
+end
+ns.UnitPollOnUpdate = PollOnUpdate
 
 function ns.SpawnUnit(key)
     if ns.frames[key] then return ns.frames[key] end
@@ -103,7 +156,7 @@ function ns.SpawnUnit(key)
         f:ClearAllPoints()
         f:SetAllPoints(ns.frames.target)
     end
-    ns.UI:Backdrop(f, cfg.bgColor, cfg.borderColor)
+    ns.UI:FrameBackdrop(f, cfg.bgColor, cfg.borderColor)
     f:SetClampedToScreen(true)
 
     -- Secure interaction
@@ -142,30 +195,7 @@ function ns.SpawnUnit(key)
     if CHANGE_EVENT[unit] then f:RegisterEvent(CHANGE_EVENT[unit]) end
     if unit == "pet" then f:RegisterEvent("UNIT_PET") end
 
-    f:SetScript("OnEvent", function(self, event, arg1, arg2)
-        if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
-            ns.UpdateHealth(self)
-        elseif event == "UNIT_HEAL_PREDICTION" then
-            ns.UpdateHealPrediction(self)
-        elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
-            ns.UpdatePower(self)
-        elseif event == "UNIT_NAME_UPDATE" then
-            ns.UpdateName(self)
-        elseif event == "UNIT_AURA" then
-            ns.AuraDirty(self, arg2)     -- marks it; arg2 (the payload) lets a buff-only tick skip the walk
-        elseif event == "UNIT_FLAGS" or event == "UNIT_FACTION"
-            or event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED"
-            or event == "PLAYER_FLAGS_CHANGED"
-            or event == "INCOMING_RESURRECT_CHANGED" then
-            ns.UpdateIndicators(self)
-        elseif event == "RAID_TARGET_UPDATE" then
-            ns.UpdateRaidMarker(self)
-        elseif string.find(event, "SPELLCAST", 1, true) then
-            ns.CastbarEvent(self, event, arg1, arg2)
-        else -- PLAYER_ENTERING_WORLD / target change / UNIT_PET
-            ns.UpdateAll(self)
-        end
-    end)
+    f:SetScript("OnEvent", OnUnitEvent)
 
     f:SetScript("OnShow", function(self) ns.UpdateAll(self) end)
 
@@ -174,31 +204,13 @@ function ns.SpawnUnit(key)
     f:HookScript("OnEnter", function(self) self.hovered = true;  ns.UpdatePvP(self) end)
     f:HookScript("OnLeave", function(self) self.hovered = false; ns.UpdatePvP(self) end)
 
-    -- targettarget has no change event -> light poll only while visible.
-    -- softtarget polls too: UNIT_* events aren't reliably routed to the
-    -- "softenemy" token on this client, so the 0.2s tick keeps HP honest.
-    if unit == "targettarget" or key == "softtarget" then
+    -- targettarget (and focustarget) have no change event -> light poll
+    -- only while visible. softtarget polls too: UNIT_* events aren't
+    -- reliably routed to the "softenemy" token on this client, so the
+    -- 0.2s tick keeps HP honest.
+    if unit == "targettarget" or unit == "focustarget" or key == "softtarget" then
         f.elapsed = 0
-        f:SetScript("OnUpdate", function(self, e)
-            self.elapsed = self.elapsed + e
-            if self.elapsed >= 0.2 then
-                self.elapsed = 0
-                if self:IsShown() and self.unit and UnitExists(self.unit) then
-                    -- the full pass (auras, name, indicators, castbar) when
-                    -- the unit behind the frame changed and once a second
-                    -- besides; the other four polls are health and power
-                    local guid = UnitGUID(self.unit)
-                    self._pollN = (self._pollN or 0) + 1
-                    if guid ~= self._pollGUID or self._pollN >= 5 then
-                        self._pollGUID, self._pollN = guid, 0
-                        ns.UpdateAll(self)
-                    else
-                        ns.UpdateHealth(self)
-                        ns.UpdatePower(self)
-                    end
-                end
-            end
-        end)
+        f:SetScript("OnUpdate", PollOnUpdate)
     end
 
     -- Drag to move (gated by lock + combat)
@@ -233,7 +245,7 @@ function ns.SpawnUnit(key)
             self:SetSize(cfg.width, cfg.height)
             applyPosition(self, cfg)
         end
-        ns.UI:Backdrop(self, cfg.bgColor, cfg.borderColor)
+        ns.UI:FrameBackdrop(self, cfg.bgColor, cfg.borderColor)
         ns.StyleElements(self)
         ns.RegisterFrameEvents(self)
         ns.UpdateAuras(self)   -- re-place buffs/debuffs live on anchor/offset edits

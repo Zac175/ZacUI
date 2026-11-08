@@ -579,6 +579,12 @@ local function RegisterCastEndTime(unit, isChannel, castGUID)
     if not spellID then
         return
     end
+    -- (ZacUI) WoW Forever hides other units' casts (secret values): no
+    -- maths on them, so such a cast isn't tracked
+    if issecretvalue ~= nil and (issecretvalue(spellID) or issecretvalue(startMS) or issecretvalue(endMS)
+        or issecretvalue(castGUID)) then
+        return
+    end
 
     local startTime = (startMS or 0) / 1000
     local kind = isChannel and "channel" or "direct"
@@ -890,7 +896,7 @@ end
 -- Precise HoT tracking (combat log) -- opt-in via SetPreciseHotTracking(true)
 -- ==========================================
 local combatLogFrame = CreateFrame("Frame")
-if not (_G.ZACUI_IS_FOREVER or (_G.ZacUI and _G.ZacUI.NoCombatLog and _G.ZacUI.NoCombatLog())) then combatLogFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED") end   -- (no combat log on WoW Forever, or under ZacUI's game-version override's Forever)
+if not (_G.ZACUI_MODERN or (_G.ZacUI and _G.ZacUI.NoCombatLog and _G.ZacUI.NoCombatLog())) then combatLogFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED") end   -- (no combat log on WoW Forever or Retail, or under ZacUI's game-version override's Forever)
 combatLogFrame:SetScript("OnEvent", function(self, event)
     local _, subEvent, _, sourceGUID, _, _, _, destGUID, _, _, _, spellID, _, _, amount = CombatLogGetCurrentEventInfo()
 
@@ -982,6 +988,10 @@ local function BuildSegmentList(destGUID, destUnit)
 
     local calculatedTotalHeals = 0
     local totalIncoming = UnitGetIncomingHeals(destUnit) or 0
+    -- WoW Forever can hand the incoming heals back hidden (a secret value):
+    -- no maths on it, so the game's own numbers sit out and only the
+    -- library's own tracked casts count
+    if issecretvalue ~= nil and issecretvalue(totalIncoming) then totalIncoming = 0 end
 
     if settings.debug then
         for _, cast in pairs(activeCasts) do

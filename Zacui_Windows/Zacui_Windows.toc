@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Windows|r
 ## Notes: ZacUI rebuilt game windows: merchant, spellbook, talents, character, quest log, mail, social, loot, macros, gossip, trade, taxi and more.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -17,8 +17,15 @@
 
 Win_Kit.lua
 Win_Merchant.lua
+# Classic book and talents on Forever (2026-11-07): every rank from
+# Forever's book data, before the spellbook that reads it (returns at
+# once on every other game).
+Win_SpellbookForever.lua
 Win_Spellbook.lua
 Win_Talents.lua
+# Classic book and talents on Forever (2026-11-07): the three trees from
+# Forever's talent data (returns at once on every other game).
+Win_TalentsForever.lua
 Win_Profession.lua
 Win_Trainer.lua
 Win_Paperdoll.lua
@@ -36,8 +43,14 @@ Win_LFG.lua
 Win_Loot.lua
 Win_Macros.lua
 Win_Gossip.lua
+# Feature cluster 1 (2026-11-07): the coin on the quest reward that sells
+# for most, on ZacUI's quest window and the game's own (after Win_Gossip).
+Win_QuestRewards.lua
 Win_Trade.lua
 Win_FlightTimes.lua
 Win_Taxi.lua
 Config_PagesWindows.lua
 Config_PagesFlight.lua
+# Classic book and talents on Forever (2026-11-07): its settings page
+# (Forever only; returns at once on every other game).
+Config_PagesClassicBook.lua

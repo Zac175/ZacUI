@@ -25,6 +25,9 @@ ns.HUD.DefineClass({
         summonImp = 688, corruption = 25311, agony = 11713, immolate = 25309,
         siphon = 18881, fear = 6215, banish = 18647, drainSoul = 11675,
         drainLife = 11700, drainMana = 11704, enslave = 11726,
+        lifeTap = 11689, darkPact = 18938, searingPain = 17923, rainOfFire = 11678, hellfire = 11684,
+        curseElements = 11722, curseShadow = 17937, curseReck = 11717, curseTongues = 11719, curseWeakness = 11708,
+        createHealthstone = 11730, createSoulstone = 20757, summonVoid = 697, summonSucc = 712, summonFel = 691, ritual = 698,
     },
 
     grid = {
@@ -63,17 +66,17 @@ ns.HUD.DefineClass({
     },
 
     debuffRow = {
-        { key = "corruption",   id = 25311 },
-        { key = "agony",        id = 11713 },
-        { key = "doom",         id = 603 },
-        { key = "immolate",     id = 25309 },
-        { key = "siphon",       id = 18881 },
-        { key = "recklessness", id = 11717, label = "Curse of Recklessness" },
-        { key = "curseShadow",  id = 17937, label = "Curse of Shadow" },
-        { key = "elements",     id = 11722, label = "Curse of the Elements" },
-        { key = "weakness",     id = 11708, label = "Curse of Weakness" },
-        { key = "tongues",      id = 11719, label = "Curse of Tongues" },
-        { key = "exhaustion",   id = 18223, label = "Curse of Exhaustion" },
+        { key = "corruption",   id = 25311, castsDot = true },
+        { key = "agony",        id = 11713, castsDot = true },
+        { key = "doom",         id = 603, castsDot = true },
+        { key = "immolate",     id = 25309, castsDot = true },
+        { key = "siphon",       id = 18881, castsDot = true },
+        { key = "recklessness", id = 11717, label = "Curse of Recklessness", castsDot = true },
+        { key = "curseShadow",  id = 17937, label = "Curse of Shadow", castsDot = true },
+        { key = "elements",     id = 11722, label = "Curse of the Elements", castsDot = true },
+        { key = "weakness",     id = 11708, label = "Curse of Weakness", castsDot = true },
+        { key = "tongues",      id = 11719, label = "Curse of Tongues", castsDot = true },
+        { key = "exhaustion",   id = 18223, label = "Curse of Exhaustion", castsDot = true },
         { key = "fear",         id = 6215 },
         { key = "deathCoil",    id = 17926 },
         { key = "banish",       id = 18647 },
@@ -88,7 +91,8 @@ ns.HUD.DefineClass({
         { key = "armor", label = "Demon Armor / Skin down", spell = "demonArmor",
           check = function(H)
               if not (H.Known("demonArmor") or H.Known("demonSkin")) then return false end
-              return not (H.Buff("demonArmor") or H.Buff("demonSkin"))
+              -- (TBC: Fel Armor counts; it does not exist on Era)
+              return not (H.Buff("demonArmor") or H.Buff("demonSkin") or H.Buff("felArmor"))
           end },
         { key = "pet", label = "No demon out", spell = "summonImp",
           check = function(H)
@@ -104,5 +108,88 @@ ns.HUD.DefineClass({
           end },
     },
 
+
+    -- Class HUD v2: the utility row, the roles, TBC's additions
+    utility = {
+        { key = "lifeTap",      kind = "spell", spell = "lifeTap",      label = "Life Tap", noRange = true },
+        { key = "darkPact",     kind = "spell", spell = "darkPact",     label = "Dark Pact", noRange = true },
+        { key = "fear",         kind = "spell", spell = "fear",         label = "Fear" },
+        { key = "banish",       kind = "spell", spell = "banish",       label = "Banish" },
+        { key = "enslave",      kind = "spell", spell = "enslave",      label = "Enslave Demon" },
+        { key = "drainSoul",    kind = "spell", spell = "drainSoul",    label = "Drain Soul" },
+        { key = "drainLife",    kind = "spell", spell = "drainLife",    label = "Drain Life" },
+        { key = "drainMana",    kind = "spell", spell = "drainMana",    label = "Drain Mana" },
+        { key = "searingPain",  kind = "spell", spell = "searingPain",  label = "Searing Pain" },
+        { key = "rainOfFire",   kind = "spell", spell = "rainOfFire",   label = "Rain of Fire", noRange = true },
+        { key = "hellfire",     kind = "spell", spell = "hellfire",     label = "Hellfire", noRange = true },
+        { key = "curseElements", kind = "spell", spell = "curseElements", label = "Curse of the Elements" },
+        { key = "curseShadow",  kind = "spell", spell = "curseShadow",  label = "Curse of Shadow" },
+        { key = "curseReck",    kind = "spell", spell = "curseReck",    label = "Curse of Recklessness" },
+        { key = "curseTongues", kind = "spell", spell = "curseTongues", label = "Curse of Tongues" },
+        { key = "curseWeakness", kind = "spell", spell = "curseWeakness", label = "Curse of Weakness" },
+        { key = "createHealthstone", kind = "spell", spell = "createHealthstone", label = "Create Healthstone", noRange = true },
+        { key = "createSoulstone",   kind = "spell", spell = "createSoulstone",   label = "Create Soulstone", noRange = true },
+        { key = "summonImp",    kind = "spell", spell = "summonImp",    label = "Summon Imp", noRange = true },
+        { key = "summonVoid",   kind = "spell", spell = "summonVoid",   label = "Summon Voidwalker", noRange = true },
+        { key = "summonSucc",   kind = "spell", spell = "summonSucc",   label = "Summon Succubus", noRange = true },
+        { key = "summonFel",    kind = "spell", spell = "summonFel",    label = "Summon Felhunter", noRange = true },
+        { key = "ritual",       kind = "spell", spell = "ritual",       label = "Ritual of Summoning", noRange = true },
+    },
+    -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
+    -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
+    -- section 13: Icy Veins' Classic warlock guide and its TBC Affliction /
+    -- Destruction guides). The base lists are Classic Era's (WoW Forever
+    -- plays them too: in raids only Corruption and the assigned curse fit
+    -- the debuff slots); a spec's tbc block replaces the rows it names.
+    roles = {
+        { key = "affliction", label = "Affliction", tab = 1, aux = true, res = { regen = true }, show = {
+            main = { "amplify", "healthstone", "soulstone", "potion", "rune" },
+            utility = { "lifeTap", "darkPact", "curseElements", "curseShadow", "curseReck", "fear", "banish", "createHealthstone", "createSoulstone" },
+            buffs = { "shadowTrance", "amplify", "touchOfShadow", "zhc" },
+            debuffs = { "corruption", "elements", "curseShadow", "recklessness", "agony", "shadowVuln" } },
+          glows = { ["buffs:shadowTrance"] = { { when = "active", style = "shine" } },
+                    ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } } },
+          tbc = { show = {
+              main = { "curseDoom", "soulshatter", "healthstone", "soulstone", "potion", "rune" },
+              buffs = { "shadowTrance", "felArmorBuff", "zhc" },
+              debuffs = { "corruption", "unstableAffliction", "siphon", "elements", "doom", "agony", "shadowVuln" } },
+            glows = { ["buffs:shadowTrance"] = { { when = "active", style = "shine" } },
+                      ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:unstableAffliction"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:siphon"] = { { when = "anticlip", style = "solid" } } } } },
+        { key = "demonology", label = "Demonology", tab = 2, aux = true, res = { regen = true }, show = {
+            main = { "felDom", "healthstone", "soulstone", "potion", "rune" },
+            utility = { "lifeTap", "curseElements", "curseShadow", "curseReck", "fear", "banish", "summonImp", "summonVoid", "summonSucc", "summonFel", "createHealthstone", "createSoulstone" },
+            buffs = { "touchOfShadow", "burningWish", "felDom", "zhc" },
+            debuffs = { "corruption", "elements", "curseShadow", "recklessness", "agony", "shadowVuln" } },
+          glows = { ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } } },
+          tbc = { show = {
+              main = { "felDom", "curseDoom", "soulshatter", "healthstone", "soulstone", "potion", "rune" },
+              buffs = { "felArmorBuff", "touchOfShadow", "burningWish", "zhc" },
+              debuffs = { "corruption", "immolate", "elements", "doom", "agony", "shadowVuln" } },
+            glows = { ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } } } } },
+        { key = "destruction", label = "Destruction", tab = 3, aux = true, res = { regen = true }, show = {
+            main = { "shadowburn", "healthstone", "soulstone", "potion", "rune" },
+            utility = { "lifeTap", "searingPain", "rainOfFire", "hellfire", "curseElements", "curseShadow", "curseReck", "fear", "banish", "createHealthstone", "createSoulstone" },
+            buffs = { "touchOfShadow", "burningWish", "zhc" },
+            debuffs = { "corruption", "elements", "curseShadow", "recklessness", "shadowVuln" } },
+          glows = { ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } } },
+          tbc = { show = {
+              main = { "shadowburn", "curseDoom", "soulshatter", "healthstone", "soulstone", "potion", "rune" },
+              buffs = { "felArmorBuff", "touchOfShadow", "burningWish", "zhc" },
+              debuffs = { "immolate", "corruption", "doom", "elements", "shadowVuln" } },
+            glows = { ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } } } } },
+    },
+    flavors = {
+        tbc = { add = {
+            { key = "shadowfury",   kind = "spell", spell = "shadowfury",   spellId = 30283, label = "Shadowfury", noRange = true },
+            { key = "soulshatter",  kind = "spell", spell = "soulshatter",  spellId = 29858, label = "Soulshatter", noRange = true },
+            { key = "felArmorBuff", id = 28176, label = "Fel Armor", row = "buffs" },
+            { key = "unstableAffliction", id = 30108, label = "Unstable Affliction", row = "debuffs", castsDot = true },
+            { key = "seedOfCorruption",   id = 27243, label = "Seed of Corruption", row = "debuffs" },
+        }, spells = { felArmor = 28176 } },
+    },
+    buffBars = { "shadowTrance", "amplify" },
     bars = { "mana", "fsr", "wand" },
 })

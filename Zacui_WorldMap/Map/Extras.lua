@@ -11,6 +11,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local S = ns.MapStitch
 local mod = ns:GetModule("worldmap")
 
@@ -67,7 +68,9 @@ local function HoldCVar(name, value)
 		local ok, was = pcall(GetCVar, name)
 		if ok and was and was ~= value then kept[name] = was end
 	end
-	SetCVarSafe(name, value)
+	-- SETUP2: a hold through ZacUI's CVar record too, so an uninstall or the part turned off hands it back
+	local CV = _G.ZacUI and _G.ZacUI.CVar
+	if CV then CV.Hold(name, value, "Zacui_WorldMap") else SetCVarSafe(name, value) end
 end
 
 local function LetGoCVar(name)
@@ -75,7 +78,10 @@ local function LetGoCVar(name)
 	local was = kept[name]
 	if was == nil then return end
 	kept[name] = nil
-	SetCVarSafe(name, was)
+	-- SETUP2: the record's release hands back the value from before the hold; a hold it does not know
+	-- (a reload in between) is put back from what OpenMap kept
+	local CV = _G.ZacUI and _G.ZacUI.CVar
+	if not (CV and CV.Release(name, "Zacui_WorldMap")) then SetCVarSafe(name, was) end
 end
 
 -- the zone (or continent) under the cursor, the cursor's point in it, and its

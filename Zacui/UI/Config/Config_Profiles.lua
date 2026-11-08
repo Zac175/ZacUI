@@ -25,7 +25,8 @@ local M, F = UI.M, UI.F
 local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
 
 local function Reload()
-    if type(ReloadUI) == "function" then ReloadUI()
+    if ns.RequestReload then ns.RequestReload()
+    elseif type(ReloadUI) == "function" then ReloadUI()
     elseif C_UI and C_UI.Reload then C_UI.Reload() end
 end
 
@@ -33,9 +34,16 @@ end
 -- that are already applied cannot be un-applied, so this is one of the few
 -- places in the addon where a reload is genuinely required rather than
 -- merely tidier - and it says so instead of pretending.
-local function AfterLoad(what)
-    Print(what .. " - reloading to apply.")
+--
+-- THE RELOAD IS ASKED FOR FIRST, then the load writes (WoW Forever honours
+-- a reload only when it is asked for at the start of the click, build
+-- 70425; UIF_Dialogs' ns.AskReload). The writes still run inside the same
+-- click, so they are what the reload saves.
+local function LoadThenReload(what, work)
     Reload()
+    local ok, res, err = pcall(work)
+    if not ok then Print(what .. " failed: " .. tostring(res)) return end
+    if res then Print(what .. " - reloading to apply.") else Print(tostring(err)) end
 end
 
 -- Which sections the section-wise actions work on. Remembered in the
@@ -217,6 +225,9 @@ function Import.Offer(text, opts)
                 -- buttons are still there to be clicked: once only.
                 if f._busy then return end
                 f._busy = true
+                -- an action that ends in a reload asks for it FIRST, before
+                -- anything is written (LoadThenReload's note)
+                if a.reload then Reload() end
                 local ok, msg, res = Import.Run(info.text, a.id, { info = info, name = f.name:GetText() })
                 if not ok then
                     f._busy = nil
@@ -228,7 +239,7 @@ function Import.Offer(text, opts)
                 UI.CloseWindow(f)
                 if res and res.reload then
                     Print("Reloading to apply.")
-                    Reload()
+                    if not a.reload then Reload() end
                     -- still here a moment later: the reload did not happen
                     C_Timer.After(2, function() Print("The import is in, but the UI did not reload - type /reload to finish.") end)
                     return
@@ -330,8 +341,7 @@ RegisterPage("Profiles", function(L)
                 .. "written back into '" .. current .. "' first, nothing is lost. A reload follows.",
             acceptText = "Switch",
             onAccept = function()
-                local ok, err = Profiles.Use(v)
-                if ok then AfterLoad("Switched to '" .. v .. "'") else Print(tostring(err)) end
+                LoadThenReload("Switched to '" .. v .. "'", function() return Profiles.Use(v) end)
             end,
         })
     end)
@@ -448,8 +458,11 @@ RegisterPage("Profiles", function(L)
                 text = "Copy " .. SectionLabels(keys) .. " from '" .. copyFrom .. "' over this character's "
                     .. "settings? A reload follows.",
                 onAccept = function()
-                    local ok, err = Profiles.CopyFrom(copyFrom, keys)
-                    if ok then Profiles.WriteBack() AfterLoad("Copied from '" .. copyFrom .. "'") else Print(tostring(err)) end
+                    LoadThenReload("Copied from '" .. copyFrom .. "'", function()
+                        local ok, err = Profiles.CopyFrom(copyFrom, keys)
+                        if ok then Profiles.WriteBack() end
+                        return ok, err
+                    end)
                 end })
         end, width = 230 } })
     end
@@ -459,9 +472,11 @@ RegisterPage("Profiles", function(L)
         UI.Confirm({ title = "Reset sections", destructive = true, acceptText = "Reset",
             text = "Reset " .. SectionLabels(keys) .. " on this character's profile to shipped defaults? A reload follows.",
             onAccept = function()
-                Profiles.ResetSections(keys)
-                Profiles.WriteBack()
-                AfterLoad("Reset")
+                LoadThenReload("Reset", function()
+                    Profiles.ResetSections(keys)
+                    Profiles.WriteBack()
+                    return true
+                end)
             end })
     end, width = 260 } })
     L:EndCard()
@@ -498,8 +513,11 @@ RegisterPage("Profiles", function(L)
                 text = "This string carries: " .. SectionLabels(carried) .. ". Those sections replace this "
                     .. "character's; everything else stays. A reload follows.",
                 onAccept = function()
-                    local ok, applyErr = Profiles.Apply(snap)
-                    if ok then Profiles.WriteBack() AfterLoad("Imported") else Print("Import failed: " .. tostring(applyErr)) end
+                    LoadThenReload("Imported", function()
+                        local ok, applyErr = Profiles.Apply(snap)
+                        if ok then Profiles.WriteBack() end
+                        return ok, "Import failed: " .. tostring(applyErr)
+                    end)
                 end })
         end, width = 170 },
         { "Save as new profile", function()

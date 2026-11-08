@@ -23,7 +23,7 @@ local SetNPFont = NP.SetNPFont
 -- as they are: ZacUI's display helpers, Core_Flavor); a read the game
 -- refuses answers false alone and the walk goes past it. Every other
 -- client reads exactly as before.
-local hiddenClient = _G.ZACUI_IS_FOREVER and true or false
+local hiddenClient = _G.ZACUI_MODERN and true or false
 local function GetAura(unit, index, filter)
     if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
         local a
@@ -68,7 +68,12 @@ local function AcquireIcon(holder, i)
     icon.tex = icon:CreateTexture(nil, "ARTWORK")
     icon.tex:SetPoint("TOPLEFT", 1, -1)
     icon.tex:SetPoint("BOTTOMRIGHT", -1, 1)
-    icon.tex:SetTexCoord(0.1, 0.9, 0.28, 0.72) -- wide crop for short icons
+    if NP.MatchOn and NP.MatchOn() then
+        -- the match pass's square icons: ZacUI's crop (Core_Look)
+        ns.Look.CropIcon(icon.tex)
+    else
+        icon.tex:SetTexCoord(0.1, 0.9, 0.28, 0.72) -- wide crop for short icons
+    end
     AddPixelBorder(icon)
 
     icon.cd = CreateFrame("Cooldown", nil, icon, "CooldownFrameTemplate")
@@ -108,7 +113,12 @@ function NP.LayoutAuras(f)
     -- Rides the same shift as the name: the raid marker overflows above
     -- the bar, the name moved up to clear it, and the auras have to keep
     -- their spacing above the name rather than land on top of it.
-    NP.Place(f, holder, "auras", NP.SetDef(f, "auras", "BOTTOM", f, "TOP", 0, 14 + (f._iconOverhang or 0)))
+    -- (match pass: 2 px over a name above the bar, the reference's row)
+    if NP.MatchOn and NP.MatchOn() and f.name and not f._nameInside and not f.nameOnly then
+        NP.Place(f, holder, "auras", NP.SetDef(f, "auras", "BOTTOM", f.name, "TOP", 0, 2))
+    else
+        NP.Place(f, holder, "auras", NP.SetDef(f, "auras", "BOTTOM", f, "TOP", 0, 14 + (f._iconOverhang or 0)))
+    end
     holder:SetHeight(d.auras.height)
     local cf = d.auras.countFont
     local csz = tonumber(cf and cf.size) or 8
@@ -129,7 +139,8 @@ function NP.UpdateAuras(f)
     local d = DB()
     local holder = f.auras
 
-    if not d.auras.enabled then
+    -- (an icon row over the plate - Readycheck's - owns that space: NP_Health)
+    if not d.auras.enabled or f._npIconRow then
         holder:Hide()
         return
     end

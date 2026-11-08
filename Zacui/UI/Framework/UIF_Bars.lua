@@ -27,6 +27,8 @@ local KillTexture = ns.KillTexture
 local SharpenIcon = ns.SharpenIcon
 local TEX_NORM = ns.TEX_NORM
 local ZUI = ns.ZUI
+-- the Look (Core_Look): read once per skin call, never per tick
+local Look = ns.Look
 
 -- A frame we must never write to, for any reason.
 -- Also used as the gate before anything that allocates on a secure frame.
@@ -71,12 +73,40 @@ local function SkinStatusBar(bar, opts)
     ZUI.skinned[bar] = true
     opts = opts or {}
 
+    -- Classic (opts.look: the part, a look table or nil): the fill is the
+    -- look's bar file unless a texture was chosen on Fonts & Textures,
+    -- the backing the same file darkened (the vanilla recessed bar), the
+    -- edge the look's border
+    local lk = Look.Pick(opts.look)
+    if lk.id ~= "zacui" then
+        local fill = (ns.Media and ns.Media.BarPath(lk.barTexture)) or lk.barTexture
+        bar:SetStatusBarTexture(fill)
+        if ns.Media then ns.Media.TrackBar(bar) end
+        local tex = bar:GetStatusBarTexture()
+        if tex and tex.SetHorizTile then
+            tex:SetHorizTile(false)
+            tex:SetVertTile(false)
+        end
+        if opts.backdrop ~= false and not bar._zui_bg then
+            local bg = bar:CreateTexture(nil, "BACKGROUND", nil, -7)
+            bg._zui_own = true
+            bg:SetAllPoints()
+            bg:SetTexture(lk.barBacking == "same" and fill or FLAT)
+            bg:SetVertexColor(0.25, 0.25, 0.25, opts.bgAlpha or 0.8)
+            bar._zui_bg = bg
+        end
+        if opts.border ~= false then AddPixelBorder(bar, nil, nil, lk) end
+        return bar
+    end
+
     -- the global status bar texture (Fonts & Textures), ZacUI's gradient
     -- by default; tracked so a change lands without a reload
-    bar:SetStatusBarTexture((ns.Media and ns.Media.BarPath(TEX_NORM)) or TEX_NORM)
+    bar:SetStatusBarTexture((ns.Media and ns.Media.BarPath(lk.barTexture)) or TEX_NORM)
     if ns.Media then ns.Media.TrackBar(bar) end
     local tex = bar:GetStatusBarTexture()
-    if tex then
+    -- (feature-detected: a client or a bar whose fill is not a texture
+    -- object has no tiling switch)
+    if tex and tex.SetHorizTile then
         tex:SetHorizTile(false)
         tex:SetVertTile(false)
     end
@@ -125,6 +155,81 @@ local function AdoptQualityBorder(btn, border)
     border:SetTexture(nil)
 end
 
+-- THE MAINLINE ACTION BUTTON (WoW Forever, 2026-11-07). Forever builds
+-- its action, stance and pet buttons from the modern (Mainline)
+-- ActionButtonTemplate, and that template hangs its hover, pushed and
+-- checked layers from the top-left corner at a fixed 46x45 (the Classic
+-- one stretches them over the button). On ZacUI's smaller buttons the
+-- flat washes below therefore sat off the bottom-right corner, bigger
+-- than the button. It also carries art the Classic one has not: the slot
+-- art behind the icon, the "new spell" frame, a spell highlight at the
+-- same 46x45. So every layer is pinned to the button itself and the
+-- extra art goes. SlotArt is the tell: no Classic template has it, so
+-- Classic Era and TBC never come here. Region calls only (secure-safe).
+local function PinToButton(btn, tex)
+    if tex and tex.ClearAllPoints and tex.SetAllPoints then
+        tex:ClearAllPoints()
+        tex:SetAllPoints(btn)
+    end
+end
+local function FitMainlineButton(btn, icon)
+    for _, get in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture", "GetCheckedTexture" }) do
+        if btn[get] then PinToButton(btn, btn[get](btn)) end
+    end
+    PinToButton(btn, btn.SpellHighlightTexture)
+    PinToButton(btn, btn.Flash)
+    PinToButton(btn, btn.QuickKeybindHighlightTexture)
+    -- the pet autocast ring is a 45px frame of its own (an unprotected
+    -- child: placed out of combat only, like every frame call here)
+    local ac = btn.AutoCastOverlay
+    if ac and ac.SetAllPoints and not InCombat() then
+        ac:ClearAllPoints()
+        ac:SetAllPoints(btn)
+    end
+    if btn.NewActionTexture then btn.NewActionTexture:SetAlpha(0) end
+    -- the rounded corner mask is for Blizzard's 45px frame art; on a
+    -- square cropped icon it only nicks the corners
+    if icon and btn.IconMask and icon.RemoveMaskTexture then
+        pcall(icon.RemoveMaskTexture, icon, btn.IconMask)
+    end
+    -- Blizzard re-runs its art pass on its own bars (Edit Mode, bar art
+    -- on/off): the frame ring and the pushed layer come back at 46x45,
+    -- so they are put back on the button and the ring hidden again
+    if btn.UpdateButtonArt and not btn._zui_artHook then
+        btn._zui_artHook = true
+        hooksecurefunc(btn, "UpdateButtonArt", function(self)
+            local n = self.GetNormalTexture and self:GetNormalTexture()
+            if n then n:SetAlpha(0) end
+            PinToButton(self, n)
+            local p = self.GetPushedTexture and self:GetPushedTexture()
+            if p then
+                p:SetColorTexture(1, 1, 1, 0.18)
+                p:SetBlendMode("ADD")
+                PinToButton(self, p)
+            end
+        end)
+    end
+end
+
+-- THE CLASSIC RING on an icon button: the vanilla template's NormalTexture
+-- is 66x66 on a 36 button, centred one pixel down; this keeps that ratio
+-- whatever the button's size (region calls only). Re-run when the button
+-- is resized (AB.StyleButton does).
+local function FitClassicRing(btn, normal, ring)
+    normal = normal or (btn.GetNormalTexture and btn:GetNormalTexture())
+    if not (normal and normal.SetSize and normal.ClearAllPoints) then return end
+    ring = ring or (Look.Get("classic") or {}).iconRing
+    if not ring then return end
+    local w = btn.GetWidth and btn:GetWidth() or 0
+    local h = btn.GetHeight and btn:GetHeight() or 0
+    if type(w) ~= "number" or w <= 0 then w = 36 end
+    if type(h) ~= "number" or h <= 0 then h = w end
+    normal:ClearAllPoints()
+    normal:SetSize(w * ring.scale, h * ring.scale)
+    normal:SetPoint("CENTER", btn, "CENTER", 0, h * ring.dy)
+end
+ns.FitClassicRing = FitClassicRing
+
 -- ICON BUTTON on a secure frame. Same idea as SkinIconButton but it never
 -- calls a frame method - only region methods - so it is safe on action
 -- buttons, bag slots and anything else the client protects.
@@ -143,13 +248,66 @@ local function SkinSecureIcon(btn, opts)
         icon = _G[name .. "Icon"] or _G[name .. "IconTexture"]
     end
 
+    -- Classic (opts.look: the part): Blizzard's ring stays - set to the
+    -- Quickslot file explicitly, scaled with the button as the vanilla
+    -- template draws it (66 on 36), so a Mainline atlas on Forever reads
+    -- the same; the icon uncropped and sharpened; pushed / highlight /
+    -- checked / quality ring as the game draws them; no strips (so the
+    -- border walks find nothing and do nothing). Region calls only.
+    local lk = Look.Pick(opts.look, "bars")
+    if lk.iconButton == "stock" then
+        local ring = lk.iconRing
+        local normal = btn.GetNormalTexture and btn:GetNormalTexture()
+        if normal and ring and not opts.keepNormal then
+            normal:SetTexture(ring.normal)
+            if normal.SetTexCoord then normal:SetTexCoord(0, 1, 0, 1) end
+            normal:SetAlpha(1)
+            ns.FitClassicRing(btn, normal, ring)
+        end
+        if icon and icon.SetTexCoord then
+            icon:SetTexCoord(lk.iconCrop, 1 - lk.iconCrop, lk.iconCrop, 1 - lk.iconCrop)
+        end
+        SharpenIcon(icon)
+        -- a look-alike button made with flat placeholders for its states
+        -- (the settings preview's sample) gets the template's own files
+        if ring then
+            for key, get in pairs({ pushed = "GetPushedTexture", highlight = "GetHighlightTexture", checked = "GetCheckedTexture" }) do
+                local t = btn[get] and btn[get](btn)
+                if t and t.GetTexture and t:GetTexture() == FLAT then
+                    t:SetTexture(ring[key])
+                    if key ~= "pushed" then t:SetBlendMode("ADD") end
+                end
+            end
+        end
+        if btn.SlotArt then btn.SlotArt:SetAlpha(0) end
+        if btn.SlotBackground then btn.SlotBackground:SetAlpha(0) end
+        if btn.NewActionTexture then btn.NewActionTexture:SetAlpha(0) end
+        -- Forever's Mainline template re-runs its art pass (Edit Mode, bar
+        -- art on/off) and puts its atlas ring back: the Quickslot file again
+        if btn.SlotArt and btn.UpdateButtonArt and not btn._zui_artHook and ring then
+            btn._zui_artHook = true
+            hooksecurefunc(btn, "UpdateButtonArt", function(self)
+                local n = self.GetNormalTexture and self:GetNormalTexture()
+                if n then
+                    n:SetTexture(ring.normal)
+                    n:SetAlpha(1)
+                    FitClassicRing(self, n, ring)
+                end
+                if self.SlotArt then self.SlotArt:SetAlpha(0) end
+                if self.SlotBackground then self.SlotBackground:SetAlpha(0) end
+            end)
+        end
+        rawset(btn, "_zLook", lk.id)
+        return btn
+    end
+
     -- The NormalTexture on a classic action button is the grey slot ring.
     -- On some buttons (bag slots, the keyring) it is the ARTWORK itself,
     -- and killing it empties the slot - so it is only cropped there.
     local normal = btn.GetNormalTexture and btn:GetNormalTexture()
     if normal then
         if opts.keepNormal then
-            if normal.SetTexCoord then normal:SetTexCoord(0.08, 0.92, 0.08, 0.92) end
+            if normal.SetTexCoord then ns.Look.CropIcon(normal, nil, nil, { border = false }) end
             SharpenIcon(normal)
         else
             KillTexture(normal)
@@ -164,7 +322,7 @@ local function SkinSecureIcon(btn, opts)
     if btn.IconMask then btn.IconMask:Hide() end
 
     if icon and icon.SetTexCoord then
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ns.Look.CropIcon(icon, nil, nil, { border = false })
         icon:SetDrawLayer("ARTWORK")
     end
     SharpenIcon(icon)
@@ -191,6 +349,7 @@ local function SkinSecureIcon(btn, opts)
         local a = Col("accent")
         checked:SetColorTexture(a.r, a.g, a.b, 0.35)
     end
+    if btn.SlotArt then FitMainlineButton(btn, icon) end
     return btn
 end
 

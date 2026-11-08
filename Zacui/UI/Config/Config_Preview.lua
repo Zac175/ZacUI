@@ -812,6 +812,7 @@ local function EnsureDock()
     -- The strip: an inset panel like the page's cards (the card fill, a
     -- soft 1px border), placed by the host under the page's title.
     dock = CreateFrame("Frame", nil, parent)
+    dock._zSet = UI._zSettings or nil
     dock:SetSize(400, MIN_H)
     UI.Fill(dock, "ui", "cardBg")
     UI.Border(dock, "ui", "border", 0.55)
@@ -932,7 +933,12 @@ local function EnsureDock()
     view.base:SetAllPoints()
     view.stripes = {}
     UI.Border(view, "ui", "border", 0.55)
-    view._zPaint = UI.PaintBox
+    view._zPaint = function(self)
+        UI.PaintBox(self)
+        if dock and rawget(dock, "_zSet") then
+            for _, t in ipairs(self._zBorder or {}) do t:SetVertexColor(1, 1, 1, UI.S.BORDER_A) end
+        end
+    end
     if view.SetClipsChildren then view:SetClipsChildren(true) end
 
     -- FOLDED: the whole slim bar opens it again, lit on hover.
@@ -953,6 +959,13 @@ local function EnsureDock()
 
     dock._zPaint = function(self)
         UI.PaintBox(self)
+        if UI.S and rawget(self, "_zSet") then
+            -- the settings window: the strip sits on the window's preview
+            -- band (Config_Window), so it draws no box of its own
+            self._zFill:SetVertexColor(0, 0, 0, 0)
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(0, 0, 0, 0) end
+            for _, t in ipairs(view._zBorder or {}) do t:SetVertexColor(1, 1, 1, UI.S.BORDER_A) end
+        end
         label:_zPaint()
         sizeNote:_zPaint()
         PaintArrows({ foldArrow, up, down, play })
@@ -1350,6 +1363,16 @@ end
 
 function Preview.Current()
     return current and current.key, current and current.canvas, current and current.P
+end
+
+-- The mode ids the strip offers right now, in order (the per-game-version
+-- tests read them: a mode for something that does not load there is not
+-- offered).
+function Preview.CurrentModes()
+    local out = {}
+    local spec = current and current.spec
+    for _, m in ipairs(type(spec and spec.modes) == "table" and spec.modes or {}) do out[#out + 1] = m.id end
+    return out
 end
 
 -- How tall the strip is right now (0 when there is none).

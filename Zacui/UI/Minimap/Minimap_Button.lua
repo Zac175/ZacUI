@@ -54,7 +54,8 @@ MB.DB = DB
 -- MENU
 -- ============================================================
 local function Reload()
-    if type(ReloadUI) == "function" then ReloadUI()
+    if ns.RequestReload then ns.RequestReload()
+    elseif type(ReloadUI) == "function" then ReloadUI()
     elseif C_UI and C_UI.Reload then C_UI.Reload() end
 end
 
@@ -94,8 +95,11 @@ local function ProfileItems()
                         .. "into '" .. tostring(current) .. "' first. A reload follows.",
                     acceptText = "Switch",
                     onAccept = function()
+                        -- the reload FIRST, then the switch's writes, inside
+                        -- the click (WoW Forever; UIF_Dialogs' ns.AskReload)
+                        Reload()
                         local ok, err = Profiles.Use(name)
-                        if ok then Reload() else Print(tostring(err)) end
+                        if not ok then Print(tostring(err)) end
                     end,
                 })
             end,

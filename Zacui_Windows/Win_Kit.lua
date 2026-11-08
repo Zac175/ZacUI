@@ -32,6 +32,9 @@ local UI = ns.UI
 
 local M, F = UI.M, UI.F
 
+-- a value WoW Forever keeps secret (ns.IsSecret; never on the other clients)
+local function Secret(v) return ns.IsSecret and ns.IsSecret(v) or false end
+
 local Kit = {}
 
 -- Layout numbers shared by every window built on the kit.
@@ -207,6 +210,9 @@ function Kit.StyleCover(f)
         t:SetTextColor(Kit.Color("titleColor", "text", "gold"))
     end
     Kit.PlaceTitle(f)
+    -- another look (Core_Look, part "windows"): its window chrome over the
+    -- flat cover; returns at once under ZacUI's look
+    if ns.Look and ns.Look.Dress then ns.Look.Dress(f, "cover", "windows") end
 end
 
 -- Every cover made (not the settings preview's), and the top-level
@@ -236,7 +242,9 @@ local function ScaleTop(top)
     if s == 1 and not top._zWinScaled then return end
     if Locked(top) then scaleWaiting = true return end
     if ns.Motion and ns.Motion.IsPlaying(top) then ns.Motion.Stop(top) end
-    if top:GetScale() ~= s then top:SetScale(s) end
+    -- (Forever can keep a window's scale secret: then it is simply set)
+    local cur = top:GetScale()
+    if Secret(cur) or cur ~= s then top:SetScale(s) end
     top._zWinScaled = true
 end
 
@@ -257,11 +265,16 @@ local function Opening(top)
     local spec = Kit.DB().openAnim
     if not (ns.Motion and type(spec) == "table" and spec.style and spec.style ~= "none") then return end
     if not ns.Motion.Enabled() or Locked(top) then return end
-    if top._zWinOpening == nil then top._zWinOpening = top:GetAlpha() or 1 end
+    -- (the stored alpha is handed straight back to SetAlpha: on Forever it
+    -- may be a secret, which is fine there but never in a compare)
+    if not top._zWinOpeningSet then
+        top._zWinOpeningSet = true
+        top._zWinOpening = top:GetAlpha() or 1
+    end
     top:SetAlpha(0)
     C_Timer.After(0, function()
         local was = top._zWinOpening
-        top._zWinOpening = nil
+        top._zWinOpening, top._zWinOpeningSet = nil, nil
         if was then top:SetAlpha(was) end
         if not top:IsShown() or Locked(top) then return end
         ns.Motion.Play(top, Kit.DB().openAnim, "in")
@@ -312,13 +325,19 @@ end
 -- opts.onClose  what the X does (close the Blizzard panel, normally)
 -- opts.insetName which panel inset preset to read (defaults to host name)
 -- opts.width/height  fixed size instead of the panel's own rectangle
+-- opts.minLevel  a frame level the cover never goes under (a modern host
+--               whose own page sits at level 100, Forever's spellbook)
 function Kit.Cover(host, opts)
     opts = opts or {}
     local f = CreateFrame("Frame", opts.name, host)
     f:SetFrameStrata(host:GetFrameStrata())
     -- Well above anything Blizzard parents to its own window (their rows
     -- and buttons sit a few levels up), so nothing pokes through.
-    f:SetFrameLevel(math.min(host:GetFrameLevel() + 50, 9000))
+    -- (Forever can keep a window's level secret: then the floor given, or
+    -- a plain 60 - the modern windows' pages sit under 100)
+    local hl = host:GetFrameLevel()
+    if Secret(hl) then hl = (opts.minLevel or 60) - 50 end
+    f:SetFrameLevel(math.max(math.min(hl + 50, 9000), opts.minLevel or 0))
     f:EnableMouse(true)
     -- Mouse wheel is claimed by the list inside; claiming it here too
     -- stops a wheel over the footer from zooming the camera.
@@ -340,8 +359,18 @@ function Kit.Cover(host, opts)
         if opts.width or opts.height then
             f:ClearAllPoints()
             f:SetPoint("TOPLEFT", host, "TOPLEFT", ins.l or 0, -(ins.t or 0))
-            f:SetSize(opts.width or (host:GetWidth() - (ins.l or 0) - (ins.r or 0)),
-                      opts.height or (host:GetHeight() - (ins.t or 0) - (ins.b or 0)))
+            local hw, hh = host:GetWidth(), host:GetHeight()
+            if Secret(hw) or Secret(hh) then
+                -- Forever keeps this window's size secret: the dimension
+                -- not given is anchored instead of worked out
+                if opts.width then f:SetWidth(opts.width)
+                else f:SetPoint("TOPRIGHT", host, "TOPRIGHT", -(ins.r or 0), -(ins.t or 0)) end
+                if opts.height then f:SetHeight(opts.height)
+                else f:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", ins.l or 0, ins.b or 0) end
+            else
+                f:SetSize(opts.width or (hw - (ins.l or 0) - (ins.r or 0)),
+                          opts.height or (hh - (ins.t or 0) - (ins.b or 0)))
+            end
         else
             ns.AnchorPanel(f, host, ins)
         end
@@ -368,7 +397,7 @@ function Kit.Cover(host, opts)
     icon._zui_own = true
     icon:SetSize(18, 18)
     icon:SetPoint("LEFT", 8, 2)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(icon)
     SharpenIcon(icon)
     icon:Hide()
 
@@ -427,6 +456,12 @@ function Kit.Cover(host, opts)
     if not opts.preview then
         Kit.covers[#Kit.covers + 1] = f
         RegisterTop(host)
+        -- Forever: a cover coming or going decides whether the window's
+        -- ZacUI title bar (Kit.ModernHeader) shows
+        if _G.ZACUI_MODERN and not opts.headerOnly then
+            f:HookScript("OnShow", function() Kit.RecheckHeaders() end)
+            f:HookScript("OnHide", function() Kit.RecheckHeaders() end)
+        end
     end
     return f
 end
@@ -549,7 +584,7 @@ function Kit.Icon(parent, size, opts)
     tex._zui_own = true
     tex:SetPoint("TOPLEFT", 1, -1)
     tex:SetPoint("BOTTOMRIGHT", -1, 1)
-    tex:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(tex)
     SharpenIcon(tex)
     f.texture = tex
     UI.Fill(f, "ui", "elementBg")
@@ -929,7 +964,7 @@ function Kit.IconButton(parent, size, texture, tooltipTitle, tooltipBody, onClic
     t:SetPoint("TOPLEFT", 3, -3)
     t:SetPoint("BOTTOMRIGHT", -3, 3)
     t:SetTexture(texture)
-    t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(t)
     SharpenIcon(t)
     b.icon = t
     if onClick then b:SetScript("OnClick", onClick) end
@@ -986,11 +1021,93 @@ local function MouseOK(f, opts)
             and not (f.IsObjectType and f:IsObjectType("Frame")))
 end
 
+-- WHAT OF A MODERN WINDOW DRAWS OVER ITS COVER (WoW Forever, 2026-11-07).
+-- Forever's windows are built from the modern templates, and those hang
+-- parts above the window on purpose: a list and its scroll bar in the
+-- HIGH strata (the reputation list), title bars at frame level 510,
+-- portraits at 400. A cover sits 50 levels above its window in the same
+-- strata, so those drew straight through it ("Reputation" twice, the
+-- faction list over ZacUI's). This finds every frame under `host` (a few
+-- levels down) that would draw above `cover` - a higher strata, or the
+-- same strata at the cover's level or above - leaving the cover itself,
+-- every other cover and anything ZacUI made alone. Callers add the result
+-- to their Silence list, which HIDES these (Kit.Silence, _zKitHide) and
+-- keeps them hidden if Blizzard re-shows one while the cover is up. Forever only: the Classic windows have no such
+-- parts, and their covers stay exactly as they were.
+local STRATA_RANK = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5,
+    FULLSCREEN = 6, FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+-- a Blizzard frame's strata and level, or nil when Forever keeps them
+-- secret (a secret may not be compared or used as a key)
+local function RankOf(f)
+    local strata = f:GetFrameStrata()
+    local level = f:GetFrameLevel()
+    if Secret(strata) or Secret(level) then return nil end
+    return STRATA_RANK[strata] or 3, level or 0
+end
+function Kit.AboveCover(host, cover, out)
+    out = out or {}
+    if not (_G.ZACUI_MODERN and host and cover and host.GetChildren) then return out end
+    local isCover = {}
+    for _, c in ipairs(Kit.covers) do isCover[c] = true end
+    local cr = STRATA_RANK[cover:GetFrameStrata()] or 3
+    local cl = cover:GetFrameLevel() or 0
+    local function Walk(f, depth)
+        for _, child in ipairs({ f:GetChildren() }) do
+            if child ~= cover and not isCover[child] and not child._zui_own and not child._zKitOwn then
+                local r, l = RankOf(child)
+                if r and (r > cr or (r == cr and l >= cl)) then
+                    -- hidden, not just faded: a faded list above the cover
+                    -- would still take the clicks meant for ZacUI's rows
+                    child._zKitHide = true
+                    out[#out + 1] = child
+                elseif depth < 3 then
+                    Walk(child, depth + 1)
+                end
+            end
+        end
+    end
+    Walk(host, 1)
+    return out
+end
+
+-- The character window's own chrome around its pages (Forever's modern
+-- CharacterFrame, Blizzard_UIPanels_Game/Camelot): the two pane hosts
+-- (the right one carries a frame divider at level 505 - the thin line
+-- down a covered page) and the pane toggle arrow at 510. Walked on top
+-- of the page itself, since they are the page's siblings, never the
+-- other pages (a page's own list must stay the business of its cover).
+function Kit.CharacterChromeAbove(cover, out)
+    out = out or {}
+    local cf = _G.CharacterFrame
+    if not (_G.ZACUI_IS_FOREVER and cf and cover) then return out end
+    for _, key in ipairs({ "LeftPaneHost", "RightPaneHost" }) do
+        local host = cf[key]
+        if type(host) == "table" and host.GetChildren then Kit.AboveCover(host, cover, out) end
+    end
+    local toggle = cf.RightPaneToggleButton
+    if type(toggle) == "table" and toggle.GetFrameLevel then
+        local cr = STRATA_RANK[cover:GetFrameStrata()] or 3
+        local r, l = RankOf(toggle)
+        if r and (r > cr or (r == cr and l >= (cover:GetFrameLevel() or 0))) then
+            toggle._zKitHide = true
+            out[#out + 1] = toggle
+        end
+    end
+    return out
+end
+
+-- THE SILENCED FLAG IS A BOOLEAN OF ITS OWN (_zKitQuiet), never "is the
+-- stored alpha nil": on WoW Forever a frame's alpha can come back as a
+-- secret value, which may be stored and handed back to SetAlpha but
+-- never compared, not even with nil.
 function Kit.Silence(frames, opts)
     local once = opts and opts.once
     for _, f in ipairs(frames) do
-        if f and f.SetAlpha and not (once and f._zKitAlpha ~= nil) then
-            if f._zKitAlpha == nil then f._zKitAlpha = f:GetAlpha() or 1 end
+        if f and f.SetAlpha and not (once and f._zKitQuiet) then
+            if not f._zKitQuiet then
+                f._zKitQuiet = true
+                f._zKitAlpha = f:GetAlpha() or 1
+            end
             f:SetAlpha(0)
             if MouseOK(f, opts) then
                 -- Read once, the first time we are about to switch it off
@@ -1000,21 +1117,43 @@ function Kit.Silence(frames, opts)
                 end
                 f:EnableMouse(false)
             end
+            -- a modern part above its cover (Kit.AboveCover): hidden too
+            if f._zKitHide and f.Hide and not (f.IsProtected and f:IsProtected() and InCombatLockdown()) then
+                if f._zKitShown == nil then f._zKitShown = f:IsShown() and true or false end
+                f:Hide()
+                if not f._zKitHook and f.HookScript then
+                    f._zKitHook = true
+                    f:HookScript("OnShow", function(self)
+                        if self._zKitQuiet and not (self:IsProtected() and InCombatLockdown()) then
+                            -- Blizzard wanted it shown: it comes back on
+                            -- Unsilence (a page switch shows the new page
+                            -- before the old cover lets go)
+                            self._zKitShown = true
+                            self:Hide()
+                        end
+                    end)
+                end
+            end
         end
     end
 end
 
 function Kit.Unsilence(frames, opts)
     for _, f in ipairs(frames) do
-        if f and f._zKitAlpha ~= nil then
+        if f and f._zKitQuiet then
             f:SetAlpha(f._zKitAlpha)
             f._zKitAlpha = nil
+            f._zKitQuiet = nil
             if MouseOK(f, opts) then
                 -- Back to what it was; a piece silenced before this was
                 -- tracked (nil) keeps the old behaviour.
                 local was = f._zKitMouse
                 f._zKitMouse = nil
                 f:EnableMouse(was ~= false)
+            end
+            if f._zKitShown ~= nil and not (f.IsProtected and f:IsProtected() and InCombatLockdown()) then
+                if f._zKitShown then f:Show() end
+                f._zKitShown = nil
             end
         end
     end
@@ -1056,6 +1195,381 @@ end
 function Kit.NormalizeQuery(text)
     text = text and strtrim(text) or ""
     return string.lower(text)
+end
+
+-- ============================================================
+-- FOREVER: ZacUI'S TITLE BAR ON A WINDOW WITHOUT A COVER (2026-11-07)
+-- ============================================================
+-- (Zac on Forever: "lots of these menus missing the styled header".)
+-- Forever's modern windows that ZacUI has not rebuilt - the character
+-- window's own Skills / PvP / Currency / Statistics pages, professions,
+-- the group finder, the flight map, the talents page, the social window -
+-- showed Blizzard's small title over ZacUI's panel. Each gets ZacUI's
+-- title bar, the same one every cover wears: a strip-only cover across
+-- the top (gold title from Blizzard's own title text, kept in step), its
+-- X a secure click on Blizzard's close button. It sits at level 600, over
+-- the modern title bar (510), portrait (400) and frame art (500), and
+-- steps aside whenever a full ZacUI cover is up on that window (the
+-- paperdoll, reputation) - the cover has its own. Out of combat only:
+-- its X is a secure button.
+local headers = {}
+local function CoverOver(host, except)
+    for _, c in ipairs(Kit.covers) do
+        -- (a page cover that brings no title bar of its own - the social
+        -- window's Friends and Raid pages - keeps the window's)
+        if c ~= except and not c._zHeaderOnly and not c._zKeepHeader and c:IsVisible() then
+            local p = c:GetParent()
+            while p do
+                if p == host then return true end
+                p = p:GetParent()
+            end
+        end
+    end
+    return false
+end
+
+local recheckQueued = false
+function Kit.RecheckHeaders()
+    if recheckQueued then return end
+    recheckQueued = true
+    -- next frame: a page switch shows the new page before it hides the old
+    C_Timer.After(0, function()
+        recheckQueued = false
+        if InCombatLockdown() then return end
+        for host, h in pairs(headers) do
+            local want = host:IsVisible() and not CoverOver(host, h)
+            if want then
+                h.Reanchor()
+                h:Show()
+            else
+                h:Hide()
+            end
+        end
+    end)
+end
+
+function Kit.ModernHeader(host)
+    if not host or headers[host] or InCombatLockdown() then return headers[host] end
+    local tt = host.TitleContainer and host.TitleContainer.TitleText
+    local h = Kit.Cover(host, {
+        name = (host.GetName and host:GetName() or "ZacUIModern") .. "ZacUIHeader",
+        title = tt and tt.GetText and tt:GetText() or "",
+        height = M.TITLEBAR,
+        minLevel = 600,
+        headerOnly = true,
+        onClose = function() HideUIPanel(host) end,
+    })
+    h._zHeaderOnly = true
+    headers[host] = h
+    if tt and hooksecurefunc then
+        hooksecurefunc(tt, "SetText", function(_, text) h:SetTitle(text) end)
+    end
+    -- the X, securely (the character window is protected)
+    local blizzClose = host.CloseButton
+    if blizzClose then
+        local sx = CreateFrame("Button", nil, h.titleBar, "SecureActionButtonTemplate")
+        sx:SetAllPoints(h.closeButton)
+        sx:SetFrameLevel(h.closeButton:GetFrameLevel() + 2)
+        sx:SetAttribute("useOnKeyDown", false)
+        sx:RegisterForClicks("AnyUp")
+        sx:SetAttribute("type", "click")
+        sx:SetAttribute("clickbutton", blizzClose)
+        local x = h.closeButton
+        sx:SetScript("OnEnter", function() x._zHot = true; x:_zPaint() end)
+        sx:SetScript("OnLeave", function() x._zHot = nil; x:_zPaint() end)
+        x:EnableMouse(false)
+        if ns.ZUI and ns.ZUI.skinned then ns.ZUI.skinned[sx] = true end
+    end
+    h:Hide()
+    host:HookScript("OnShow", function() Kit.RecheckHeaders() end)
+    for _, child in ipairs({ host:GetChildren() }) do
+        if child ~= h and child.HookScript and not child._zui_own then
+            child:HookScript("OnShow", function() Kit.RecheckHeaders() end)
+        end
+    end
+    Kit.RecheckHeaders()
+    return h
+end
+
+Kit.MODERN_HEADER_HOSTS = { "CharacterFrame", "ProfessionsFrame", "ProfessionsBookFrame", "FlightMapFrame",
+    "PlayerSpellsFrame", "SocialUIFrame", "LegacySystemFrame", "PetStableFrame" }
+if _G.ZACUI_MODERN then
+    local boot = CreateFrame("Frame")
+    boot:RegisterEvent("PLAYER_LOGIN")
+    boot:RegisterEvent("ADDON_LOADED")
+    boot:RegisterEvent("PLAYER_REGEN_ENABLED")
+    boot:SetScript("OnEvent", function(self)
+        -- the windows wear a game look: their own title bars stay (Core_Look's
+        -- Look.Stock; latched, so this holds the whole session)
+        if ns.Look and ns.Look.Stock and ns.Look.Stock("windows") then
+            self:UnregisterAllEvents()
+            return
+        end
+        if InCombatLockdown() then return end
+        for _, name in ipairs(Kit.MODERN_HEADER_HOSTS) do
+            local host = _G[name]
+            if type(host) == "table" and host.GetChildren and not headers[host] then Kit.ModernHeader(host) end
+        end
+        Kit.RecheckHeaders()
+    end)
+end
+
+-- ============================================================
+-- FOREVER: QUIET, NEVER HIDDEN (2026-11-07)
+-- ============================================================
+-- (Zac on Forever's character window after wave 2, with /fstack: Blizzard's
+-- Camelot item slots - PaperDollItemsFrame at frame level 100, every slot
+-- at 101 - drawn on top of ZacUI's paperdoll with their tooltips working,
+-- the pane divider (505) still down the page, "Level 2 Warrior" through
+-- ZacUI's header.) Finding what draws above a cover by its frame level
+-- (Kit.AboveCover) is not enough there: Forever can keep a Blizzard
+-- frame's level secret (then nothing is found), and a part Blizzard
+-- shows again after the cover is laid is back. And a Hide of Blizzard's
+-- own frame is something its code may notice.
+--
+-- Kit.Hush takes a Blizzard part by NAME, never by level: alpha 0 on the
+-- part (its children and text fade with it, whatever their strata) and
+-- the mouse off on every frame under it that had it (pooled list rows,
+-- the slots' popout buttons), so nothing of it draws or takes a click.
+-- Show, Hide and SetParent are never called on Blizzard's frames. What
+-- was changed is remembered in a weak side table, not on the frame, and
+-- Kit.Unhush puts it back exactly as it was. A protected part's mouse is
+-- left alone in combat (the client would refuse) and seen to when the
+-- fight ends. A ScrollBox hands its rows out of a pool: a row it
+-- initialises while hushed is quietened as it comes (ScrollUtil).
+local hushed = setmetatable({}, { __mode = "k" })
+local rowHooked = setmetatable({}, { __mode = "k" })
+Kit.hushed = hushed
+
+local function Own(f) return f._zui_own or f._zKitOwn end
+
+local function MouseOff(f, rec)
+    if not (f.EnableMouse and f.IsMouseEnabled) then return end
+    if f.IsProtected and f:IsProtected() and InCombatLockdown() then
+        rec.later = true
+    elseif rec.mouse[f] then
+        f:EnableMouse(false)   -- (taken off before; off again after a Blizzard refresh)
+    elseif f:IsMouseEnabled() then
+        rec.mouse[f] = true
+        f:EnableMouse(false)
+    end
+    if f.GetChildren then
+        for _, c in ipairs({ f:GetChildren() }) do
+            if not Own(c) then MouseOff(c, rec) end
+        end
+    end
+end
+
+local function HookRows(box)
+    if rowHooked[box] or not (box.ForEachFrame and ScrollUtil and ScrollUtil.AddInitializedFrameCallback) then return end
+    rowHooked[box] = true
+    pcall(ScrollUtil.AddInitializedFrameCallback, box, function(_, row)
+        local rec = hushed[box]
+        if rec and rec.want == "off" and row then MouseOff(row, rec) end
+    end, nil, false)
+end
+
+function Kit.Hush(f)
+    if not (f and type(f) == "table" and f.SetAlpha) then return end
+    local rec = hushed[f]
+    if not rec then
+        rec = { alpha = f:GetAlpha(), mouse = setmetatable({}, { __mode = "k" }) }
+        hushed[f] = rec
+    end
+    rec.want, rec.later = "off", nil
+    f:SetAlpha(0)
+    MouseOff(f, rec)
+    HookRows(f)
+end
+
+function Kit.Unhush(f)
+    local rec = f and hushed[f]
+    if not rec then return end
+    rec.want, rec.later = "on", nil
+    -- (the alpha may be one Forever keeps secret: stored and handed back
+    -- untouched, never compared)
+    f:SetAlpha(rec.alpha)
+    for c in pairs(rec.mouse) do
+        if c.IsProtected and c:IsProtected() and InCombatLockdown() then
+            rec.later = true
+        else
+            c:EnableMouse(true)
+            rec.mouse[c] = nil
+        end
+    end
+    if not rec.later then hushed[f] = nil end
+end
+
+function Kit.HushList(list) for _, f in ipairs(list) do Kit.Hush(f) end end
+function Kit.UnhushList(list) for _, f in ipairs(list) do Kit.Unhush(f) end end
+
+-- the mouse a fight held back: taken off, or given back, when it ends
+local function SettleHush()
+    for f, rec in pairs(hushed) do
+        if rec.later then
+            if rec.want == "off" then Kit.Hush(f) else Kit.Unhush(f) end
+        end
+    end
+end
+
+-- ------------------------------------------------------------
+-- THE CHARACTER WINDOW'S PARTS (Forever's Camelot CharacterFrame,
+-- Blizzard_UIPanels_Game/Camelot/CharacterFrame.xml + PaperDollFrame.xml
+-- + ReputationFrame.xml), by name. Everything of Blizzard's that would
+-- draw through or under-click a ZacUI cover on the window:
+--   shared    the pane divider (an unnamed frame at 505 inside
+--             RightPaneHost: every child frame of both pane hosts, found
+--             again on every call so a rebuilt one is caught), the pane
+--             toggle arrow (510), the stats panes (CharacterStatsPane*,
+--             children of the window Blizzard shows on the paperdoll's
+--             Expand), the side panes (HIGH strata), the window's own
+--             chrome (NineSlice, title bar, portrait, close button) and
+--             the level lines' text (CharacterLevelText)
+--   paperdoll PaperDollItemsFrame (100) and so every slot (101), the
+--             level line (PaperDollLevelInfo, HIGH 520: "Level 2 Warrior"
+--             through the header), the pet level line, the model scene,
+--             the sidebar tabs, the titles / equipment manager panes, the
+--             top strip, the pet bar and happiness
+--   reputation the list and its scroll bar (HIGH), the detail side pane,
+--             the filter dropdown
+-- A key is read with rawget: on a frame it is a plain field, and a stub
+-- without it must answer nil, not a stand-in.
+local function Part(owner, key)
+    if type(owner) ~= "table" then return nil end
+    local v = rawget(owner, key)
+    if type(v) == "table" and v.SetAlpha then return v end
+end
+local function Global(name)
+    local v = _G[name]
+    if type(v) == "table" and v.SetAlpha then return v end
+end
+
+local PAPERDOLL_PARTS = { "PaperDollItemsFrame", "PaperDollLevelInfo", "PaperDollPetLevelInfo",
+    "CharacterModelScene", "PaperDollSidebarTabs", "PetPaperDollFrameExpBar", "PetPaperDollPetHappinessInfo" }
+local PAPERDOLL_KEYS = { "TitleManagerPane", "EquipmentManagerPane", "TopBackgroundStripHost" }
+local SHARED_PARTS = { "CharacterStatsPaneScrollBox", "CharacterStatsPanePetScrollBox", "CharacterStatsPane",
+    -- the level lines' own text ("Level 2 Warrior"), on top of their frames
+    "CharacterLevelText", "PetCharacterLevelText", "CharacterFramePortrait" }
+-- the window's own chrome under every cover: its frame art (NineSlice, a
+-- level-500 sheet over the whole page), the title bar (510), the portrait
+-- (400) and the close button (the cover's X clicks it securely)
+local CHROME_KEYS = { "NineSlice", "TitleContainer", "PortraitContainer", "CloseButton" }
+local REPUTATION_KEYS = { "ScrollBox", "ScrollBar", "ReputationDetailFrame", "filterDropdown" }
+
+function Kit.CharacterParts(which, out)
+    out = out or {}
+    local cf = _G.CharacterFrame
+    if not (_G.ZACUI_MODERN and type(cf) == "table") then return out end
+    local function Add(f) if f then out[#out + 1] = f end end
+    for _, key in ipairs({ "LeftPaneHost", "RightPaneHost" }) do
+        local host = Part(cf, key)
+        if host and host.GetChildren then
+            for _, c in ipairs({ host:GetChildren() }) do
+                if not Own(c) then Add(c) end
+            end
+        end
+    end
+    Add(Part(cf, "RightPaneToggleButton"))
+    for _, key in ipairs(CHROME_KEYS) do Add(Part(cf, key)) end
+    for _, name in ipairs(SHARED_PARTS) do Add(Global(name)) end
+    local panes = rawget(cf, "SidePanes")
+    if type(panes) == "table" then for _, p in ipairs(panes) do Add(p) end end
+    if which == "paperdoll" then
+        for _, name in ipairs(PAPERDOLL_PARTS) do Add(Global(name)) end
+        for _, key in ipairs(PAPERDOLL_KEYS) do Add(Part(_G.PaperDollFrame, key)) end
+    elseif which == "reputation" then
+        for _, key in ipairs(REPUTATION_KEYS) do Add(Part(_G.ReputationFrame, key)) end
+    end
+    return out
+end
+
+-- The covers on the window, and when to look again. A page cover
+-- registers once (Kit.CharacterCover): on its show the parts are hushed,
+-- on its hide given back. They are hushed AGAIN - the parts found afresh -
+-- whenever Blizzard rebuilds the page around a cover that is up: the
+-- window's page switch (CharacterFrame:ShowSubFrame), a pane host shown
+-- again (RefreshRightPane), the item slots shown again (the pet sidebar
+-- hands them back with PaperDollItemsFrame:Show), and each slot's own
+-- refresh (PaperDollItemSlotButton_Update, which Blizzard runs on every
+-- slot for every equipment change: that one touches the slot alone).
+local charCovers = {}
+-- what a cover hushed is what it gives back (a divider rebuilt since the
+-- cover went up is found by the next hush, the old one is still put back)
+-- (pcall per part: one part the client refuses never leaves the rest
+-- of the window loud, nor breaks the cover's own show / hide)
+local function HushFor(c)
+    local ok, parts = pcall(Kit.CharacterParts, c.which)
+    if not ok then return end
+    for _, f in ipairs(parts) do
+        c.parts[f] = true
+        pcall(Kit.Hush, f)
+    end
+end
+local function UnhushFor(c)
+    for f in pairs(c.parts) do
+        c.parts[f] = nil
+        pcall(Kit.Unhush, f)
+    end
+end
+local recheckChar = false
+function Kit.RehushCharacter()
+    if recheckChar then return end
+    recheckChar = true
+    -- next frame: a page switch shows the new page before the old cover
+    -- lets go, and the parts belong to the page that stays up
+    C_Timer.After(0, function()
+        recheckChar = false
+        for _, c in ipairs(charCovers) do
+            if c.win:IsVisible() then HushFor(c) end
+        end
+    end)
+end
+
+local charHooked = false
+local function HookCharacter()
+    if charHooked then return end
+    local cf = _G.CharacterFrame
+    if type(cf) ~= "table" then return end
+    charHooked = true
+    -- (the mixin's method sits on the frame table itself: rawget)
+    -- (and the right pane's refresh and the paperdoll's Expand, which show
+    -- the stats and side panes again)
+    for _, method in ipairs({ "ShowSubFrame", "RefreshRightPane", "Expand" }) do
+        if type(rawget(cf, method)) == "function" then
+            pcall(hooksecurefunc, cf, method, Kit.RehushCharacter)
+        end
+    end
+    local pdf = Global("PaperDollFrame")
+    if pdf and pdf.HookScript then pdf:HookScript("OnShow", Kit.RehushCharacter) end
+    for _, key in ipairs({ "LeftPaneHost", "RightPaneHost" }) do
+        local host = Part(cf, key)
+        if host and host.HookScript then host:HookScript("OnShow", Kit.RehushCharacter) end
+    end
+    local items = Global("PaperDollItemsFrame")
+    if items and items.HookScript then items:HookScript("OnShow", Kit.RehushCharacter) end
+    if type(_G.PaperDollItemSlotButton_Update) == "function" then
+        pcall(hooksecurefunc, "PaperDollItemSlotButton_Update", function(slot)
+            local rec = items and hushed[items]
+            if rec and rec.want == "off" and type(slot) == "table" then
+                items:SetAlpha(0)
+                MouseOff(slot, rec)
+            end
+        end)
+    end
+    local regen = CreateFrame("Frame")
+    regen:RegisterEvent("PLAYER_REGEN_ENABLED")
+    regen:SetScript("OnEvent", function() if not InCombatLockdown() then SettleHush() end end)
+end
+
+function Kit.CharacterCover(win, which)
+    if not (_G.ZACUI_MODERN and win) then return end
+    for _, c in ipairs(charCovers) do if c.win == win then return end end
+    local c = { win = win, which = which, parts = setmetatable({}, { __mode = "k" }) }
+    charCovers[#charCovers + 1] = c
+    HookCharacter()
+    win:HookScript("OnShow", function() HushFor(c) end)
+    win:HookScript("OnHide", function() UnhushFor(c) end)
+    if win:IsVisible() then HushFor(c) end
 end
 
 -- shared with later ZacUI files

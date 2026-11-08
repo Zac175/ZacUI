@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Bars|r
 ## Notes: ZacUI action bars and bar loadouts. Replaces Bartender4 and Myslot.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -18,7 +18,15 @@
 AB_Core.lua
 AB_ActionBars.lua
 AB_Extras.lua
+# Keybind mode (/zui kb) and the note about keys on buttons nobody can see
+# (2026-11-07). After AB_Extras: it reads the pet and stance buttons.
+AB_Keys.lua
 AB_Import.lua
 AB_Loadouts.lua
+# Feature cluster 3 (2026-11-07): a new spell rank put on the bars when it is
+# learned, off by default. After AB_Import (it rides the bars module's start).
+AB_Uprank.lua
 AB_Preview.lua
 Config_PagesBars.lua
+# Drag to customise in the bar preview (ZacUI's UIF_PreviewDrag).
+AB_PreviewDrag.lua

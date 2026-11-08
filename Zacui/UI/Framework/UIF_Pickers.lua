@@ -182,8 +182,11 @@ function ns.ApplyFontSpec(fs, spec, defaults)
     end
 end
 
-function ns.ResolveBarTexture(name)
-    local house = (ns.Media and ns.Media.BarPath and ns.Media.BarPath()) or ns.TEX_NORM
+-- `part`: whose bar (a look part key); with nothing chosen the house
+-- texture is the part's look's (ZacUI's gradient under the ZacUI look)
+function ns.ResolveBarTexture(name, part)
+    local house = (ns.Media and ns.Media.BarPath and ns.Media.BarPath(ns.Look and ns.Look.For(part).barTexture))
+        or ns.TEX_NORM
     if name == nil or name == "" then return house end
     if ns.NewMediaName then name = ns.NewMediaName(name) or name end
     local lsm = LSM()
@@ -239,6 +242,51 @@ function UI.Field(parent, label, make, opts)
     local host = UI.FieldHost(parent, label)
     local lab = host._zFieldLabel
     local control = make(host)
+    -- THE SETTINGS WINDOW (UI.S): a one-line control (a dropdown, an edit
+    -- box, a button) goes on EllesmereUI's row - the label on the left at
+    -- 14, the control on the right of a field at most half a row wide; a
+    -- dropdown at their 170. A taller control keeps its label above.
+    local S = UI.S
+    -- (only a field that is a row of a section: inside a picker's own
+    -- grid it keeps its label above, in the picker's column)
+    if UI._zSettings and S and (control:GetHeight() or 99) <= 34 and rawget(parent, "_zAccent") then
+        if control.Close and control._zSet then control:SetWidth(S.DD_W) end
+        local cw = control:GetWidth() or S.DD_W
+        local room = UI.Room(parent)
+        local w = math.max(opts.width or 0, S.FIELD_W)
+        if room and w > room then w = room end
+        if cw > w - 60 then cw = math.max(60, w - 60) if control._zFit then control:_zFit(cw) else control:SetWidth(cw) end end
+        UI._zFontDress(lab, S.F_LABEL)
+        lab._zPaintCat, lab._zPaintKey = "text", "normal"
+        lab:_zPaint()
+        lab:ClearAllPoints()
+        lab:SetPoint("LEFT", host, "LEFT", 0, 0)
+        lab:SetJustifyH("LEFT")
+        lab:SetWordWrap(false)
+        UI.TruncTip(lab, host)
+        control:ClearAllPoints()
+        control:SetPoint("RIGHT", host, "RIGHT", 0, 0)
+        local h = math.max(control:GetHeight() or S.DD_H, 20)
+        local function Lay(width)
+            host:SetSize(width, h)
+            lab:SetWidth(math.max(20, width - (control:GetWidth() or cw) - 12))
+        end
+        Lay(w)
+        function host:_zFit(fw) Lay(math.max(120, fw)) end
+        host._zHalf = true
+        host.control, host.label = control, lab
+        host._zPaint = function() lab:_zPaint() end
+        return host
+    end
+    if UI._zSettings and UI._zFontDress then
+        -- (a pooled host may have been a one-line field before)
+        UI._zFontDress(lab, UI.SettingsSize(F.SMALL))
+        lab._zPaintCat, lab._zPaintKey = "text", "gray"
+        lab:ClearAllPoints()
+        lab:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
+        lab:SetWidth(0)
+        lab:_zPaint()
+    end
     local gap = UI.LabelGap(lab)
     control:SetPoint("TOPLEFT", host, "TOPLEFT", 0, -gap)
     host:SetSize(PickerWidth(parent, opts.width or control:GetWidth() or 120), gap + (control:GetHeight() or M.DROPDOWN_H))
@@ -264,15 +312,105 @@ end
 
 -- A labelled field (UI.Field, a picker with .control) is dimmed as a
 -- whole - label and all - and only its control goes deaf.
-function UI.SetEnabled(w, on)
+--
+-- A DIMMED OPTION SAYS WHY. UI.SetEnabled(w, false, why): it dims and goes
+-- deaf as before, and a still, invisible cover over it answers the mouse
+-- with a tooltip - the option's name, the reason in the warning colour
+-- ("Needs X turned on", "Not on this game version", "Locked in combat"),
+-- then what the option does. The cover swallows clicks (the option is off)
+-- and is made the first time the option is dimmed; on again, it hides.
+-- No reason given: UI.WHY_DEFAULT (the usual case, a child of the option
+-- above it; L:Dependent).
+UI.WHY_DEFAULT = "Needs the option above turned on."
+UI.WHY_FLAVOR = "Not on this game version."
+UI.WHY_COMBAT = "Locked in combat."
+
+local function TextOf(fs)
+    if fs and fs.GetText then
+        local t = fs:GetText()
+        if type(t) == "string" and t ~= "" then return t end
+    end
+end
+local function LabelOf(w)
+    if not w then return nil end
+    return w._zTipTitle or TextOf(w.label) or TextOf(w._zFieldLabel) or TextOf(w._zLabelFS)
+        or (w.GetObjectType and w:GetObjectType() == "Button" and TextOf(w._zText))
+        or (w.control and LabelOf(w.control)) or nil
+end
+
+-- the tooltip for a reason: on any frame (the cover, a disabled button)
+function UI.ShowWhy(owner, title, why, body)
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    local t = GetColor("tooltip", "title")
+    if title then GameTooltip:AddLine(title, t.r, t.g, t.b) end
+    local o = GetColor("text", "orange")
+    GameTooltip:AddLine(why or UI.WHY_DEFAULT, o.r, o.g, o.b, true)
+    if body then
+        local c = GetColor("text", "gray")
+        GameTooltip:AddLine(body, c.r, c.g, c.b, true)
+    end
+    GameTooltip:Show()
+end
+
+-- The covers are shared: one comes off a free list when an option is
+-- dimmed and goes back when it is lit again or its widget goes back to the
+-- settings pool (UIF_Pool calls UI.RecycleWhy), so browsing the pages
+-- makes no new frames once a few exist.
+local freeCovers = {}
+function UI.RecycleWhy(hit)
+    if not hit then return end
+    local owner = hit._zOwner
+    if owner and rawget(owner, "_zWhyHit") == hit then owner._zWhyHit = nil end
+    hit._zOwner = nil
+    hit:Hide()
+    hit:ClearAllPoints()
+    hit:SetParent(nil)
+    freeCovers[#freeCovers + 1] = hit
+end
+
+local function WhyCover(w)
+    local hit = w._zWhyHit
+    if hit and hit._zOwner == w and hit:GetParent() == w then return hit end
+    hit = table.remove(freeCovers)
+    if hit then
+        hit:SetParent(w)
+    else
+        hit = CreateFrame("Frame", nil, w)
+        hit:EnableMouse(true)
+        -- the settings pool hands it back here instead of letting it go
+        hit._zPoolKeep = true
+        hit:SetScript("OnEnter", function(self)
+            local owner = self._zOwner
+            if not owner then return end
+            UI.ShowWhy(self, LabelOf(owner), self._zWhy,
+                owner._zTipBody or (owner.control and owner.control._zTipBody) or nil)
+        end)
+        hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    hit:SetAllPoints(w)
+    hit:SetFrameLevel((w:GetFrameLevel() or 0) + 20)
+    hit._zOwner = w
+    w._zWhyHit = hit
+    return hit
+end
+
+function UI.SetEnabled(w, on, why)
     if not w then return end
     on = on and true or false
     w._zOff = not on
-    w:SetAlpha(on and 1 or 0.35)
+    -- (EllesmereUI's 0.3 in the settings window)
+    w:SetAlpha(on and 1 or ((rawget(w, "_zSet") or rawget(w, "_zHalf")) and UI.S.OFF_A or 0.35))
     Mouse(w, on)
     if w.control then
         w.control._zOff = not on
         Mouse(w.control, on)
+    end
+    if on then
+        if w._zWhyHit then UI.RecycleWhy(w._zWhyHit) end
+    elseif w.CreateTexture then
+        local hit = WhyCover(w)
+        hit._zWhy = why or UI.WHY_DEFAULT
+        hit:Show()
     end
 end
 
@@ -295,11 +433,16 @@ end
 --   opts.resetTip = the x's tooltip (default "Back to the theme colour")
 function UI.ColorPicker(parent, opts)
     opts = opts or {}
+    local set = UI._zSettings and UI.S
+    -- (settings window: EllesmereUI's 24 px swatch with a white edge)
+    local SW, SH, HH = set and set.SWATCH or 30, set and set.SWATCH or 14, set and set.SWATCH or 16
     local host = CreateFrame("Button", nil, parent)
-    host:SetHeight(16)
+    host:SetHeight(HH)
+    host._zSet = set and true or nil
+    host._zHalf = set and true or nil
 
     local sw = CreateFrame("Frame", nil, host)
-    sw:SetSize(30, 14)
+    sw:SetSize(SW, SH)
     sw:SetPoint("LEFT", host, "LEFT", 0, 0)
     local solid = sw:CreateTexture(nil, "ARTWORK", nil, 1)
     solid._zui_own = true
@@ -334,8 +477,8 @@ function UI.ColorPicker(parent, opts)
     local width = 30
     if opts.label then
         label = UI.Font(host, F.LABEL, { text = opts.label })
-        label:SetPoint("LEFT", sw, "RIGHT", 8, 0)
-        width = 30 + 8 + math.max(10, label:GetStringWidth() or 0)
+        label:SetPoint("LEFT", sw, "RIGHT", set and 10 or 8, 0)
+        width = SW + (set and 10 or 8) + math.max(10, label:GetStringWidth() or 0)
     end
     host:SetWidth(opts.width or width)
 
@@ -373,7 +516,7 @@ function UI.ColorPicker(parent, opts)
     function host:_zFit(maxW)
         if (self:GetWidth() or 0) > maxW then self:SetWidth(maxW) end
         if not label then return end
-        local roomL = math.floor(maxW - 38 - (resetBtn and 18 or 0))
+        local roomL = math.floor(maxW - SW - 8 - (resetBtn and 18 or 0))
         if roomL < 40 or (label:GetStringWidth() or 0) <= roomL + 0.5 then return end
         label:ClearAllPoints()
         label:SetPoint("TOPLEFT", sw, "TOPRIGHT", 8, 1)
@@ -382,10 +525,10 @@ function UI.ColorPicker(parent, opts)
         label:SetWordWrap(true)
         sw:ClearAllPoints()
         sw:SetPoint("TOPLEFT", host, "TOPLEFT", 0, -1)
-        local h = math.max(16, math.ceil(label:GetStringHeight() or 16) + 2)
+        local h = math.max(HH, math.ceil(label:GetStringHeight() or HH) + 2)
         self:SetHeight(h)
         self:SetWidth(maxW)
-        self._zExtraH = h - 16
+        self._zExtraH = h - HH
     end
     -- (as built, before any fit: a pooled picker goes back to this)
     local w0 = host:GetWidth()
@@ -394,14 +537,14 @@ function UI.ColorPicker(parent, opts)
     function host:_zUnfit()
         if label then
             label:ClearAllPoints()
-            label:SetPoint("LEFT", sw, "RIGHT", 8, 0)
+            label:SetPoint("LEFT", sw, "RIGHT", set and 10 or 8, 0)
             label:SetWidth(0)
             if lj0 then label:SetJustifyH(lj0) end
             if lw0 ~= nil then label:SetWordWrap(lw0) end
         end
         sw:ClearAllPoints()
         sw:SetPoint("LEFT", host, "LEFT", 0, 0)
-        self:SetSize(w0, 16)
+        self:SetSize(w0, HH)
         self._zExtraH = nil
     end
     do
@@ -417,8 +560,12 @@ function UI.ColorPicker(parent, opts)
         local r, g, b, a = Read()
         solid:SetVertexColor(r, g, b, 1)
         if see then see:SetVertexColor(r, g, b, a) end
-        local k = self._zHot and GetColor("ui", "accent") or GetColor("ui", "border")
-        for _, t in ipairs(sw._zBorder) do t:SetVertexColor(k.r, k.g, k.b, 1) end
+        if set then
+            for _, t in ipairs(sw._zBorder) do t:SetVertexColor(1, 1, 1, self._zHot and 1 or 0.85) end
+        else
+            local k = self._zHot and GetColor("ui", "accent") or GetColor("ui", "border")
+            for _, t in ipairs(sw._zBorder) do t:SetVertexColor(k.r, k.g, k.b, 1) end
+        end
         if label then label:_zPaint() end
         if resetBtn then resetBtn:SetShown(Picked()) end
     end
@@ -778,7 +925,12 @@ function UI.FontPicker(parent, opts)
     -- column is too narrow for their labels
     local half = math.floor((colW - 10) / 2)
     local probe = UI.Font(host, F.SMALL, { text = "Shadow X" })
-    local stack = half < math.ceil(probe:GetStringWidth() or 0) + 36
+    -- (the settings window's slider is one line - label, track, value
+    -- box - so it wants more room: UI.S)
+    local S = UI._zSettings and UI.S
+    local needW = math.ceil(probe:GetStringWidth() or 0)
+        + (S and (2 * S.TRACK_GAP + S.TRACK_MIN + S.VALUE_W + 4) or 36)
+    local stack = half < needW
     probe:Hide()
     local sw = stack and colW or half
     local sx = UI.Slider(host, { width = sw, label = "Shadow X", min = -4, max = 4, step = 1,
@@ -786,13 +938,14 @@ function UI.FontPicker(parent, opts)
     sx:SetPoint("TOPLEFT", host, "TOPLEFT", x2, y)
     local sy = UI.Slider(host, { width = sw, label = "Shadow Y", min = -4, max = 4, step = 1,
         value = tonumber(Val("shadowY")) or -1, onChange = function(v) Put("shadowY", v) end })
+    local shH = math.max(32, (sx:GetHeight() or 30) + 2, (sy:GetHeight() or 30) + 2)
     if stack then
-        y = y - 44
+        y = y - math.max(44, shH + 10)
         sy:SetPoint("TOPLEFT", host, "TOPLEFT", x2, y)
     else
         sy:SetPoint("TOPLEFT", host, "TOPLEFT", x2 + half + 10, y)
     end
-    host:SetSize(W, -(y - 32))
+    host:SetSize(W, -(y - shH))
 
     Sync = function()
         ns.ApplyFontSpec(sample, Cur(), D)

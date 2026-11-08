@@ -15,6 +15,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local S = ns.MapStitch
 local WORLD = S.WORLD
 
@@ -160,6 +161,9 @@ local function Clocked(name, t0)
 end
 
 local function SetView(scale, x, y)
+	-- a map not laid out yet (no size: WoW Forever puts a map up before its
+	-- window has one) gives no scale; the next layout sets the view
+	if type(scale) ~= "number" or not (scale > 0) or scale == math.huge then return end
 	sc.currentScale, sc.targetScale, sc.zoomTarget = scale, scale, scale
 	sc.Child:SetScale(scale)
 	sc:CalculateScrollExtents()

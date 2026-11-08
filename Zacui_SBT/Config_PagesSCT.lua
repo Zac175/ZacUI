@@ -86,8 +86,8 @@ local function Add(L, w, gap)
 end
 W.Add = Add
 
-local function Enable(w, on)
-    if UI.SetEnabled then UI.SetEnabled(w, on) end
+local function Enable(w, on, why)
+    if UI.SetEnabled then UI.SetEnabled(w, on, why) end
 end
 
 -- ============================================================
@@ -432,7 +432,12 @@ local function NextLine(st, only)
         st.idx = (st.idx or 0) % #FEED + 1
         local s = FEED[st.idx]
         local area, text, o
-        if s.ev and S.EventLine then
+        -- Forever (Core_Flavor): only what you take shows there - your own
+        -- hits and killing blows are only in the combat log it does not
+        -- give addons - so the sample has none of them either
+        if s.ev and S.FOREVER and (s.ev:find("^out_") or s.ev == "n_kb") then
+            -- (skipped)
+        elseif s.ev and S.EventLine then
             area, text, o = S.EventLine(s.ev, s.f)
         elseif s.alert and S.Alerts and S.Alerts.Line then
             if S.AlertOn(s.alert) then area, text, o = S.Alerts.Line(s.alert, s.amount) end
@@ -681,13 +686,15 @@ local function TextPreview(L)
         key = "sbt.text",
         title = "Scrolling text",
         width = 560, height = 110,
-        modes = {
-            { id = "all", label = "All" },
-            { id = "incoming", label = "Incoming" },
-            { id = "outgoing", label = "Outgoing" },
-            { id = "notification", label = "Notices" },
-            { id = "plates", label = "Nameplate" },
-        },
+        modes = (function()
+            local m = { { id = "all", label = "All" }, { id = "incoming", label = "Incoming" } }
+            -- (Forever shows only what you take, and has no nameplate
+            -- numbers: Core_Flavor)
+            if not S.FOREVER then m[#m + 1] = { id = "outgoing", label = "Outgoing" } end
+            m[#m + 1] = { id = "notification", label = "Notices" }
+            if S.PlateText then m[#m + 1] = { id = "plates", label = "Nameplate" } end
+            return m
+        end)(),
         modesLabel = "Show",
         build = textBuild, update = textUpdate, replay = textReplay,
     })

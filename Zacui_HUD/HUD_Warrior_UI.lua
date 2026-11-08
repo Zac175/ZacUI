@@ -8,6 +8,7 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print

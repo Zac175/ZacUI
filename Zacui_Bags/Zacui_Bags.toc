@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Bags|r
 ## Notes: ZacUI combined bag and auction house.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -18,5 +18,10 @@
 Bags_Core.lua
 Bags_Sort.lua
 Bags_Frame.lua
+# Your other characters: the footer's gold list, remembered bags and bank,
+# tooltip counts (after Bags_Frame: it dresses its windows)
+Bags_Alts.lua
+# Overnight gap build (2026-11-08): item level and BoE text on gear slots.
+Bags_Extras.lua
 AH_Core.lua
 AH_Frame.lua

@@ -229,6 +229,7 @@ function MP.Update()
 
     if not Minimap or not Minimap.GetZoom then return stop("no minimap") end
     if not d.pins then return stop("turned off") end
+    if ns.FeatureOn and not ns.FeatureOn("maps_data") then return stop("not this game's Azeroth") end
 
     local mapID = C_Map and C_Map.GetBestMapForUnit
         and C_Map.GetBestMapForUnit("player")
@@ -461,7 +462,9 @@ function MP.Apply()
         driver = CreateFrame("Frame", nil, Minimap)
         driver._elapsed = 0
     end
-    if DB().pins then
+    -- (the markers are Classic Era's Azeroth data: none on a game version
+    -- whose map is not that Azeroth, Core_Flavor's "maps_data" row)
+    if DB().pins and not (ns.FeatureOn and not ns.FeatureOn("maps_data")) then
         driver:SetScript("OnUpdate", function(self, dt)
             self._elapsed = self._elapsed + dt
             -- Ten times a second. These move only when the player does,

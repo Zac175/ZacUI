@@ -473,10 +473,14 @@ local function BuildBreakdown()
     local close = CreateFrame("Button", nil, f)
     close:SetSize(16, 16)
     close:SetPoint("TOPRIGHT", -6, -6)
-    local x = close:CreateFontString(nil, "OVERLAY")
-    MeterFont(x, 12)
+    -- ZacUI's own close icon (2026-11-07; it was an "X" in the font)
+    local x = close:CreateTexture(nil, "ARTWORK")
+    x:SetSize(16, 16)
     x:SetPoint("CENTER")
-    x:SetText("X")
+    x:SetTexture((Meter.ICONS or "Interface\\AddOns\\ZacUI\\Media\\Icons\\") .. "close")
+    x:SetVertexColor(0.8, 0.8, 0.8, 1)
+    close:SetScript("OnEnter", function() x:SetVertexColor(1, 1, 1, 1) end)
+    close:SetScript("OnLeave", function() x:SetVertexColor(0.8, 0.8, 0.8, 1) end)
     close:SetScript("OnClick", function() f:Hide() end)
 
     f.lines = {}
@@ -502,10 +506,25 @@ local function BuildBreakdown()
 end
 
 function Meter.OpenBreakdown(win, actor)
+    -- a row painted from the game's meter in a fight (Meter_Win_Live):
+    -- its values may be hidden, so it has a breakdown of its own
+    if actor and actor.live and Meter.Live then return Meter.Live.OpenBreakdown(win, actor) end
     local display = win.settings.display
-    -- a death opens its recap in this window's place
-    if display == "deaths" and Meter.OpenDeathRecap then
+    local BD = Meter.Breakdown
+    local inWindow = BD and win.rowframe and win.frame and not win.preview
+    -- a death opens its recap in this window's place (or, when asked, a
+    -- short recap inside the meter window - Meter v2)
+    if display == "deaths" and Meter.OpenDeathRecap
+        and not (inWindow and BD.Opt("deathsInWindow")) then
         return Meter.OpenDeathRecap(Meter.CombatForWindow(win), actor)
+    end
+    -- METER V2: the breakdown opens INSIDE the window, as its own bars
+    -- (Meter_Win_Breakdown); this standalone window stays for anything
+    -- that is not a meter window
+    if inWindow then
+        if breakdown then breakdown:Hide() end
+        if Meter.CloseDeathRecap then Meter.CloseDeathRecap() end
+        return BD.Open(win, actor)
     end
     breakdown = breakdown or BuildBreakdown()
     if Meter.CloseDeathRecap then Meter.CloseDeathRecap() end
@@ -609,8 +628,14 @@ local function WindowLines(win)
         if row:IsShown() and row.actor then
             count = count + 1
             if count > d.reportLines then break end
-            lines[#lines + 1] = count .. ". " .. (row.leftText:GetText() or "")
-                .. " " .. (row.rightText:GetText() or "")
+            -- the name as the row shows it, without the rank the row may
+            -- carry ("3. Zac" - look.showRank): the report numbers them
+            -- (and without the colour codes that dim the rank and the
+            -- per-second figure: chat takes plain text)
+            local function Plain(t) return (tostring(t or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) end
+            local name = Plain(row.leftText:GetText()):gsub("^%d+%. ", "")
+            lines[#lines + 1] = count .. ". " .. name
+                .. " " .. Plain(row.rightText:GetText())
         end
     end
     if #lines == 1 then return nil end
@@ -789,7 +814,7 @@ local function RecapRow(p, i)
     r.icon._zui_own = true
     r.icon:SetSize(14, 14)
     r.icon:SetPoint("LEFT", 42, 0)
-    r.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(r.icon)
     r.name = UI.Font(r, UF.LABEL, { cat = "text", key = "normal" })
     r.name:SetPoint("LEFT", 60, 0) r.name:SetWidth(nameW) r.name:SetJustifyH("LEFT") r.name:SetWordWrap(false)
     r.src = UI.Font(r, UF.SMALL, { cat = "text", key = "gray" })

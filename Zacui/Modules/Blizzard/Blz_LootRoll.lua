@@ -129,7 +129,7 @@ function LR.NewBar(parent, name)
     local status = CreateFrame("StatusBar", nil, bar)
     status:SetPoint("TOPLEFT", 1, -1)
     status:SetPoint("BOTTOMRIGHT", -1, 1)
-    status:SetStatusBarTexture((ns.Media and ns.Media.BarPath(TEX_NORM)) or TEX_NORM)
+    status:SetStatusBarTexture((ns.Media and ns.Media.BarPath(ns.Media.HouseBar())) or TEX_NORM)
     status:SetFrameLevel(bar:GetFrameLevel())
     status.bar = bar
     bar.status = status
@@ -151,7 +151,7 @@ function LR.NewBar(parent, name)
     button.icon = button:CreateTexture(nil, "ARTWORK")
     button.icon:SetPoint("TOPLEFT", 1, -1)
     button.icon:SetPoint("BOTTOMRIGHT", -1, 1)
-    button.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ns.Look.CropIcon(button.icon)
     button.stack = button:CreateFontString(nil, "OVERLAY",
         "NumberFontNormalSmall")
     bar.button = button
@@ -228,7 +228,7 @@ function LR.Style(bar, cfg)
         bar.status:SetStatusBarTexture(ns.ResolveBarTexture(cfg.texture))
         bar._zLRTex = true
     elseif bar._zLRTex then
-        bar.status:SetStatusBarTexture((ns.Media and ns.Media.BarPath(TEX_NORM)) or TEX_NORM)
+        bar.status:SetStatusBarTexture((ns.Media and ns.Media.BarPath(ns.Media.HouseBar())) or TEX_NORM)
         bar._zLRTex = nil
     end
     local to = bar._zAnchorTo
@@ -732,7 +732,7 @@ Modules.readycheck = function()
                 end
             end
             if item.Icon and item.Icon.SetTexCoord then
-                item.Icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                ns.Look.CropIcon(item.Icon)
                 local holder = CreateFrame("Frame", nil, item)
                 holder:SetAllPoints(item.Icon)
                 AddPixelBorder(holder)

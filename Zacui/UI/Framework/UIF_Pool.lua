@@ -65,7 +65,11 @@ local MOTION_KEYS = { _zAnim = true, _zFadeSerial = true, _zFadeTo = true, _zFad
 -- What the font keeper (Core_Fonts) notes on a string is about the face
 -- it wears now, which a change of ZacUI's font moves while it waits here.
 local HOUSE_KEYS = { _zHouseFace = true, _zHouseOrig = true }
-local function Skip(k) return k == 0 or NOT_OURS[k] or MOTION_KEYS[k] or HOUSE_KEYS[k] or k == "_zPoolSnap" end
+-- A dimmed widget's reason cover (UIF_Pickers' UI.SetEnabled) has a free
+-- list of its own: the pool neither keeps nor puts back the widget's link
+-- to one (the cover itself goes back through UI.RecycleWhy, below).
+local COVER_KEYS = { _zWhyHit = true }
+local function Skip(k) return k == 0 or NOT_OURS[k] or MOTION_KEYS[k] or HOUSE_KEYS[k] or COVER_KEYS[k] or k == "_zPoolSnap" end
 
 local SCRIPTS = { "OnClick", "OnEnter", "OnLeave", "OnShow", "OnHide", "OnValueChanged", "OnTextChanged",
     "OnEnterPressed", "OnEscapePressed", "OnEditFocusGained", "OnEditFocusLost", "OnMouseDown",
@@ -310,7 +314,13 @@ local function RestoreOne(o, isRoot, pooledSet)
     -- their own, the rest is let go (as every page part was before)
     if s.kids and o.GetChildren then
         for _, c in ipairs({ o:GetChildren() }) do
-            if not s.kids[c] and not pooledSet[c] then Orphan(c) end
+            -- a dimmed widget's reason cover (UIF_Pickers) goes back to its
+            -- own free list, not let go
+            if rawget(c, "_zPoolKeep") then
+                if ns.UI and ns.UI.RecycleWhy then ns.UI.RecycleWhy(c) else c:Hide() end
+            elseif not s.kids[c] and not pooledSet[c] then
+                Orphan(c)
+            end
         end
     end
     if s.regs and o.GetRegions then
@@ -586,8 +596,8 @@ Wrap("Slider", { parent = 1, opts = 2, optValues = { value = true },
 Wrap("Dropdown", P1)
 -- (its bar is the parent's child: it travels with it)
 Wrap("ScrollArea", { parent = 1,
-    raw = function(parent)
-        local scroll, child, bar = UI._zRawScrollAreaPlain(parent)
+    raw = function(parent, opts)
+        local scroll, child, bar = UI._zRawScrollAreaPlain(parent, opts)
         scroll._zPoolAlso = { bar }
         return scroll, child, bar
     end,
@@ -603,17 +613,20 @@ Wrap("TextBox", { parent = 1, opts = 2, optValues = { text = true },
     rebind = function(w, _, o) w:SetText((o and o.text) or "") end })
 Wrap("Card", { parent = 1, values = { [3] = true },
     rebind = function(w, parent, _, y)
+        -- (a settings section sits at the window's 45 px pad, UI.S)
+        local m = rawget(w, "_zSet") and UI.S.PAD or M.MARGIN
         w:ClearAllPoints()
-        w:SetPoint("TOPLEFT", parent, "TOPLEFT", M.MARGIN, y)
-        w:SetPoint("RIGHT", parent, "RIGHT", -M.MARGIN, 0)
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", m, y)
+        w:SetPoint("RIGHT", parent, "RIGHT", -m, 0)
     end })
 Wrap("PageHeader", { parent = 1, values = { [4] = true },
     rebind = function(w, parent, _, _, y)
+        local m = rawget(w, "_zSet") and 0 or M.MARGIN
         w:ClearAllPoints()
-        w:SetPoint("TOPLEFT", parent, "TOPLEFT", M.MARGIN, y)
-        w:SetPoint("RIGHT", parent, "RIGHT", -M.MARGIN, 0)
+        w:SetPoint("TOPLEFT", parent, "TOPLEFT", m, y)
+        w:SetPoint("RIGHT", parent, "RIGHT", -m, 0)
     end,
-    ret = function(w, args) return args[4] - w:GetHeight() - 12 end })
+    ret = function(w, args) return args[4] - w:GetHeight() - (rawget(w, "_zSet") and 0 or 12) end })
 -- text: everything is set again on reuse, so only the layer / template
 -- make its shape
 -- (built here rather than through UI.Font, so the string's look is read

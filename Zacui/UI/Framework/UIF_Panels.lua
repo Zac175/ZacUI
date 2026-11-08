@@ -333,6 +333,8 @@ local function FitPanelChrome(frame, lineY)
         close:SetSize(fit, fit)
         if close._zui_x1 then close._zui_x1:SetSize(X_ARM, 2) end
         if close._zui_x2 then close._zui_x2:SetSize(X_ARM, 2) end
+        -- (the close icon: as wide as the X_ARM bars, its glyph 12/32 of it)
+        if close._zui_xIcon then close._zui_xIcon:SetSize(21, 21) end
         close:ClearAllPoints()
         -- RIGHT edge 6px inside, centre of the button on the centre of
         -- the band (the band spans 0 .. lineY, so its middle is lineY/2)
@@ -504,6 +506,14 @@ local function SkinPanel(frame, opts)
     if not frame or ZUI.skinned[frame] then return end
     ZUI.skinned[frame] = true
     opts = opts or {}
+    -- Classic: the Blizzard window keeps its own art. Only the panel
+    -- register is kept, so /zacui inset and the covers' GetPanelInset
+    -- still know the frame.
+    if ns.Look.Pick(opts.look).windowChrome == "stock" then
+        local nm = frame.GetName and frame:GetName()
+        if nm then ZUI.panels[nm] = frame end
+        return
+    end
 
     StripFrameChrome(frame)
     if opts.keepArt then
@@ -619,7 +629,7 @@ local function SkinPanel(frame, opts)
         local line = frame:CreateTexture(nil, "OVERLAY", nil, 6)
         line._zui_own = true
         line:SetColorTexture(a.r, a.g, a.b, 0.6)
-        line:SetHeight(1)
+        if ns.Pixel then ns.Pixel.Edge(line, "TOP", frame) else line:SetHeight(1) end
         frame._zui_line = line
     else
         -- AccentTitle also golds the title text; its placement is

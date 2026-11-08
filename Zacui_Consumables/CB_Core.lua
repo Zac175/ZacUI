@@ -448,7 +448,8 @@ end
 -- the global cooldown, eating, casting
 function W.GCD()
     if not GetSpellCooldown then return 0, 0 end
-    local s, d = GetSpellCooldown(61304)
+    local s, d = GetSpellCooldown(ns.GCDSpell and ns.GCDSpell() or 61304)
+    if ns.Hidden(s, d) then return 0, 0 end   -- (hidden on WoW Forever)
     if s and d and s > 0 and d > 0 then
         local r = s + d - GetTime()
         if r > 0 then return r, d end

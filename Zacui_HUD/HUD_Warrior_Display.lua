@@ -8,6 +8,10 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+
+-- a value WoW Forever hands back hidden (a secret value: no maths on it)
+local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -358,7 +362,7 @@ local function UpdateSpellIcon(icon, def)
         if def.noGCD and not cd.real then
             icon:ClearSwipe()
         else
-            icon:SetSwipe(cd.start, cd.duration)
+            icon:SetSwipe(cd.start, cd.duration, cd.durObj)
         end
     end
 
@@ -887,6 +891,7 @@ local function BuildResources()
     -- Rage bar (229x4). Value updates on its own OnUpdate with lerp
     -- smoothing (the WA had smoothProgress on); only runs while shown.
     rageBar = D.MakeRageBar(rageAnchor)
+    D.rageBar = rageBar
     -- Per frame: one rage read; a frame where nothing moved (same rage,
     -- the bar caught up, no queued swing) stops there. The "is the queued
     -- swing starving Bloodthirst / Whirlwind" verdict is worked out about
@@ -903,6 +908,30 @@ local function BuildResources()
         end
         local power = UnitPower("player", 1) or 0
         local maxPower = UnitPowerMax("player", 1) or 100
+        -- WoW Forever can hand back the rage as a hidden value: no maths or
+        -- comparisons on it, so the bar and the number take it as it is
+        -- (both accept hidden values) and the queued-swing block, the
+        -- smoothing and the low-rage colour sit out until it reads again.
+        if Hidden(power) or Hidden(maxPower) then
+            if not self._secretPow then
+                self._secretPow = true
+                self.displayValue, self.lastPct, self._lastPow, self.settled = nil, nil, nil, false
+                if self.qSeg:IsShown() then self.qSeg:Hide() end
+                D.qStarving, self._qStarve, self._qc = false, nil, nil
+                self._sAcc, self._sPow, self._sCost = nil, nil, nil
+                local C = WCol()
+                self:SetBarColor(C.rage[1], C.rage[2], C.rage[3], C.rage[4])
+            end
+            local okMax = Hidden(maxPower) and 100 or maxPower
+            self.bar:SetMinMaxValues(0, okMax)
+            self.bar:SetValue(power)
+            self.text:SetText(power)
+            return
+        elseif self._secretPow then
+            self._secretPow = nil
+            self.bar:SetMinMaxValues(0, 1)
+            self.displayValue, self.lastPct, self.settled = nil, nil, false
+        end
         -- the queued swing (S.hsQueued / S.cleaveQueued, the core's scan)
         local cost = (self.qOn and (S.hsQueued and (S.hsCost or 15) or (S.cleaveQueued and (S.cleaveCost or 20)))) or nil
         if not cost and self.settled and power == self._lastPow and maxPower == self._lastMax
@@ -1003,6 +1032,9 @@ local function BuildResources()
         local remaining = dur > 0 and (sw.start + dur - now) or -1
         local active = dur > 0 and remaining > -GRACE
         if active ~= (barF:IsShown() and true or false) then barF:SetShown(active) end
+        -- (WoW Forever: a hidden swing time runs on the game's clock)
+        if active and HUD.TimedSwing(barF, sw.durObj) then return true end
+        HUD.UntimedSwing(barF)
         if active then
             local frac = remaining > 0 and remaining / dur or 0
             if frac > 1 then frac = 1 end
@@ -1096,7 +1128,7 @@ local function UpdateExecuteHelper()
         end
         execIcon:SetDesat(desat)
         if btCd and btCd.real then
-            execIcon:SetSwipe(btCd.start, btCd.duration)
+            execIcon:SetSwipe(btCd.start, btCd.duration, btCd.durObj)
         else
             execIcon:ClearSwipe()
         end
@@ -1161,7 +1193,7 @@ local function RefreshResources(cfg)
         -- placed again only when the cost, the bar or the max changes
         local bw = rageBar.bar:GetWidth() or 229
         local mx = UnitPowerMax("player", 1) or 100
-        if mx <= 0 then mx = 100 end
+        if Hidden(mx) or mx <= 0 then mx = 100 end
         local c1, c2
         if r.rageMarks ~= false then
             if S.spells.bloodthirst and S.spells.bloodthirst.known then c1 = S.btCost or 30 end
@@ -1567,7 +1599,7 @@ local function UpdateAuraIcon(icon, def)
         if not (sp and sp.known) then return false end
         icon:SetIconTexture(sp.icon)
         local cd = S.cds[def.spell]
-        if cd then icon:SetSwipe(cd.start, cd.duration) end
+        if cd then icon:SetSwipe(cd.start, cd.duration, cd.durObj) end
         local us = S.usable[def.spell] or {}
         icon:SetDesat((cd and cd.real) or us.noPower or us.usable == false or false)
         icon.buffRef = nil

@@ -120,8 +120,27 @@ B.ANCHOR_DEFAULTS = {
     glow = A("CENTER", 0, 0), badge = A("BOTTOMLEFT", 2, 2),
 }
 local NAME_WEAPON = A("TOPLEFT", 2, -12, "LEFT")
+-- THE MATCH PASS (2026-11-07, zui_tests/MATCH_BARS_1107.md; ZacUI look
+-- only): the reference UI's cooldown-manager icon numbers - every text a
+-- crisp outline with no shadow, the cooldown / global cooldown / eating /
+-- running-out numbers a third of the icon (12 at 36), the count 0.31 of
+-- it (11 at 36) at the corner 2 px up, the cooldown dead centre, a 0.7
+-- sweep with no edge and no flash. Nothing saved changes: a font or spot
+-- picked by hand is the player's; the other looks draw what they drew.
+local function HDOn()
+    local L = ns.Look
+    return (L and L.Is and L.Is("consumables", "zacui")) and true or false
+end
+B.HDOn = HDOn
+B.HD_TEXT = {
+    count = { min = 8, k = 0.31 }, cooldown = { min = 9, k = 1 / 3 }, gcd = { min = 9, k = 1 / 3 },
+    duration = { min = 9, k = 1 / 3 }, expiry = { min = 9, k = 1 / 3 },
+}
+B.HD_ANCHORS = { count = A("BOTTOMRIGHT", 0, 2), cooldown = A("CENTER", 0, 0) }
+B.HD_SWIPE = 0.7
 function B.AnchorDefault(elem, data)
     if elem == "name" and data and (data.slot or data.bagWeapon or data.unified) then return NAME_WEAPON end
+    if HDOn() and B.HD_ANCHORS[elem] then return B.HD_ANCHORS[elem] end
     return B.ANCHOR_DEFAULTS[elem]
 end
 B.ANCHOR_TARGETS = { { value = "button", text = "The button" }, { value = "count", text = "Stack count" },
@@ -137,6 +156,11 @@ local function Style(cfg) return CB.T(cfg, "style") or EMPTY end
 B.Style = Style
 function B.FontDefaults(elem, size)
     local t = B.TEXT[elem]
+    if HDOn() then
+        local h = B.HD_TEXT[elem] or t
+        local s = h.fixed or math_max(h.min, math_floor((size or 36) * h.k + 0.5))
+        return { size = s, outline = "outline", shadow = false }
+    end
     local s = t.fixed or math_max(t.min, math_floor((size or 36) * t.k))
     return { size = s, outline = "outline", shadow = true, shadowX = t.sh, shadowY = -t.sh }
 end
@@ -177,13 +201,17 @@ local function Strips(frame, layer, sub)
     for _, side in ipairs({ "top", "bottom", "left", "right" }) do
         local t = frame:CreateTexture(nil, layer or "OVERLAY", nil, sub)
         t:SetTexture(FLAT)
+        local p = side:upper()
         if side == "top" or side == "bottom" then
-            local p = side:upper()
-            t:SetPoint(p .. "LEFT") t:SetPoint(p .. "RIGHT") t:SetHeight(1)
+            t:SetPoint(p .. "LEFT") t:SetPoint(p .. "RIGHT")
         else
-            local p = side:upper()
-            t:SetPoint("TOP" .. p) t:SetPoint("BOTTOM" .. p) t:SetWidth(1)
+            t:SetPoint("TOP" .. p) t:SetPoint("BOTTOM" .. p)
         end
+        -- one physical pixel under ZacUI's look (Core_Pixel, HD polish);
+        -- one unit everywhere else, as before
+        if ZacUI.Pixel then ZacUI.Pixel.Edge(t, p, frame)
+        elseif side == "top" or side == "bottom" then t:SetHeight(1)
+        else t:SetWidth(1) end
         s[side] = t
     end
     return s
@@ -197,8 +225,65 @@ local function Cooldown(button, level)
     if c.SetDrawSwipe then c:SetDrawSwipe(true) end
     if c.SetHideCountdownNumbers then c:SetHideCountdownNumbers(true) end
     c:SetFrameLevel(button:GetFrameLevel() + level)
+    -- the ZacUI look's sweep (match pass): 0.7 black, no flash at the end
+    if HDOn() then
+        if c.SetSwipeColor then c:SetSwipeColor(0, 0, 0, B.HD_SWIPE) end
+        if c.SetDrawBling then c:SetDrawBling(false) end
+    end
     c:Hide()
     return c
+end
+
+-- THE GAME LOOKS' RING. Look.For("consumables") (the "bars" part): ZacUI's
+-- look draws nothing here. Classic WoW UI: UI-Quickslot2 at 66/36 of the
+-- button, centred 1/36 down, under the edge strips (which keep the states'
+-- colours), with the template's pushed and highlight art. Blizzard style /
+-- WoW Forever: the client's UI-HUD-ActionBar-IconFrame atlas 2 px round the
+-- button where C_Texture knows it, else the Classic ring. Sized from the
+-- button on every size change (a hook on the button's own resize, never
+-- per frame). Build time only.
+local MODERN_RING = "UI-HUD-ActionBar-IconFrame"
+local function AtlasOK(n)
+    local CT = _G.C_Texture
+    return n and CT and CT.GetAtlasInfo and CT.GetAtlasInfo(n) and true or false
+end
+function B.GameRing(button)
+    local L = ZacUI.Look
+    local lk = L and L.For and L.For("consumables")
+    if not (lk and lk.id ~= "zacui") then return end
+    local ef = button.edgeFrame or button
+    local ring = ef:CreateTexture(nil, "OVERLAY", nil, 0)
+    ring._zui_own = true
+    button.gameRing = ring
+    local q = (lk.iconRing) or (L.Get and L.Get("classic") and L.Get("classic").iconRing)
+    local modern = not lk.iconRing and AtlasOK(MODERN_RING)
+    local function Fit()
+        ring:ClearAllPoints()
+        if modern then
+            ring:SetPoint("TOPLEFT", button, "TOPLEFT", -2, 2)
+            ring:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", 2, -2)
+        elseif q then
+            local w = button:GetWidth()
+            if type(w) ~= "number" or w <= 0 then w = 36 end
+            ring:SetSize(w * q.scale, w * q.scale)
+            ring:SetPoint("CENTER", button, "CENTER", 0, w * q.dy)
+        end
+    end
+    if modern then ring:SetAtlas(MODERN_RING, false)
+    elseif q then ring:SetTexture(q.normal) end
+    Fit()
+    if button.HookScript then button:HookScript("OnSizeChanged", Fit) end
+    button.gameRingFit = Fit
+    -- the template's highlight and pushed art (Classic files: every client
+    -- ships them)
+    if q and button.GetHighlightTexture then
+        local hl = button:GetHighlightTexture()
+        if hl and hl.SetTexture then hl:SetTexture(q.highlight) hl:SetVertexColor(1, 1, 1, 1) end
+    end
+    if q and button.GetPushedTexture then
+        local pu = button:GetPushedTexture()
+        if pu and pu.SetTexture then pu:SetTexture(q.pushed) pu:SetVertexColor(1, 1, 1, 1) end
+    end
 end
 
 -- every part on a button (a secure live one or a plain sample); preview
@@ -208,18 +293,20 @@ function B.Dress(button, preview)
     button.bg:SetAllPoints()
     button.bg:SetTexture(FLAT)
     button.bg:SetVertexColor(0, 0, 0, 1)
+    -- the icon's inset: one physical pixel under ZacUI's look (HD polish)
+    local px = ZacUI.Pixel and ZacUI.Pixel.One(button) or 1
     local icon = button:CreateTexture(nil, "BORDER")
-    icon:SetPoint("TOPLEFT", 1, -1)
-    icon:SetPoint("BOTTOMRIGHT", -1, 1)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    icon:SetPoint("TOPLEFT", px, -px)
+    icon:SetPoint("BOTTOMRIGHT", -px, px)
+    ZacUI.Look.CropIcon(icon)
     button.icon = icon
     local hl = button:CreateTexture(nil, "HIGHLIGHT")
-    hl:SetPoint("TOPLEFT", 1, -1) hl:SetPoint("BOTTOMRIGHT", -1, 1)
+    hl:SetPoint("TOPLEFT", px, -px) hl:SetPoint("BOTTOMRIGHT", -px, px)
     hl:SetTexture(FLAT) hl:SetVertexColor(1, 1, 1, 0.12)
     if hl.SetBlendMode then hl:SetBlendMode("ADD") end
     if button.SetHighlightTexture then button:SetHighlightTexture(hl) end
     local pushed = button:CreateTexture(nil, "ARTWORK")
-    pushed:SetPoint("TOPLEFT", 1, -1) pushed:SetPoint("BOTTOMRIGHT", -1, 1)
+    pushed:SetPoint("TOPLEFT", px, -px) pushed:SetPoint("BOTTOMRIGHT", -px, px)
     pushed:SetTexture(FLAT) pushed:SetVertexColor(0, 0, 0, 0.5)
     if button.SetPushedTexture then button:SetPushedTexture(pushed) end
     -- the edge, on a frame of its own above the swirls
@@ -228,10 +315,16 @@ function B.Dress(button, preview)
     ef:SetFrameLevel(button:GetFrameLevel() + 2)
     button.edgeFrame = ef
     button.edge = Strips(ef, "OVERLAY", 1)
+    -- the game looks (2026-11-08): the button wears the action button's
+    -- own ring - the vanilla Quickslot ring under Classic WoW UI, the
+    -- client's modern ring under Blizzard style / WoW Forever where it has
+    -- it - as the look's action bars do (Core_Look's iconRing)
+    B.GameRing(button)
     -- the global cooldown (with its edge), the item's cooldown, the cast
     -- (reversed, on top): three swirls that can run at once
     button.gcdFrame = Cooldown(button, 2)
-    if button.gcdFrame.SetDrawEdge then button.gcdFrame:SetDrawEdge(true) end
+    -- (the ZacUI look's global cooldown: the same sweep, no edge - match pass)
+    if button.gcdFrame.SetDrawEdge then button.gcdFrame:SetDrawEdge(not HDOn()) end
     button.cooldownFrame = Cooldown(button, 2)
     button.castFrame = Cooldown(button, 3)
     if button.castFrame.SetReverse then button.castFrame:SetReverse(true) end
@@ -254,8 +347,8 @@ function B.Dress(button, preview)
     badge.bg = badge:CreateTexture(nil, "OVERLAY")
     badge.bg:SetAllPoints() badge.bg:SetTexture(FLAT) badge.bg:SetVertexColor(0, 0, 0, 0.8)
     badge.icon = badge:CreateTexture(nil, "OVERLAY", nil, 1)
-    badge.icon:SetPoint("TOPLEFT", 1, -1) badge.icon:SetPoint("BOTTOMRIGHT", -1, 1)
-    badge.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    badge.icon:SetPoint("TOPLEFT", px, -px) badge.icon:SetPoint("BOTTOMRIGHT", -px, px)
+    ZacUI.Look.CropIcon(badge.icon)
     badge:Hide()
     button.badge = badge
     if preview and ns.TagElement then ns.TagElement(badge.icon, "consbars.part.badge") end

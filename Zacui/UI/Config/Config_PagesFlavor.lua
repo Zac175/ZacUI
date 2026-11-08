@@ -1,5 +1,5 @@
 -- Config_PagesFlavor - General > Game versions: what ZacUI runs on
--- Classic Era, TBC and Forever (the feature table in Core_Flavor, as a
+-- Classic Era, TBC, Forever and Retail (the feature table in Core_Flavor, as a
 -- grid: on / off / changed, the reason on hover, this client marked),
 -- and "Test as", which runs ZacUI as another game on this client after a
 -- /reload, so Zac can play on Era and see ZacUI behave as it would on
@@ -20,17 +20,24 @@ local CHOICES = {
     { text = "Classic Era", value = "era" },
     { text = "TBC", value = "tbc" },
     { text = "Forever", value = "forever" },
+    { text = "Retail", value = "retail" },
 }
 local function ChoiceText(v)
     for _, c in ipairs(CHOICES) do if c.value == v then return c.text end end
     return CHOICES[1].text
 end
 
--- the grid's words and colours, per state
+-- the grid's words and colours, per state; an "off" cell names its kind
+-- (not needed / not there / can't, Core_Flavor)
 local STATE = {
     on      = { text = "on",      key = "green" },
     off     = { text = "off",     key = "red" },
     changed = { text = "changed", key = "orange" },
+}
+local KIND_BODY = {
+    not_needed = "Not needed there: ",
+    not_there  = "Not there: ",
+    cant       = "Can't run there: ",
 }
 
 -- part folder -> what the grid calls it
@@ -65,9 +72,23 @@ local function PreviewFlavor()
     return p
 end
 
-local CELL_W, CELL_GAP = 80, 4
+-- a column per game: as wide as the room leaves after the name column
+-- (four games since Retail joined, 2026-11-07), never wider than CELL_W.
+-- A narrow window (or a big font) that cannot seat full cells beside a
+-- name column stacks instead: the name on its own line, the cells on the
+-- line under it, each a share of the whole width. A word that does not
+-- fit a cell wraps and the row grows with it.
+local CELL_W, CELL_GAP, NAME_MIN = 80, 4, 150
 
-local function ColumnHead(parent, flavor)
+-- cell width, name width, stacked?
+local function GridPlan(room)
+    local n = #ns.FLAVORS
+    local w = math.floor((room - NAME_MIN) / n) - CELL_GAP
+    if w >= CELL_W then return CELL_W, room - n * (CELL_W + CELL_GAP), false end
+    return math.floor(room / n) - CELL_GAP, room, true
+end
+
+local function ColumnHead(parent, flavor, cellW)
     local real, cur = ns.RealFlavor(), ns.Flavor()
     local label = ns.FlavorName(flavor)
     local key = "gray"
@@ -76,21 +97,21 @@ local function ColumnHead(parent, flavor)
     elseif flavor == real then
         label, key = label .. "\n(this client)", "gold"
     end
-    local fs = UI.Font(parent, UI.F.SMALL, { cat = "text", key = key, justify = "CENTER" })
-    fs:SetWidth(CELL_W)
+    local fs = UI.Font(parent, UI.F.SMALL, { cat = "text", key = key, justify = "CENTER", width = cellW })
     fs:SetText(label)
     return fs
 end
 
-local function Cell(parent, f, flavor)
-    local st, why = ns.FeatureState(f.id, flavor)
+local function Cell(parent, f, flavor, cellW)
+    local st, why, kind = ns.FeatureState(f.id, flavor)
     local look = STATE[st] or STATE.on
     local b = CreateFrame("Button", nil, parent)
-    b:SetSize(CELL_W, 16)
-    local fs = UI.Font(b, UI.F.SMALL, { cat = "text", key = look.key, justify = "CENTER" })
-    fs:SetPoint("CENTER", 0, 0)
-    fs:SetText(look.text)
-    b._zText, b._zState = fs, st
+    b:SetSize(cellW, 16)
+    local fs = UI.Font(b, UI.F.SMALL, { cat = "text", key = look.key, justify = "CENTER", width = cellW - 2 })
+    fs:SetPoint("TOP", b, "TOP", 0, -1)
+    fs:SetText(st == "off" and kind and ns.FLAVOR_KIND_NAMES[kind] or look.text)
+    b:SetHeight(math.max(16, math.ceil(fs:GetStringHeight() or 12) + 2))
+    b._zText, b._zState, b._zKind = fs, st, kind
     if flavor == ns.Flavor() then
         UI.Fill(b, "ui", "accent", 0.10)
         b._zPaint = function(self) UI.PaintBox(self) fs:_zPaint() end
@@ -98,7 +119,8 @@ local function Cell(parent, f, flavor)
     end
     local body
     if st == "off" then
-        body = "Off: " .. why .. "."
+        body = (KIND_BODY[kind] or "Off: ") .. why .. ". It does not load on this game: no frames, "
+            .. "settings or search hits; your settings for it are kept."
     elseif st == "changed" then
         body = "Runs, changed: " .. why .. "."
     else
@@ -110,7 +132,7 @@ end
 
 RegisterPage("Flavors", function(L)
     L:Header("Game versions",
-        "What ZacUI runs on Classic Era, TBC and Forever, and a way to test another one on this client.")
+        "What ZacUI runs on Classic Era, TBC, Forever and Retail, and a way to test another one on this client.")
 
     -- the note, as it reads on screen while testing
     L:Preview({
@@ -146,7 +168,7 @@ RegisterPage("Flavors", function(L)
     UI.Tooltip(pick.control or pick, "Run ZacUI as",
         "ZacUI switches features off exactly as it would on that game, after a /reload. "
         .. "The game itself does not change: this client keeps every API it has. "
-        .. "While it is on, a note on screen says so. The same as /zacui flavor era, tbc, forever or auto.")
+        .. "While it is on, a note on screen says so. The same as /zacui flavor era, tbc, forever, retail or auto.")
     L:Add(pick, 6)
     pick._zFlavorPicker = true
 
@@ -162,8 +184,8 @@ RegisterPage("Flavors", function(L)
     L:Row(status, 18)
     local reload = UI.Button(L.current, "Reload now", { width = 110,
         tooltip = "Reloads the interface so the choice takes effect.",
-        onClick = function() ReloadUI() end })
-    if pending == cur and reload.SetDisabled then reload:SetDisabled(true) end
+        onClick = function() ns.RequestReload() end })
+    if pending == cur and reload.SetDisabled then reload:SetDisabled(true, "Nothing to reload: this is the game version ZacUI runs as now.") end
     L:Row(reload, (UI.M.BUTTON_H or 20) + 6)
     L:EndCard()
 
@@ -176,19 +198,21 @@ RegisterPage("Flavors", function(L)
     L:Row(only, 22)
 
     local room = L:Room()
-    local nameW = math.max(120, room - 3 * (CELL_W + CELL_GAP))
+    local cellW, nameW, stacked = GridPlan(room)
+    local cellX0 = stacked and 0 or nameW
 
     -- the column heads: the client this is, and the one being tested
     local head = UI.Holder(L.current)
-    local x, headH = nameW, 14
-    for _, fl in ipairs(ns.FLAVORS) do
-        local fs = ColumnHead(head, fl)
-        fs:SetPoint("TOPLEFT", head, "TOPLEFT", x + CELL_GAP, 0)
-        headH = math.max(headH, math.ceil(fs:GetStringHeight() or 14))
-        x = x + CELL_W + CELL_GAP
-    end
     local hName = UI.Font(head, UI.F.SMALL, { cat = "text", key = "gray", text = "Part / feature" })
     hName:SetPoint("TOPLEFT", head, "TOPLEFT", 0, 0)
+    local headTop = stacked and -(math.ceil(hName:GetStringHeight() or 12) + 2) or 0
+    local x, headH = cellX0, 14
+    for _, fl in ipairs(ns.FLAVORS) do
+        local fs = ColumnHead(head, fl, cellW)
+        fs:SetPoint("TOPLEFT", head, "TOPLEFT", x + CELL_GAP, headTop)
+        headH = math.max(headH, math.ceil(fs:GetStringHeight() or 14) - headTop)
+        x = x + cellW + CELL_GAP
+    end
     head:SetSize(room, headH)
     L:Row(head, headH + 4)
 
@@ -205,18 +229,26 @@ RegisterPage("Flavors", function(L)
             local name = UI.Font(row, UI.F.SMALL, { cat = "text", key = "normal", width = nameW - 10, justify = "LEFT" })
             name:SetText(f.name)
             name:SetPoint("TOPLEFT", row, "TOPLEFT", 10, -1)
-            local h = math.max(16, math.ceil(name:GetStringHeight() or 12) + 2)
-            row:SetSize(room, h)
-            local cx = nameW
+            local nameH = math.ceil(name:GetStringHeight() or 12) + 2
+            local cellTop = stacked and -nameH or 0
+            local h, cx = stacked and nameH or math.max(16, nameH), cellX0
             for _, fl in ipairs(ns.FLAVORS) do
-                local c = Cell(row, f, fl)
-                c:SetPoint("TOPLEFT", row, "TOPLEFT", cx + CELL_GAP, 0)
-                cx = cx + CELL_W + CELL_GAP
+                local c = Cell(row, f, fl, cellW)
+                c:SetPoint("TOPLEFT", row, "TOPLEFT", cx + CELL_GAP, cellTop)
+                h = math.max(h, (c:GetHeight() or 16) - cellTop)
+                cx = cx + cellW + CELL_GAP
             end
+            row:SetSize(room, h)
             L:Row(row, h + 3)
         end
     end
     L:Gap(4)
-    L:Desc("Hover a cell for the reason. A part that is off on a game registers nothing there, and its page says why.")
+    L:Desc("Hover a cell for the reason. Not needed: that game does not have the problem. Not there: the "
+        .. "content is not on that game. Can't: the game keeps what it needs from addons, or ZacUI cannot do it "
+        .. "there yet. Whatever the kind, it does not load there and has no page or settings; this page and "
+        .. "/zacui flavor are the only places it shows. Your settings for it are kept.")
     L:EndCard()
+
+    -- the Developer card (Core_DevSecrets), only while /zui dev tools on
+    if ns.DevCard then ns.DevCard(L) end
 end)

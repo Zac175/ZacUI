@@ -218,7 +218,7 @@ local function SkinCastBar(bar, opts)
     -- when an addon or a later build shows it, crop it like every icon.
     local icon = bar.Icon or (name and _G[name .. "Icon"])
     if icon and icon.SetTexCoord then
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ns.Look.CropIcon(icon)
         SharpenIcon(icon)
     end
 

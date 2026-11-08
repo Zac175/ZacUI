@@ -1,4 +1,6 @@
-if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE then return end
+-- (ZacUI) also off on WoW Forever: built on the modern client, it has no
+-- talents API, combat log or classic heal data this library needs
+if WOW_PROJECT_ID == WOW_PROJECT_MAINLINE or _G.ZACUI_MODERN then return end
 
 local major = "LibHealComm-4.0"
 local minor = 115
@@ -34,8 +36,9 @@ local type = type
 local unpack = unpack
 local wipe = wipe
 local GetBuildInfo = GetBuildInfo
-local HasActiveSeason = C_Seasons.HasActiveSeason
-local GetActiveSeason = C_Seasons.GetActiveSeason
+-- (ZacUI: C_Seasons is missing on WoW Forever - no seasons there)
+local HasActiveSeason = (C_Seasons and C_Seasons.HasActiveSeason) or function() return false end
+local GetActiveSeason = (C_Seasons and C_Seasons.GetActiveSeason) or function() return nil end
 
 local Ambiguate = Ambiguate
 local CastingInfo = CastingInfo
@@ -3554,7 +3557,7 @@ function HealComm:OnInitialize()
 	self.eventFrame:RegisterEvent("UNIT_SPELLCAST_DELAYED")
 	self.eventFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_UPDATE")
 	self.eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-	if not (_G.ZACUI_IS_FOREVER or (_G.ZacUI and _G.ZacUI.NoCombatLog and _G.ZacUI.NoCombatLog())) then self.eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED") end   -- (ZacUI: no combat log on WoW Forever, or under its game-version override's Forever)
+	if not (_G.ZACUI_MODERN or (_G.ZacUI and _G.ZacUI.NoCombatLog and _G.ZacUI.NoCombatLog())) then self.eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED") end   -- (ZacUI: no combat log on WoW Forever or Retail, or under its game-version override's Forever)
 	self.eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
 	self.eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 	self.eventFrame:RegisterEvent("UPDATE_MOUSEOVER_UNIT")

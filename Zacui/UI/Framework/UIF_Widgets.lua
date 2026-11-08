@@ -14,6 +14,7 @@ local SkinButton = ns.SkinButton
 local StripTextures = ns.StripTextures
 local TEX_THUMB = ns.TEX_THUMB
 local ZUI = ns.ZUI
+local Look = ns.Look
 
 -- Recursively nil every texture REGION under a frame (bounded depth).
 -- Callers use it BEFORE creating their own textures, on decor trees where
@@ -36,7 +37,7 @@ local function CropIconsUnder(root, depth)
     for _, child in ipairs({ root:GetChildren() }) do
         local icon = child.Icon or child.icon
         if icon and icon.SetTexCoord then
-            icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+            ns.Look.CropIcon(icon, nil, nil, { border = false })
         end
         SharpenIcon(icon)
         -- Crop, NEVER kill: classic macro buttons render the icon itself
@@ -45,7 +46,7 @@ local function CropIconsUnder(root, depth)
         if (icon or child.GetNormalTexture) and child.GetNormalTexture then
             local nt = child:GetNormalTexture()
             if nt and nt.GetTexture and nt:GetTexture() and nt.SetTexCoord then
-                nt:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                ns.Look.CropIcon(nt, nil, nil, { border = false })
                 SharpenIcon(nt)
             end
         end
@@ -57,9 +58,11 @@ end
 -- bar.Track.Thumb is a textured BUTTON, bar.Back/bar.Forward are atlas
 -- arrow buttons, and there is no GetThumbTexture. The classic path did
 -- literally nothing on these - the "still broken bars/thumbs/buttons".
-local function SkinModernScrollBar(bar)
+local function SkinModernScrollBar(bar, look)
     if not bar or ZUI.skinned[bar] then return end
     ZUI.skinned[bar] = true
+    -- Classic: Blizzard's own track, thumb and arrows stay
+    if Look.Pick(look).scrollbar == "stock" then return end
 
     -- Kill ALL Blizzard art under the bar first (border strips, caps and
     -- arrow atlases hide in child frames key-guessing never reached).
@@ -111,13 +114,15 @@ end
 -- (thumb via GetThumbTexture, arrows found structurally) or modern keyed
 -- bars. Deliberately touches ONLY the bar - never the scrollframe's
 -- regions (the talent-tree lesson).
-local function SkinAnyScrollBar(bar)
+local function SkinAnyScrollBar(bar, look)
     if not bar or ZUI.skinned[bar] then return end
     if not bar.GetThumbTexture then
-        SkinModernScrollBar(bar)
+        SkinModernScrollBar(bar, look)
         return
     end
     ZUI.skinned[bar] = true
+    -- Classic: Blizzard's own track, thumb and arrows stay
+    if Look.Pick(look).scrollbar == "stock" then return end
     StripTextures(bar)
     local thumb = bar:GetThumbTexture()
     if thumb then

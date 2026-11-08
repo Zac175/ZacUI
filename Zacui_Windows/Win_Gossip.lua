@@ -752,6 +752,8 @@ local function PlaceRewards(entries)
         b:Show()
     end
     docY = docY + math.ceil(#entries / 2) * (REWARD_H + 4) + 6
+    -- the coin on the reward that sells for most (Win_QuestRewards), when on
+    if ns.QuestRewardMark and ns.QuestRewardMark.MarkOwn then pcall(ns.QuestRewardMark.MarkOwn, rewardPool) end
 end
 
 local function QuestItems(rtype, n, choosable)

@@ -125,7 +125,7 @@ local plates = {}         -- nameplate units on screen
 local function Scan(unit)
     local s = { HELPFUL = {}, HARMFUL = {} }
     if UnitExists(unit) and UnitAura then
-        s.guid = UnitGUID(unit)
+        s.guid = ns.SafeGUID(unit)
         for _, filter in ipairs({ "HELPFUL", "HARMFUL" }) do
             local list = s[filter]
             for i = 1, 40 do
@@ -342,7 +342,7 @@ local function UnitOK(ctx, unit)
         if not Pr().NameRealmCheck(tr.unitName, name, realm) then return false end
     end
     if (tr.unit == "nameplate" or tr.unit == "boss") and tr.useNpcId and tr.npcId and tr.npcId ~= "" then
-        local guid = UnitGUID(unit)
+        local guid = ns.SafeGUID(unit)
         local npc = guid and select(6, strsplit("-", guid))
         if Pr() then
             if not Pr().ListCheck(tr.npcId, npc) then return false end
@@ -370,6 +370,7 @@ local function Extras(ctx, st, unit)
     end
     if tr.fetchRaidMark and unit then
         local rt = GetRaidTargetIndex and GetRaidTargetIndex(unit)
+        if issecretvalue and issecretvalue(rt) then rt = nil end   -- (WoW Forever)
         st.raidMark = rt and ("{rt" .. rt .. "}") or nil
     end
 end
@@ -383,7 +384,7 @@ local function StateFrom(ctx, st, unit, aura, now)
     elseif (aura.stacks or 0) < oldStacks and st.active then st.stackLostTime = now end
     st.unit = unit
     st.unitName = unit and UnitName(unit) or nil
-    st.GUID = unit and UnitGUID(unit) or aura.GUID
+    st.GUID = unit and ns.SafeGUID(unit) or aura.GUID
     st.name, st.icon, st.stacks = aura.name, aura.icon, aura.stacks
     st.spellId, st.debuffClass, st.unitCaster = aura.spellId, aura.debuffClass, aura.unitCaster
     st.debuffClassIcon = CLASS_ICONS[aura.debuffClass or ""]

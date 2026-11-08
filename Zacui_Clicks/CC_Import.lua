@@ -72,15 +72,17 @@ function CC.ImportClique(overwrite)
 end
 
 local function DisableClique()
+    -- the reload FIRST, then the switch (WoW Forever honours a reload only when
+    -- it is asked for at the start of the click; UIF_Dialogs' ns.AskReload)
+    if ns.RequestReload then ns.RequestReload() else ReloadUI() end
     local f = (C_AddOns and C_AddOns.DisableAddOn) or DisableAddOn
     if f then pcall(f, "Clique") end
-    ReloadUI()
 end
 CC.DisableClique = DisableClique
 
 function CC.OfferCliqueHandoff(count)
     if not (UI and UI.Confirm) then return end
-    UI.Confirm({
+    return UI.Confirm({
         title = "Click casting",
         text = (count and count > 0 and ("Brought " .. count .. " character binding set(s) over from Clique.\n\n") or "")
             .. "ZacUI does click casting itself now. Turn Clique off and reload? Until then ZacUI's click "
@@ -100,8 +102,14 @@ boot:SetScript("OnEvent", function(self)
     if not c.importedClique then
         local n = CC.ImportClique(false)
         Print("click casting: brought " .. n .. " binding set(s) over from Clique.")
-        C_Timer.After(3, function() CC.OfferCliqueHandoff(n) end)
+        -- in its turn among the login popups (Core_Popups), never in combat
+        if ns.Popups then
+            ns.Popups.Want("clique", function() return CC.OfferCliqueHandoff(n) end, { order = 45, delay = 3 })
+        else
+            C_Timer.After(3, function() CC.OfferCliqueHandoff(n) end)
+        end
     else
-        Print("click casting: Clique is still on, so ZacUI's click casting stands down. ZacUI > Combat > Click casting can switch Clique off.")
+        local line = "click casting: Clique is still on, so ZacUI's click casting stands down. ZacUI > Combat > Click casting can switch Clique off."
+        if ns.Popups then ns.Popups.Say(line) else Print(line) end
     end
 end)

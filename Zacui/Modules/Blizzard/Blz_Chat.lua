@@ -64,6 +64,53 @@ local EDIT_H = 24
 local KEEP_WHISPERS = 5
 local COPY_LINES = 500
 
+-- THE MATCH PASS (2026-11-08, Zac: "his chat has some styling that i
+-- like"): under the ZacUI look the chat wears the reference chat's
+-- numbers (zui_tests/MATCH_CHAT_1108.md lists each with its source). The
+-- panel a dark blue-black at 65%, every edge and divider one physical
+-- pixel of white at 6%; the tab strip the panel carried on behind the
+-- tabs, each tab a 44% (selected 65%) tile of the panel colour with its
+-- name at 11 in white (65% unselected), the selected one underlined one
+-- pixel in the accent, a 6% hairline between tabs; the bar under the
+-- text the panel itself with the 6% divider over it; the edit box 23
+-- high; wrapped lines indented; the resize grip ZacUI's own glyph at 40%.
+-- A colour or font picked on the Chat page still wins over every one.
+-- Sizes and spots of the chat itself are never moved.
+local REF = {
+    bg = { 0.03, 0.045, 0.05 }, bgA = 0.65,
+    edge = { 1, 1, 1, 0.06 },
+    tabIdleA = 0.44, tabActiveA = 0.65, tabHoverA = 0.55,
+    tabText = { 1, 1, 1, 0.65 }, tabTextActive = { 1, 1, 1, 1 },
+    tabSize = 11, tabH = 24, tabPadX = 12, tabPadY = 6,
+    editH = 23,
+    gripSize = 18, gripX = 4, gripY = -3, gripA = 0.4, gripHoverA = 0.9,
+}
+-- Zac (2026-11-08): "i still like how its layed out mostly" - so the pass
+-- moves nothing: no size, spot or saved value changes; the polish is one
+-- switch (chat.refStyle = false turns it all off) and the reference's tab
+-- tiles (which change the strip's height) are a second, off by default
+-- (chat.tabTiles).
+-- the chat's part wears ZacUI's own look (the only one the skin runs under;
+-- the Chat page's preview can draw another look through Look.With)
+local function ZacLook()
+    local L = ns.Look
+    if not (L and L.For) then return true end
+    local l = L.For("chat")
+    return l == nil or l.id == "zacui"
+end
+-- ...and the polish is on
+local function Match()
+    if not ZacLook() then return false end
+    local c = type(ZacUIDB) == "table" and ZacUIDB.chat
+    return not (type(c) == "table" and c.refStyle == false)
+end
+-- the reference's tab tiles (strip height from the name, tiles the tab's
+-- width): opt-in, they change the strip's height
+local function Tiles()
+    local c = type(ZacUIDB) == "table" and ZacUIDB.chat
+    return Match() and type(c) == "table" and c.tabTiles == true
+end
+
 -- ============================================================
 -- SMALL THINGS
 -- ============================================================
@@ -482,6 +529,8 @@ local function DB()
     local d = ZacUIDB.chat
     if d.bar == nil then d.bar = true end
     if d.editBox ~= "bar" and d.editBox ~= "below" and d.editBox ~= "above" then d.editBox = "bar" end
+    -- (the reference's 65% and 1 px line are NOT defaults: Zac keeps his
+    -- chat as it is; both are one slider away on the Chat page)
     if type(d.opacity) ~= "number" then d.opacity = 0.75 end
     if d.fade == nil then d.fade = false end
     if d.arrows == nil then d.arrows = true end
@@ -588,20 +637,113 @@ local function StyleBlizzText(fs, spec, keepSize)
         shadow = (s[4] or 0) ~= 0 or (s[5] or 0) ~= 0, shadowX = s[4], shadowY = s[5] })
 end
 
+-- WHICH FONT A BLIZZARD STRING WEARS: the one picked on the Chat page, or
+-- under the ZacUI look (the match pass) ZacUI's face, outlined as the
+-- house outline says - the tab names at the reference's 11, messages at
+-- each window's own size, the edit box at its own. Outside the ZacUI look
+-- with nothing picked: nil, the game's own font as before.
+local MATCH_SPEC = {}
+function Chat.FontSpec(which, d)
+    d = d or DB()
+    local key = (which == "tab" and "tabFont") or (which == "edit" and "editFont") or "messageFont"
+    local own = d[key]
+    if not Empty(own) then return own end
+    if not Match() then return nil end
+    local s = MATCH_SPEC[which]
+    if not s then
+        s = {}
+        MATCH_SPEC[which] = s
+    end
+    s.outline = HouseOutline()
+    s.size = (which == "tab") and REF.tabSize or nil
+    return s
+end
+
+-- Wrapped lines start under the first line's words, not at the edge
+-- (the reference's indented wrap) - under the ZacUI look unless switched
+-- off (chat.indent = false); what the window had is put back otherwise.
+function Chat.ApplyIndent(cf, d)
+    if not (cf and cf.SetIndentedWordWrap) then return end
+    d = d or DB()
+    local want = Match() and d.indent ~= false
+    if cf._zStockIndent == nil and cf.GetIndentedWordWrap then
+        local ok, v = pcall(cf.GetIndentedWordWrap, cf)
+        cf._zStockIndent = (ok and v) and true or false
+    end
+    local now = want and true or (cf._zStockIndent or false)
+    if cf._zIndent ~= now then
+        cf._zIndent = now
+        pcall(cf.SetIndentedWordWrap, cf, now)
+    end
+end
+
+-- THE RESIZE GRIP: the window's own resize button (the game's, so sizing
+-- and its saving stay the game's) wearing ZacUI's corner glyph, white at
+-- 40%, 90% under the mouse, 18 across (the reference's). Only its art and
+-- size change; where the game puts it and when it shows stay the game's.
+-- Lock size (Chat_Panel) hides the button itself, so the two never meet.
+local GRIP_ART = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\resize"
+function Chat.StyleGrip(cf)
+    if not cf or not Match() then return end
+    local name = cf.GetName and cf:GetName()
+    local grip = cf.resizeButton or (name and _G[name .. "ResizeButton"])
+    if not grip or grip._zGrip or not grip.SetNormalTexture then return end
+    grip._zGrip = true
+    local function Art(setter, getter, a)
+        if not grip[setter] then return end
+        pcall(grip[setter], grip, GRIP_ART)
+        local t = grip[getter] and grip[getter](grip)
+        if t then
+            t._zui_own = true
+            if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
+            if t.SetVertexColor then t:SetVertexColor(1, 1, 1, a) end
+            if t.SetBlendMode then t:SetBlendMode("BLEND") end
+        end
+    end
+    Art("SetNormalTexture", "GetNormalTexture", REF.gripA)
+    Art("SetPushedTexture", "GetPushedTexture", REF.gripHoverA)
+    Art("SetHighlightTexture", "GetHighlightTexture", REF.gripHoverA - REF.gripA)
+    -- the size on the clients where the game leaves the button to the
+    -- addon side (Era / TBC); the modern clients keep their own
+    local modern = ns.ModernClient and ns.ModernClient()
+    if not modern and grip.SetSize and not InCombatLockdown() then
+        pcall(grip.SetSize, grip, REF.gripSize, REF.gripSize)
+    end
+end
+
 -- The dark panel behind a chat window: the palette window colour at the
 -- opacity setting, or the chosen colour; its edge the palette's or chosen.
+-- (the match pass: nothing picked = the reference's dark blue-black and a
+-- white 6% hairline, under the ZacUI look)
+local function PanelRGB(d)
+    if type(d.panelColor) == "table" then
+        local r, g, b = ns.ColorOf(d.panelColor)
+        return r, g, b
+    end
+    if Match() then return REF.bg[1], REF.bg[2], REF.bg[3] end
+    return nil
+end
+local function EdgeRGBA(d)
+    if type(d.panelBorderColor) == "table" then return ns.ColorOf(d.panelBorderColor) end
+    if Match() then return REF.edge[1], REF.edge[2], REF.edge[3], REF.edge[4] end
+    return nil
+end
 local function PaintPanel(bg, d)
     d = d or DB()
-    SkinBackdrop(bg, "windowBg", d.opacity)
-    if type(d.panelColor) == "table" and bg._zui_cbg then
-        local r, g, b = ns.ColorOf(d.panelColor)
+    -- (the chat part's look: Core_Look, part "chat")
+    SkinBackdrop(bg, "windowBg", d.opacity, "chat")
+    local r, g, b = PanelRGB(d)
+    if r and bg._zui_cbg then
         bg._zui_cbg:SetVertexColor(r, g, b, d.opacity)
     end
-    if type(d.panelBorderColor) == "table" then
-        TintBorder(bg, ns.ColorOf(d.panelBorderColor))
+    local er, eg, eb, ea = EdgeRGBA(d)
+    if er and not (bg._zui_borderTex and bg._zui_borderTex._zEdge) then
+        TintBorder(bg, er, eg, eb, ea)
     else
         TintBorder(bg)
     end
+    -- texture, border size / colour mode, inner line (Chat_Panel)
+    if Chat.PanelExtra then Chat.PanelExtra(bg, d) end
 end
 
 -- The bar's own look (fill and top line), on the real bar or a sample.
@@ -610,15 +752,27 @@ local function MakeBarLook(bar)
     local top = bar:CreateTexture(nil, "ARTWORK", nil, 5)
     top._zui_own = true
     top:SetTexture(ns.FLAT)
-    top:SetHeight(1)
+    -- (one physical pixel under ZacUI's look: Core_Pixel, HD polish)
+    if ns.Pixel then ns.Pixel.Edge(top, "TOP", bar) else top:SetHeight(1) end
     top:SetPoint("TOPLEFT")
     top:SetPoint("TOPRIGHT")
     bar._zTop = top
     bar._zPaint = function(self)
         local d = DB()
-        local r, g, b, a = ColorOr(d.barColor, "ui", "headerBg")
-        self._zFill:SetVertexColor(r, g, b, a)
-        self._zTop:SetVertexColor(ColorOr(d.barLineColor, "ui", "border"))
+        local match = Match()
+        -- (the match pass: the bar is the panel itself - no fill of its own -
+        -- under the reference's 6% divider)
+        if match and type(d.barColor) ~= "table" then
+            self._zFill:SetVertexColor(0, 0, 0, 0)
+        else
+            local r, g, b, a = ColorOr(d.barColor, "ui", "headerBg")
+            self._zFill:SetVertexColor(r, g, b, a)
+        end
+        if match and type(d.barLineColor) ~= "table" then
+            self._zTop:SetVertexColor(REF.edge[1], REF.edge[2], REF.edge[3], REF.edge[4])
+        else
+            self._zTop:SetVertexColor(ColorOr(d.barLineColor, "ui", "border"))
+        end
     end
     bar:_zPaint()
 end
@@ -631,16 +785,29 @@ local function MakeHeadLook(head)
     local rule = head:CreateTexture(nil, "ARTWORK", nil, 5)
     rule._zui_own = true
     rule:SetTexture(ns.FLAT)
-    rule:SetHeight(1)
+    if ns.Pixel then ns.Pixel.Edge(rule, "BOTTOM", head) else rule:SetHeight(1) end
     rule:SetPoint("BOTTOMLEFT", 1, 1)
     rule:SetPoint("BOTTOMRIGHT", -1, 1)
     head._zRule = rule
     head._zPaint = function(self)
         ns.UI.PaintBox(self)
         local d = DB()
-        if type(d.stripColor) == "table" then self._zFill:SetVertexColor(ns.ColorOf(d.stripColor)) end
+        local match = Match()
+        if type(d.stripColor) == "table" then
+            self._zFill:SetVertexColor(ns.ColorOf(d.stripColor))
+        elseif match then
+            -- (the match pass: the panel carried on behind the tabs)
+            local r, g, b = PanelRGB(d)
+            self._zFill:SetVertexColor(r, g, b, tonumber(d.opacity) or REF.bgA)
+        end
+        if match and self._zBorder then
+            local er, eg, eb, ea = EdgeRGBA(d)
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(er, eg, eb, ea) end
+        end
         if type(d.stripLineColor) == "table" then
             self._zRule:SetVertexColor(ns.ColorOf(d.stripLineColor))
+        elseif match then
+            self._zRule:SetVertexColor(REF.edge[1], REF.edge[2], REF.edge[3], REF.edge[4])
         else
             local a = GetColor("ui", "accent")
             self._zRule:SetVertexColor(a.r, a.g, a.b, 0.6)
@@ -663,7 +830,8 @@ local function MakeChip(tab, text)
     local line = tab:CreateTexture(nil, "ARTWORK")
     line._zui_own = true
     line:SetTexture(ns.FLAT)
-    line:SetHeight(2)
+    -- (whole physical pixels under the ZacUI look; PaintChipState sizes it)
+    if ns.Pixel then ns.Pixel.Edge(line, "BOTTOM", tab, 1) else line:SetHeight(1) end
     line:SetPoint("BOTTOMLEFT", fill, "BOTTOMLEFT", 0, 0)
     line:SetPoint("BOTTOMRIGHT", fill, "BOTTOMRIGHT", 0, 0)
     line:Hide()
@@ -686,22 +854,101 @@ local function MakeChip(tab, text)
     news:SetAllPoints()
     host:Hide()
 
-    return { fill = fill, line = line, pulse = pulse, host = host, news = news }
+    -- the hairline between two tabs on the strip (the match pass)
+    local sep = tab:CreateTexture(nil, "ARTWORK")
+    sep._zui_own = true
+    sep:SetTexture(ns.FLAT)
+    sep:SetPoint("TOPLEFT", fill, "TOPRIGHT", 0, 0)
+    sep:SetPoint("BOTTOMLEFT", fill, "BOTTOMRIGHT", 0, 0)
+    if ns.Pixel then ns.Pixel.Edge(sep, "LEFT", tab) else sep:SetWidth(1) end
+    sep:Hide()
+
+    return { fill = fill, line = line, pulse = pulse, host = host, news = news, text = text, tab = tab, sep = sep }
+end
+
+-- WHERE A CHIP SITS. Padding picked on the Chat page (Chat_Panel's
+-- ChipPads): round the label by that much, as before. Otherwise, under the
+-- ZacUI look (the match pass), a docked tab on the strip is a tile the
+-- strip's height (chip.band, measured with the strip) and its tab's width,
+-- as the reference's tabs are; anywhere else (a window on its own, the
+-- Chat page's sample) the reference's 12 either side of the name and 24
+-- high round its middle. Outside the ZacUI look: the old 7 / 4 round the
+-- name. Placed again only when the answer changes.
+local function PlaceChip(chip, d)
+    local fill, text = chip.fill, chip.text
+    if not (fill and text) then return end
+    local px, py
+    if Chat.ChipPads then px, py = Chat.ChipPads(d) end
+    local band = chip.band
+    local key, mode
+    if px or py then
+        px, py = px or (Tiles() and REF.tabPadX or TAB_PAD_X), py or (Tiles() and REF.tabPadY or TAB_PAD_Y)
+        mode = "pad"
+    elseif Tiles() and band and chip.tab then
+        mode = "band"
+    elseif Tiles() then
+        mode = "ref"
+    else
+        mode = "old"
+    end
+    if mode == "band" then
+        key = "band" .. band.up .. ":" .. band.down
+    else
+        key = mode .. tostring(px) .. ":" .. tostring(py)
+    end
+    if chip._zPlaced == key then return end
+    chip._zPlaced = key
+    fill:ClearAllPoints()
+    if mode == "pad" then
+        fill:SetPoint("TOPLEFT", text, "TOPLEFT", -px, py)
+        fill:SetPoint("BOTTOMRIGHT", text, "BOTTOMRIGHT", px, -py)
+    elseif mode == "band" then
+        fill:SetPoint("TOP", text, "TOP", 0, band.up)
+        fill:SetPoint("BOTTOM", text, "BOTTOM", 0, -band.down)
+        fill:SetPoint("LEFT", chip.tab, "LEFT", 0, 0)
+        fill:SetPoint("RIGHT", chip.tab, "RIGHT", 0, 0)
+    elseif mode == "ref" then
+        fill:SetPoint("LEFT", text, "LEFT", -REF.tabPadX, 0)
+        fill:SetPoint("RIGHT", text, "RIGHT", REF.tabPadX, 0)
+        fill:SetHeight(REF.tabH)
+    else
+        fill:SetPoint("TOPLEFT", text, "TOPLEFT", -TAB_PAD_X, TAB_PAD_Y)
+        fill:SetPoint("BOTTOMRIGHT", text, "BOTTOMRIGHT", TAB_PAD_X, -TAB_PAD_Y)
+    end
 end
 
 -- One chip in one state: selected (raised fill, line), hover (faint
 -- fill), news (line, pulsing - or the chosen animation).
 local function PaintChipState(chip, selected, hover, news, d)
     d = d or DB()
-    if selected or hover then
+    -- the label's colours (Chat_Panel), then where the chip sits
+    if Chat.ChipExtra then Chat.ChipExtra(chip, selected, hover, news, d) end
+    PlaceChip(chip, d)
+    if Match() and type(d.tabFillColor) ~= "table" then
+        -- (the match pass: every tab a tile of the panel's colour, 44%,
+        -- the one under the mouse 55%, the one you are on 65%)
+        local r, g, b = PanelRGB(d)
+        chip.fill:SetVertexColor(r, g, b, selected and REF.tabActiveA or hover and REF.tabHoverA or REF.tabIdleA)
+        chip.fill:Show()
+    elseif selected or hover then
         local r, g, b = ColorOr(d.tabFillColor, "button", "hover")
         chip.fill:SetVertexColor(r, g, b, selected and 1 or 0.55)
         chip.fill:Show()
     else
         chip.fill:Hide()
     end
+    if chip.sep then
+        if chip.band and Tiles() and chip._zPlaced and chip._zPlaced:sub(1, 4) == "band" then
+            local er, eg, eb, ea = EdgeRGBA(d)
+            chip.sep:SetVertexColor(er, eg, eb, ea)
+            chip.sep:Show()
+        else
+            chip.sep:Hide()
+        end
+    end
     local lh = math.max(1, math.min(6, tonumber(d.tabLine) or 2))
-    chip.line:SetHeight(lh)
+    -- (whole physical pixels under the ZacUI look: Core_Pixel)
+    if not (ns.Pixel and ns.Pixel.SetEdgeSize(chip.line, lh)) then chip.line:SetHeight(lh) end
     chip.host:SetHeight(lh)
     local spec = d.newsAnim
     local custom = type(spec) == "table" and spec.style and spec.style ~= "none" and ns.Motion
@@ -858,12 +1105,34 @@ local function MeasureHead()
     local top, base = text:GetTop(), cf:GetTop()
     -- not laid out yet: keep whatever was measured last
     if not (top and base) then return dock.headH or 0 end
+    local bottom = text.GetBottom and text:GetBottom() or nil
     local ts = (tab.GetEffectiveScale and tab:GetEffectiveScale()) or 1
     local cs = (cf.GetEffectiveScale and cf:GetEffectiveScale()) or 1
-    if cs and cs > 0 and ts then top = top * ts / cs end
+    if cs and cs > 0 and ts then
+        top = top * ts / cs
+        if bottom then bottom = bottom * ts / cs end
+    end
+    local floor = base + PAD - 1
+    -- THE MATCH PASS: a strip the label sits in the middle of (the
+    -- reference's tabs centre their names), its tabs tiles the strip's
+    -- height; chip.band says how far the tiles reach past the label
+    if Tiles() and bottom and bottom < top and not (Chat.ChipPads and Chat.ChipPads(d)) then
+        local mid = (top + bottom) / 2
+        local h = math.floor(2 * (mid - floor) + 0.5)
+        local up = math.floor((floor + h - top) * 100 + 0.5) / 100
+        local down = math.floor((bottom - floor) * 100 + 0.5) / 100
+        -- (an odd client layout - the name too low or too high for a
+        -- centred strip - keeps the old strip below)
+        if h >= 16 and h <= 48 and up >= 0 and down >= 0 then
+            local b = dock.band
+            if not b or b.up ~= up or b.down ~= down then dock.band = { up = up, down = down } end
+            return h
+        end
+    end
+    dock.band = nil
     -- from the strip's bottom edge (PAD - 1 above the text area) to two
     -- pixels over the top of a chip
-    local h = math.floor(top + TAB_PAD_Y + 2 - (base + PAD - 1) + 0.5)
+    local h = math.floor(top + TAB_PAD_Y + 2 - floor + 0.5)
     if h < 8 or h > 48 then return 0 end
     return h
 end
@@ -995,9 +1264,11 @@ PlaceEditBox = function(cf)
         eb._zAnchor = rel or eb._zAnchor
     end
     -- the edit box's font (and its "Say:" header's), Blizzard's until chosen
-    StyleBlizzText(eb, d.editFont)
+    -- (ZacUI's face, outlined, under the ZacUI look: the match pass)
+    local espec = Chat.FontSpec("edit", d)
+    StyleBlizzText(eb, espec)
     local header = eb.header or (eb.GetName and eb:GetName() and _G[eb:GetName() .. "Header"])
-    if header then StyleBlizzText(header, d.editFont) end
+    if header then StyleBlizzText(header, espec) end
     -- up and down recall what you typed without holding Alt
     if eb.SetAltArrowKeyMode then eb:SetAltArrowKeyMode(not d.arrows) end
     SyncEditBox(eb)
@@ -1006,12 +1277,18 @@ end
 
 -- The bar and the tab strip belong to the dock: up while any docked
 -- window is.
-local function SyncBar()
-    if not (dock.bar or dock.head) then return end
+local function DockUp()
     local up = false
     EachChatFrame(function(cf)
         if InDock(cf) and cf:IsShown() then up = true end
     end)
+    return up
+end
+local function SyncBar()
+    -- (the icon rail, Chat_Panel, rides with the dock too)
+    if Chat.RailSync then pcall(Chat.RailSync) end
+    if not (dock.bar or dock.head) then return end
+    local up = DockUp()
     if dock.bar then dock.bar:SetShown(up and DB().bar and true or false) end
     if dock.head then dock.head:SetShown(up and (dock.headH or 0) > 0) end
 end
@@ -1061,13 +1338,19 @@ local function PaintTab(cf)
 
     local selected = IsSelectedTab(cf)
     local news = (tab.alerting and not selected) and true or false
+    -- on the strip (the match pass): a docked tab while the strip is up
+    chip.band = (InDock(cf) and (dock.headH or 0) > 0) and dock.band or nil
+    -- a whisper window's tab keeps the game's whisper colour on its name
+    chip.isTemp = cf.isTemporary and true or nil
     PaintChipState(chip, selected, tab._zHover, news, d)
 
     -- how visible it is: held at full, left to Blizzard, or - the
     -- default - driven by the mouse (TABS ON MOUSEOVER, below)
     if d.tabsVisible == "always" then
-        tab._zWantAlpha = 1
-        if tab.GetAlpha and tab:GetAlpha() ~= 1 then tab:SetAlpha(1) end
+        -- (scaled by the whole chat's idle fade / visibility rule: Chat_Fade)
+        local full = Chat.fadeScale or 1
+        tab._zWantAlpha = full
+        if tab.GetAlpha and tab:GetAlpha() ~= full then tab:SetAlpha(full) end
     elseif d.tabsVisible == "blizzard" then
         ReleaseTab(tab)
     end
@@ -1111,8 +1394,9 @@ local function SkinTab(cf)
             end
         end)
     end
-    -- the label's font, Blizzard's until one is chosen
-    StyleBlizzText(TabText(tab), DB().tabFont)
+    -- the label's font, Blizzard's until one is chosen (ZacUI's at 11
+    -- under the ZacUI look: the match pass)
+    StyleBlizzText(TabText(tab), Chat.FontSpec("tab", DB()))
     PlaceTabText(TabText(tab), tab, DB())
     PaintTab(cf)
 end
@@ -1169,6 +1453,7 @@ local hover = { dock = { alpha = 0, away = 99 }, own = {} }
 local FADE_IN, FADE_OUT, LINGER = 0.12, 0.30, 0.6
 
 local function SetTabAlpha(tab, alpha)
+    alpha = alpha * (Chat.fadeScale or 1)
     tab._zWantAlpha = alpha
     if tab.GetAlpha and tab:GetAlpha() ~= alpha then tab:SetAlpha(alpha) end
 end
@@ -1208,7 +1493,7 @@ local function HoverApply()
     local shared = hover.dock.alpha
     -- raid mode: the raid frames have the chat box, tabs and all
     if Chat.raidHidden then shared = 0 end
-    if dock.head then dock.head:SetAlpha(shared) end
+    if dock.head then dock.head:SetAlpha(shared * (Chat.fadeScale or 1)) end
     for _, name in ipairs(CHAT_FRAMES or {}) do
         local cf = _G[name]
         local tab = cf and cf._zTab
@@ -1266,8 +1551,14 @@ local function ApplyTabVisibility()
     if mode == "hover" then
         HoverApply()
     elseif dock.head then
-        dock.head:SetAlpha(1)
+        dock.head:SetAlpha(Chat.fadeScale or 1)
     end
+end
+-- the tabs and their strip again, after Chat.fadeScale changed (Chat_Fade)
+function Chat.RepaintTabs()
+    if not dock.built then return end
+    PaintTabs()
+    ApplyTabVisibility()
 end
 
 -- ============================================================
@@ -1310,6 +1601,16 @@ end
 
 local BarMenu   -- forward: plates open it on a right-click
 
+-- The bar's numbers in the saved order (d.barOrder: item ids; nil = the
+-- list as it is, not copied). `list` is ITEMS or the Chat page's samples
+-- (each with ._it, its item); keyed by id.
+local function ItemKey(it) return it.id or (it._it and it._it.id) end
+function Chat.OrderedItems(list)
+    local order = DB().barOrder
+    if type(order) ~= "table" or not ns.OrderedList then return list end
+    return ns.OrderedList(list, order, ItemKey)
+end
+
 local function LayoutBar()
     local bar, content = dock.bar, dock.content
     if not bar then return end
@@ -1340,11 +1641,13 @@ local function LayoutBar()
             used = used + b._wide
         end
     end
-    -- then set them down from the right, in list order
+    -- then set them down from the right, in list order (the saved order,
+    -- d.barOrder - item ids, dragged in the Chat preview; nil = ITEMS)
     local rx = -2
     local leftmost
-    for i = #ITEMS, 1, -1 do
-        local b = dock.items[ITEMS[i].id]
+    local list = Chat.OrderedItems(ITEMS)
+    for i = #list, 1, -1 do
+        local b = dock.items[list[i].id]
         if b._fits then
             b:ClearAllPoints()
             b:SetPoint("RIGHT", content, "RIGHT", rx, 0)
@@ -1605,37 +1908,91 @@ local function BuildChips()
     dock.chips[#dock.chips + 1] = l
 end
 
+-- one number's plate (the items at load, and a block another file docks
+-- later: Chat.AddBarItem)
+local function BuildItem(it)
+    local b = Plate(dock.content)
+    b:SetHeight(BarH() - 2)
+    b._now = ""
+    -- the text hangs from the right of its slot, so the unit stays
+    -- put and only the digits to its left change
+    b._label:ClearAllPoints()
+    b._label:SetPoint("RIGHT", b, "RIGHT", -6, 0)
+    b._wide = math.ceil(WidthOf(b._label, it.sample or "") + 12)
+    b._tip = it.tip
+    -- the friends and guild tooltips are the minimap's, which open
+    -- downwards unless told otherwise; down here that is off screen
+    b._zTipAnchor = "ANCHOR_TOP"
+    local rule = b:CreateTexture(nil, "ARTWORK")
+    rule._zui_own = true
+    rule:SetTexture(ns.FLAT)
+    if ns.Pixel then ns.Pixel.Edge(rule, "LEFT", b) else rule:SetWidth(1) end
+    rule:SetPoint("TOPLEFT", 0, -5)
+    rule:SetPoint("BOTTOMLEFT", 0, 5)
+    local c = GetColor("text", "gray")
+    rule:SetVertexColor(c.r, c.g, c.b, 0.35)
+    b._rule = rule
+    b:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then BarMenu() return end
+        if it.click then pcall(it.click, self, button) end
+    end)
+    b:Hide()
+    dock.items[it.id] = b
+    return b
+end
+
 local function BuildItems()
     dock.items = {}
+    for _, it in ipairs(ITEMS) do BuildItem(it) end
+end
+
+-- ANOTHER FILE'S BLOCK ON THE BAR (feature cluster 3: Chat_LDB docks
+-- LibDataBroker objects). The same shape as the items above ({ id,
+-- label, sample, keep, every, text, tip, click }); `front` puts it at the
+-- left of the numbers, else at the right. Off until its switch in
+-- d.items[id] is ticked, like every item. Returns the spec and its plate
+-- (the plate once the bar is built).
+local function RebuildKeep()
+    wipe(BY_KEEP)
+    for i, it in ipairs(ITEMS) do BY_KEEP[i] = it end
+    table.sort(BY_KEEP, function(a, b) return (a.keep or 99) < (b.keep or 99) end)
+end
+function Chat.AddBarItem(spec, front)
+    if type(spec) ~= "table" or not spec.id then return nil end
     for _, it in ipairs(ITEMS) do
-        local b = Plate(dock.content)
-        b:SetHeight(BarH() - 2)
-        b._now = ""
-        -- the text hangs from the right of its slot, so the unit stays
-        -- put and only the digits to its left change
-        b._label:ClearAllPoints()
-        b._label:SetPoint("RIGHT", b, "RIGHT", -6, 0)
-        b._wide = math.ceil(WidthOf(b._label, it.sample or "") + 12)
-        b._tip = it.tip
-        -- the friends and guild tooltips are the minimap's, which open
-        -- downwards unless told otherwise; down here that is off screen
-        b._zTipAnchor = "ANCHOR_TOP"
-        local rule = b:CreateTexture(nil, "ARTWORK")
-        rule._zui_own = true
-        rule:SetTexture(ns.FLAT)
-        rule:SetWidth(1)
-        rule:SetPoint("TOPLEFT", 0, -5)
-        rule:SetPoint("BOTTOMLEFT", 0, 5)
-        local c = GetColor("text", "gray")
-        rule:SetVertexColor(c.r, c.g, c.b, 0.35)
-        b._rule = rule
-        b:SetScript("OnClick", function(self, button)
-            if button == "RightButton" then BarMenu() return end
-            if it.click then pcall(it.click, self) end
-        end)
-        b:Hide()
-        dock.items[it.id] = b
+        if it.id == spec.id then return it, dock.items and dock.items[it.id] end
     end
+    if front then table.insert(ITEMS, 1, spec) else ITEMS[#ITEMS + 1] = spec end
+    RebuildKeep()
+    local b
+    if dock.content and dock.items then
+        b = BuildItem(spec)
+        StyleBarText(b._label, DB())
+        b._wide = math.ceil(WidthOf(b._label, spec.sample or "") + 12)
+        dock.dirty = true
+    end
+    return spec, b
+end
+
+function Chat.RemoveBarItem(id)
+    for i, it in ipairs(ITEMS) do
+        if it.id == id then
+            table.remove(ITEMS, i)
+            RebuildKeep()
+            local b = dock.items and dock.items[id]
+            if b then
+                b:Hide()
+                dock.items[id] = nil
+            end
+            dock.dirty = true
+            return true
+        end
+    end
+    return false
+end
+
+function Chat.BarItem(id)
+    return dock.items and dock.items[id]
 end
 
 -- The bar's clock. `step` is the time since it last ran.
@@ -1778,6 +2135,9 @@ local function BuildBar()
         elseif event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_BN_WHISPER" then
             local name = sender or "?"
             if event == "CHAT_MSG_WHISPER" then name = ns.ShortName(name) end
+            -- (the privacy cover, Chat_Privacy: the hover list shows the
+            -- mask instead of the words while it is on)
+            if ns.ChatPrivacy and ns.ChatPrivacy.Mask then text = ns.ChatPrivacy.Mask(text) end
             table.insert(whispers.log, 1, { name = name, text = text or "", at = time() })
             for i = #whispers.log, KEEP_WHISPERS + 1, -1 do whispers.log[i] = nil end
             whispers.unread = whispers.unread + 1
@@ -1976,7 +2336,9 @@ function Chat.Refresh()
     EachChatFrame(function(cf)
         if cf.SetFading then cf:SetFading(d.fade and true or false) end
         ApplyFadeTimes(cf, d)
-        StyleBlizzText(cf, d.messageFont, true)
+        StyleBlizzText(cf, Chat.FontSpec("messages", d), true)
+        Chat.ApplyIndent(cf, d)
+        Chat.StyleGrip(cf)
         SkinTab(cf)
         PlacePanel(cf)
         PlaceEditBox(cf)
@@ -1990,6 +2352,8 @@ function Chat.Refresh()
         if dock.content then dock.content:SetShown(not Typing()) end
     end
     if Chat.ApplyWidth then Chat.ApplyWidth() end
+    -- the icon rail beside the panel (Chat_Panel)
+    if Chat.RailRefresh then pcall(Chat.RailRefresh, d) end
 end
 
 local refreshQueued
@@ -2537,7 +2901,13 @@ function RM.OnMessage(_, event, msg, sender)
     end
     RM.unread = (RM.unread or 0) + 1
     RM.PaintUnreadSoon()
-    if RM.hidden and not DB().raidMsgsHidden then RM.AddToast(kind, who .. ": " .. msg) end
+    if RM.hidden and not DB().raidMsgsHidden then
+        -- (a whisper's words under the privacy cover: the mask, Chat_Privacy)
+        if (kind == "WHISPER" or kind == "BN_WHISPER") and ns.ChatPrivacy and ns.ChatPrivacy.Mask then
+            msg = ns.ChatPrivacy.Mask(msg)
+        end
+        RM.AddToast(kind, who .. ": " .. msg)
+    end
 end
 
 function RM.ToggleMsgs()
@@ -2714,6 +3084,19 @@ _G.ZacUIRaidChat = {
 
 Chat.DB = DB
 Chat.ITEMS = ITEMS
+-- the match pass's numbers and test, and what the icon rail (Chat_Panel)
+-- reads of the dock: the docked window in view, the panel it stands
+-- beside, the strip's state, whether the mouse is over the chat
+Chat.REF = REF
+Chat.Match = Match
+Chat.ZacLook = ZacLook
+Chat.Tiles = Tiles
+Chat.PanelRGB = PanelRGB
+Chat.EdgeRGBA = EdgeRGBA
+Chat.SelectedFrame = SelectedFrame
+Chat.Dock = function() return dock end
+Chat.DockUp = DockUp
+Chat.MouseOverChat = function() return MouseOverChat(SelectedFrame(), true) end
 -- The pieces the Chat page's preview is built from: the same panel, bar,
 -- strip, tab chip, button and text functions the real chat uses.
 Chat.Look = {
@@ -2871,6 +3254,8 @@ Modules.chat = function()
             Print("|cffff9900chat tab strip:|r could not be built (" .. tostring(errHead) .. "). The tabs themselves are unaffected.")
         end
         dock.built = true
+        -- other addons' LibDataBroker blocks the player ticked (Chat_LDB)
+        if ns.ChatLDB and ns.ChatLDB.Apply then pcall(ns.ChatLDB.Apply) end
         -- a window dragged out of, or into, the dock gains or loses the bar
         for _, fn in ipairs({ "FCF_DockFrame", "FCF_UnDockFrame" }) do
             if type(_G[fn]) == "function" then hooksecurefunc(fn, RefreshSoon) end

@@ -10,6 +10,10 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+
+-- a value WoW Forever hands back hidden (a secret value: no maths on it)
+local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -265,11 +269,12 @@ local GCD_MAX = 1.51
 local function UpdateSpellSnapshot()
     for key, sp in pairs(S.spells) do
         if sp.known and sp.name then
-            local start, duration = GetSpellCooldown_C(sp.name)
+            local start, duration, _, _, durObj = GetSpellCooldown_C(sp.name)
             start, duration = start or 0, duration or 0
             local cd = S.cds[key]
             if not cd then cd = {} S.cds[key] = cd end
             cd.start, cd.duration = start, duration
+            cd.durObj = durObj   -- (WoW Forever: a hidden cooldown's swipe)
             cd.real = duration > GCD_MAX
             local us = S.usable[key]
             if not us then us = {} S.usable[key] = us end
@@ -292,14 +297,19 @@ local function UpdateMisc()
     S.targetAttackable = (UnitExists("target") and UnitCanAttack("player", "target")
         and not UnitIsDeadOrGhost("target")) and true or false
     local mana, manaMax = UnitPower("player", 0), UnitPowerMax("player", 0)
-    S.manaPct = (manaMax and manaMax > 0) and (mana / manaMax) or 1
+    if Hidden(mana) or Hidden(manaMax) then
+        -- hidden (WoW Forever): keep the last known share
+        S.manaPct = S.manaPct or 1
+    else
+        S.manaPct = (manaMax and manaMax > 0) and (mana / manaMax) or 1
+    end
     -- Inventory slots 13/14 are Blizzard's fixed Trinket 1/2 slots.
     for slotIdx = 13, 14 do
         local t = S.trinkets[slotIdx]
         if not t then t = {} S.trinkets[slotIdx] = t end
         t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", slotIdx) or nil
         if GetInventoryItemCooldown then
-            local start, duration = GetInventoryItemCooldown("player", slotIdx)
+            local start, duration = HUD.PlainCD(GetInventoryItemCooldown("player", slotIdx))
             t.start, t.duration = start or 0, duration or 0
         end
     end
@@ -316,19 +326,23 @@ local fsrCastAt = -10
 
 local function OnManaEvent(event)
     local cur = UnitPower("player", 0) or 0
+    -- hidden (WoW Forever): the five-second-rule reading sits out
+    if Hidden(cur) then lastMana = nil return end
     if event == "UNIT_POWER_FREQUENT" then
-        if cur >= (UnitPowerMax("player", 0) or 0) then
+        local mx = UnitPowerMax("player", 0)
+        if Hidden(mx) then mx = nil end
+        if cur >= (mx or 0) then
             lastMana = cur
             return
         end
-        if cur > lastMana
+        if lastMana and cur > lastMana
             and GetTime() >= fsrCastAt + 5
             and not (UnitCastingInfo and UnitCastingInfo("player")) then
             S.mp5.start, S.mp5.duration = GetTime(), 2
         end
         lastMana = cur
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
-        if cur < lastMana then
+        if lastMana and cur < lastMana then
             S.mp5.start, S.mp5.duration = GetTime(), 5
             fsrCastAt = GetTime()
         end
@@ -348,10 +362,11 @@ local function OnCombatLogEvent(_, subevent, _, sourceGUID)
 end
 
 -- WoW Forever: the game's own swing event instead (ns.Swings)
-local function OnSwing(hand, now, dur)
+local function OnSwing(hand, now, dur, durObj)
     if hand ~= "mh" then return end
     S.swing.start = now
     S.swing.duration = dur or 0
+    S.swing.durObj = durObj   -- (WoW Forever: the hidden swing time on the game's clock)
 end
 
 -- Display: anchors. Each anchor sits centred on an UNSCALED holder; the
@@ -660,6 +675,9 @@ local function BuildBars(V)
             VS.swing.start = GetTime()
             remaining = dur
         end
+        -- (WoW Forever: a hidden swing time runs on the game's clock)
+        if not V.sample and HUD.TimedSwing(swingBar, VS.swing.durObj) then return end
+        HUD.UntimedSwing(swingBar)
         local frac = (remaining > 0 and dur > 0) and (remaining / dur) or 0
         swingBar.bar:SetValue(frac)
         if swingBar.UpdateSpark then swingBar:UpdateSpark(frac) end
@@ -707,7 +725,7 @@ local function UpdateMainIcon(V, icon, def)
         local us = VS.usable[def.spell] or {}
         local inRange = (not def.noRange) and VS.inRange[def.spell] or nil
         icon:SetIconTexture(sp.icon)
-        if cd then icon:SetSwipe(cd.start, cd.duration) end
+        if cd then icon:SetSwipe(cd.start, cd.duration, cd.durObj) end
         local desat = (cd and cd.real) or us.noPower or false
         local tint = nil
         if inRange == 0 then
@@ -816,6 +834,107 @@ local function RefreshAuraRow(V, cfg)
     HUD.LayoutRow(V.memo.aura, V.auraActive, V.AuraRow, size, size, a.spacing or 4)
 end
 
+-- Class HUD v2: the active seal as an icon by the mana bar (off until
+-- turned on: cfg.resources.sealIcon; the icon is made only then). Classic
+-- Era / TBC read the seal from your buffs by name; WoW Forever, which
+-- hides your buffs in a fight, asks for each seal by the rank you know
+-- (C_UnitAuras.GetPlayerAuraBySpellID) and keeps the last state when the
+-- game answers nothing there; its time runs on the game's clock.
+local SEAL_KEYS = { "sealCommand", "sealRight", "sealWisdom", "sealLight", "sealJustice", "sealCrusader" }
+local SEAL_SIZE = 24
+
+local function SealIcon(V, cfg)
+    local icon = V.sealIcon
+    local size = cfg.resources.sealIconSize or SEAL_SIZE
+    if not icon then
+        icon = W.CreateIcon(V.Mana, { width = size, height = size, zoom = W.ICON_ZOOM, keepAspect = true, inverse = true })
+        icon:SetFrameStrata(HUD_STRATA)
+        icon:SetPoint("RIGHT", V.manaBar, "LEFT", -4, 0)
+        icon:AddText("p", "CENTER", 11, { 1, 1, 1, 1 })
+        icon:Hide()
+        icon._size = size
+        V.sealIcon = icon
+    elseif icon._size ~= size then
+        icon._size = size
+        icon:SetSize(size, size)
+    end
+    return icon
+end
+
+local function ForeverSeal(VS)
+    local UA = C_UnitAuras
+    local get = UA and UA.GetPlayerAuraBySpellID
+    if not (get and ns.ModernClient and ns.ModernClient()) then return nil end
+    for _, key in ipairs(SEAL_KEYS) do
+        local name = VS.auraNames[key]
+        local id = name and GetSpellInfo and select(7, GetSpellInfo(name))
+        if type(id) == "number" and not Hidden(id) then
+            local ok, a = pcall(get, id)
+            if ok and type(a) == "table" then return a end
+        end
+    end
+    return nil
+end
+
+local function RefreshSeal(V, cfg)
+    local r = cfg.resources
+    if not (r.sealIcon and V.manaBar) then
+        if V.sealIcon then V.sealIcon:Hide() end
+        return
+    end
+    local icon = SealIcon(V, cfg)
+    local VS = V.S
+    local shown = false
+    if On(V, cfg) then
+        local b
+        for _, key in ipairs(SEAL_KEYS) do
+            local name = VS.auraNames[key]
+            b = name and VS.buffs[name:lower()]
+            if b then break end
+        end
+        if b then
+            V.sealHidden = nil
+            V.sealRef = b
+            icon:SetIconTexture(b.icon or 134400)
+            if (b.duration or 0) > 0 then icon:SetSwipe(b.expirationTime - b.duration, b.duration) else icon:ClearSwipe() end
+            shown = true
+        elseif not V.sample then
+            local a = ForeverSeal(VS)
+            if a then
+                V.sealHidden, V.sealRef = a, nil
+                icon:SetHiddenTexture(a.icon)
+                icon:SetHiddenSwipe("player", a)
+                shown = true
+            elseif V.sealHidden and VS.inCombat then
+                shown = true   -- (nothing answered in a fight: as it was)
+            else
+                V.sealHidden, V.sealRef = nil, nil
+            end
+        end
+        if not shown and V.preview then
+            V.sealRef = nil
+            icon:SetIconTexture(VS.auraIcons.sealRight or 134400)
+            icon:ClearSwipe()
+            shown = true
+        end
+    end
+    icon:SetShown(shown)
+end
+
+local function SealText(V)
+    local icon = V.sealIcon
+    if not (icon and icon:IsShown()) then return end
+    local b = V.sealRef
+    if b and (b.expirationTime or 0) > 0 then
+        icon:SetText("p", W.FormatTime(math.max(0, b.expirationTime - GetTime()), 0))
+    elseif V.sealHidden then
+        local left = ns.AuraTimeLeft and ns.AuraTimeLeft("player", V.sealHidden)
+        if left ~= nil then icon:SetHiddenText("p", "%.0f", left) else icon:SetText("p", "") end
+    else
+        icon:SetText("p", "")
+    end
+end
+
 local function RefreshResources(V, cfg)
     local VS = V.S
     local r = cfg.resources
@@ -856,6 +975,7 @@ local function RefreshResources(V, cfg)
         end
     end
     V.blessText:SetShown(blessShow)
+    RefreshSeal(V, cfg)
 end
 
 local auxShown = {}
@@ -962,6 +1082,7 @@ function PH.Display:HideAll()
     if V.mp5Bar then V.mp5Bar:Hide() end
     if V.rfText then V.rfText:Hide() end
     if V.blessText then V.blessText:Hide() end
+    if V.sealIcon then V.sealIcon:Hide() end
 end
 
 -- Rebuild sizes after settings changes (frames persist; only sizes/positions move).
@@ -1019,6 +1140,7 @@ local function TextTickView(V)
             icon:SetText("p", remaining > 0 and W.FormatTime(remaining, 0) or "")
         end
     end
+    SealText(V)
 end
 
 local function TextTick()
@@ -1209,6 +1331,7 @@ ev:RegisterEvent("PLAYER_LOGIN")
 -- Hot events live only while the HUD runs (see StartTicker/StopTicker).
 RegisterHotEvents = function()
     lastMana = UnitPower("player", 0) or 0
+    if Hidden(lastMana) then lastMana = nil end
     ns.CLEU.On("PaladinHUD", SWING_SUBS, OnCombatLogEvent)
     ns.Swings.On("PaladinHUD", OnSwing)
     ev:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
@@ -1232,6 +1355,7 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         end
         playerGUID = UnitGUID("player")
         lastMana = UnitPower("player", 0) or 0
+        if Hidden(lastMana) then lastMana = nil end
         S.inCombat = InCombatLockdown() or UnitAffectingCombat("player")
 
         ev:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1326,6 +1450,17 @@ local function Tab_General(L, cfg)
     Check(L, "MP5 tick bar (drink / five-second rule)", r.mp5Bar, function(v) r.mp5Bar = v Refresh() end)
     Check(L, "\"Righteous Fury\" missing text", r.rfText, function(v) r.rfText = v Refresh() end)
     Check(L, "\"Blessing\" missing text", r.blessingText, function(v) r.blessingText = v Refresh() end)
+    Check(L, "Active seal icon by the mana bar", r.sealIcon or false, function(v)
+        r.sealIcon = v or nil
+        Refresh()
+        HUD.RefreshPage()
+    end, nil, "Your seal and its time left, next to the mana bar.")
+    if r.sealIcon then
+        HUD.Slider(L, "Seal icon size", 14, 48, r.sealIconSize or SEAL_SIZE, function(v)
+            r.sealIconSize = (v ~= SEAL_SIZE) and v or nil
+            Refresh()
+        end, { width = 240, format = Px })
+    end
     L:EndCard()
 
     L:Card("Trinkets and racial")

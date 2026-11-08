@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Nameplates|r
 ## Notes: ZacUI nameplates, plate scripts, soft targeting and the crosshair. Replaces Plater.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -20,6 +20,11 @@ NP_Core.lua
 NP_FX.lua
 NP_Health.lua
 NP_Cast.lua
+# the Classic look's vanilla plate border (wraps the two layout passes above)
+NP_ClassicPlate.lua
+# Feature cluster 2 (2026-11-07): the interrupt-ready tint on the cast bars
+# (off by default; nothing made or ticking while off)
+NP_Interrupt.lua
 NP_Auras.lua
 NP_Extras.lua
 NP_Threat.lua
@@ -31,3 +36,6 @@ Crosshair_Core.lua
 NP_Crosshair.lua
 Config_PagesNameplates.lua
 Config_PagesNPScripts.lua
+# Drag to customise in the plates preview (ZacUI's UIF_PreviewDrag): the
+# sample plate's pieces. After the pages (it registers by preview key).
+NP_PreviewDrag.lua

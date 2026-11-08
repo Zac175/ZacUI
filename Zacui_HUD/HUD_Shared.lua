@@ -10,6 +10,12 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table; Retail's
+-- classes play by spec, with the game's own Cooldown Manager): the whole
+-- part stands down here, before it publishes ns.HUD. Every later file of
+-- the part needs ns.HUD and returns at once without it, so no frame,
+-- event, ticker or menu row is ever made there.
+if ns.PartOff and ns.PartOff("Zacui_HUD") then return end
 
 -- shared state from earlier ZacUI files
 local GetColor = ns.GetColor
@@ -46,8 +52,64 @@ HUD.GetContainerItemCooldown = GetContainerItemCooldown_C
 HUD.GetSpellCooldown = GetSpellCooldown or (C_Spell and function(spell)
     local c = C_Spell.GetSpellCooldown(spell)
     if not c then return 0, 0, 0 end
-    return c.startTime, c.duration, c.isEnabled and 1 or 0
+    local en = c.isEnabled
+    if ns.IsSecret(en) then en = true end
+    return c.startTime, c.duration, en and 1 or 0
 end)
+
+-- WoW Forever (2026-11-07): spell and item cooldowns can come back as
+-- secret values (no maths or comparing). Every HUD reads them through
+-- these, so there a hidden reading keeps the last plain one while it
+-- runs, else reads as ready (0, 0) - nothing does maths on a hidden one.
+-- Where nothing is ever secret (Classic Era, TBC) the plain calls stay.
+-- HUD.PlainCD(start, duration) does the same for a read made elsewhere.
+function HUD.PlainCD(start, duration)
+    if ns.Hidden(start, duration) then return 0, 0 end
+    return start, duration
+end
+if issecretvalue ~= nil then
+    local function Keep(raw)
+        if not raw then return raw end
+        local last = {}
+        return function(a, b)
+            local s, d, e, m = raw(a, b)
+            local k = b ~= nil and (tostring(a) .. ":" .. tostring(b)) or a
+            if ns.Hidden(s, d) then
+                local l = k ~= nil and last[k]
+                if l and l[1] + l[2] > GetTime() then return l[1], l[2], 1, 1 end
+                return 0, 0, 1, 1
+            end
+            if k ~= nil and type(s) == "number" and type(d) == "number" then
+                local l = last[k] or {}
+                last[k] = l
+                l[1], l[2] = s, d
+            end
+            return s, d, e, m
+        end
+    end
+    HUD.GetSpellCooldown = Keep(HUD.GetSpellCooldown)
+    -- (2026-11-07) A spell cooldown the game hides reads as ready above, but
+    -- its swipe can still be drawn: the 5th value is then the game's
+    -- duration object for it (C_Spell.GetSpellCooldownDuration, Forever's
+    -- API docs), for IconProto:SetSwipe's third argument.
+    local CSp = C_Spell
+    if CSp and CSp.GetSpellCooldown and CSp.GetSpellCooldownDuration then
+        local plain = HUD.GetSpellCooldown
+        HUD.GetSpellCooldown = function(spell, b)
+            local s, d, e, m = plain(spell, b)
+            if b == nil and spell ~= nil and s == 0 then
+                local ok, c = pcall(CSp.GetSpellCooldown, spell)
+                if ok and type(c) == "table" and ns.IsSecret(c.startTime) then
+                    local okd, obj = pcall(CSp.GetSpellCooldownDuration, spell)
+                    if okd and obj then return s, d, e, m, obj end
+                end
+            end
+            return s, d, e, m
+        end
+    end
+    GetContainerItemCooldown_C = Keep(GetContainerItemCooldown_C)
+    HUD.GetContainerItemCooldown = GetContainerItemCooldown_C
+end
 
 HUD.IsUsableSpell = IsUsableSpell or (C_Spell and C_Spell.IsSpellUsable)
 HUD.IsSpellInRange = IsSpellInRange or (C_Spell and function(spell, unit)
@@ -71,7 +133,7 @@ HUD.GetItemInfo     = GetItemInfo or (C_Item and C_Item.GetItemInfo)
 -- hidden - show them through Core_Flavor's display helpers, never maths.
 -- HUD.HIDDEN_AURAS is false on every other client: the HUDs keep their
 -- own UnitAura walk there, exactly as before.
-HUD.HIDDEN_AURAS = _G.ZACUI_IS_FOREVER and true or false
+HUD.HIDDEN_AURAS = _G.ZACUI_MODERN and true or false
 function HUD.EachMyTargetDebuff(fn)
     for i = 1, 40 do
         local a = ns.ReadAura("target", i, "HARMFUL")
@@ -96,6 +158,38 @@ function HUD.RageCost(id)
         end
     end
     return nil
+end
+
+-- WoW Forever (2026-11-07): a swing whose time the game hides runs on the
+-- game's own clock - the bar gets the swing's duration object (ns.Swings'
+-- 4th value; StatusBar:SetTimerDuration, draining like the plain bars)
+-- and its spark rides the fill's right edge, so nothing reads the hidden
+-- value. HUD.TimedSwing(barF, durObj) answers true while it does that;
+-- HUD.UntimedSwing(barF) hands the bar back to the plain fraction.
+function HUD.TimedSwing(barF, durObj)
+    local bar = barF and barF.bar
+    if not (durObj and bar and bar.SetTimerDuration) then return false end
+    if barF._zTimed ~= durObj then
+        local E = Enum
+        local interp = E and E.StatusBarInterpolation and E.StatusBarInterpolation.Immediate or 0
+        local dirs = E and E.StatusBarTimerDirection
+        local dir = dirs and dirs.RemainingTime or 1
+        if not pcall(bar.SetTimerDuration, bar, durObj, interp, dir) then return false end
+        barF._zTimed = durObj
+        local sp = barF.spark
+        local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+        if sp then
+            sp:ClearAllPoints()
+            if fill then sp:SetPoint("CENTER", fill, "RIGHT", 0, 0) sp:Show() else sp:Hide() end
+        end
+    end
+    return true
+end
+function HUD.UntimedSwing(barF)
+    if barF and barF._zTimed then
+        barF._zTimed = nil
+        barF.bar:SetMinMaxValues(0, 1)
+    end
 end
 
 -- A living enemy target the player can attack.
@@ -299,8 +393,27 @@ HUD.MOTION_DEFAULTS = {
     ready     = { style = "fade",  duration = 0.4,  delay = 0, easing = "easeOutQuad" },
 }
 
+-- THE GAME LOOKS' STOCK STYLE (2026-11-08, Core_Look's FollowDefaults):
+-- under Classic WoW UI, Blizzard style and WoW Forever the HUDs keep every
+-- feature but none of ZacUI's own polish the stock UI has no part of - the
+-- light sheen over icons and bars and the glowing leading edge of a bar.
+-- A value set by hand stays; ZacUI's look is untouched.
+HUD.LOOK_STOCK = {
+    { "iconSheen", 0 },
+    { "barSheen", 0 },
+    { "barEdge", 0 },
+}
+local lookFollowed
 function HUD.Look()
-    return HUD.Store("look", HUD.LOOK_DEFAULTS) or HUD.LOOK_DEFAULTS
+    local t = HUD.Store("look", HUD.LOOK_DEFAULTS)
+    if t and not lookFollowed then
+        local L = ns.Look
+        if L and L.Settled and L.Settled() and L.FollowDefaults then
+            lookFollowed = true
+            L.FollowDefaults(t, HUD.LOOK_DEFAULTS, HUD.LOOK_STOCK, "hud")
+        end
+    end
+    return t or HUD.LOOK_DEFAULTS
 end
 
 function HUD.Motion()
@@ -388,9 +501,9 @@ end
 -- (ZacUIDB.hud.look.anchors.<kind>, ZacUI's anchor shape) moves that kind
 -- on every icon: any corner of the icon, or hung off another of its
 -- texts. Nothing saved = the text never moves from where it was made.
-HUD.ICON_TEXTS = { "p", "s", "count", "label", "mobs", "short", "plates", "nx" }
+HUD.ICON_TEXTS = { "p", "s", "count", "label", "mobs", "short", "plates", "nx", "key" }
 HUD.ICON_TEXT_LABELS = { p = "Main timer", s = "Corner timer", count = "Stack count", label = "Label under the icon",
-    mobs = "Mob count", short = "Rage short", plates = "Plate count", nx = "Press next" }
+    mobs = "Mob count", short = "Rage short", plates = "Plate count", nx = "Press next", key = "Keybind" }
 HUD.ICON_TEXT_TIPS = {
     p = "The big number on or under an icon: its cooldown or time left.",
     s = "The small second timer in an icon's top right corner.",
@@ -400,6 +513,7 @@ HUD.ICON_TEXT_TIPS = {
     short = "How much rage an ability is short (\"-6\").",
     plates = "How many plates a sapper would hit, on its icon.",
     nx = "Hesitation's \"NEXT\" over the button to press first.",
+    key = "The key that casts it, in an icon's top left corner (the class HUDs' keybind text).",
 }
 -- where most icons put each kind (what the page's picker shows as the
 -- default; each icon's own spot is the real one)
@@ -412,6 +526,7 @@ HUD.ICON_TEXT_DEFAULTS = {
     short = { point = "TOPRIGHT", relPoint = "TOPRIGHT", x = -1, y = -1 },
     plates = { point = "CENTER", relPoint = "CENTER", x = 0, y = 0 },
     nx = { point = "CENTER", relPoint = "TOP", x = 0, y = 7 },
+    key = { point = "TOPLEFT", relPoint = "TOPLEFT", x = 1, y = -1 },
 }
 -- Hesitation's icons name the same texts their own way
 local KIND_OF = { t = "p", n = "mobs", r = "short" }
@@ -644,6 +759,23 @@ function HUD.ManaBarOnUpdate(self, elapsed)
         mana = UnitPower("player", 0) or 0
         manaMax = UnitPowerMax("player", 0) or 1
     end
+    -- a hidden value (WoW Forever): the bar and the number take it as it
+    -- is, with no maths or smoothing, until it reads again
+    if ns.IsSecret and (ns.IsSecret(mana) or ns.IsSecret(manaMax)) then
+        if not self._secretPow then
+            self._secretPow = true
+            self.displayValue, self.lastMana, self.settled = nil, nil, false
+        end
+        self.bar:SetMinMaxValues(0, ns.IsSecret(manaMax) and (self._plainMax or 1) or manaMax)
+        self.bar:SetValue(mana)
+        self.text:SetText(mana)
+        return
+    elseif self._secretPow then
+        self._secretPow = nil
+        self.bar:SetMinMaxValues(0, 1)
+        self.displayValue, self.lastMana, self.settled = nil, nil, false
+    end
+    self._plainMax = manaMax
     if self.settled and mana == self.lastMana and manaMax == self.lastMax then return end
     self.lastMax = manaMax
     local target = manaMax > 0 and (mana / manaMax) or 0
@@ -766,6 +898,20 @@ do
     if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(t, "hud.movers") end
 end
 
+-- Edit Mode put spots back (undo, Cancel): each group's watch takes the
+-- handle's box where it is now, so the pieces it already put back are
+-- not carried a second time
+function HUD.SyncGroups()
+    for key, g in pairs(groups) do
+        local proxy = g.proxy or _G["ZacUIMover_" .. key]
+        if proxy and proxy:IsShown() then
+            g.lastX, g.lastY = proxy:GetCenter()
+        else
+            g.lastX, g.lastY = nil, nil
+        end
+    end
+end
+
 -- Shows or hides the drag proxies of every registered anchor whose key
 -- starts with `prefix` (one HUD's set), so a page button can unlock a
 -- whole HUD at once. Toggling again locks them.
@@ -790,7 +936,8 @@ local function HudGroup()
     for _, item in ipairs(menu) do
         if item.id == GROUP_ID then return item end
     end
-    local group = { id = GROUP_ID, label = "Class HUDs", children = {} }
+    -- addon: the sidebar's power button turns the whole part off (finish pass)
+    local group = { id = GROUP_ID, label = "Class HUDs", children = {}, addon = "Zacui_HUD" }
     -- Right after Combat, with the other things that draw in a fight
     -- (before Quality of life when there is no Combat group).
     local at = #menu + 1
@@ -1183,7 +1330,7 @@ local function MotionPicker(L, label, key, styles, desc)
     })
     L:Add(p, 4)
     if desc then L:Desc(desc) end
-    UI.SetEnabled(p, HUD.Smooth())
+    UI.SetEnabled(p, HUD.Smooth(), 'Needs "Smooth motion and polish" turned on.')
     return p
 end
 
@@ -1236,9 +1383,10 @@ function HUD.SharedAnimCards(L)
             onSelect = function(v) SetGlide("easing", v) end })
     end, { width = 160 })
     L:Add(dd, 6)
-    UI.SetEnabled(cb, on)
-    UI.SetEnabled(sl, on and g.style ~= "none")
-    UI.SetEnabled(dd, on and g.style ~= "none")
+    local WHY_SMOOTH = 'Needs "Smooth motion and polish" turned on.'
+    UI.SetEnabled(cb, on, WHY_SMOOTH)
+    UI.SetEnabled(sl, on and g.style ~= "none", on and 'Needs "Slide icons into their new place" turned on.' or WHY_SMOOTH)
+    UI.SetEnabled(dd, on and g.style ~= "none", on and 'Needs "Slide icons into their new place" turned on.' or WHY_SMOOTH)
     L:EndCard()
     L:Card("Cooldown ready")
     MotionPicker(L, "Ready flash", "ready", { "none", "fade", "pop" },

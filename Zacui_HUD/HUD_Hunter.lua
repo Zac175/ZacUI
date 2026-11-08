@@ -9,7 +9,7 @@
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
 
-local ASPECTS = { "aspectHawk", "aspectMonkey", "aspectCheetah", "aspectPack", "aspectBeast", "aspectWild" }
+local ASPECTS = { "aspectHawk", "aspectMonkey", "aspectCheetah", "aspectPack", "aspectBeast", "aspectWild", "aspectViper" }
 
 ns.HUD.DefineClass({
     class = "HUNTER", className = "Hunter", label = "Hunter HUD", store = "hunter",
@@ -29,6 +29,8 @@ ns.HUD.DefineClass({
         aspectHawk = 14322, aspectMonkey = 13163, aspectCheetah = 5118,
         aspectPack = 13159, aspectBeast = 13161, aspectWild = 20190,
         trueshot = 20906, callPet = 883, flare = 1543,
+        raptorStrike = 14266, mongooseBite = 14271, wingClip = 14268, arcaneShot = 14287,
+        volley = 14295, tranqShot = 19801, scareBeast = 14327, mendPet = 13543, revivePet = 982,
     },
 
     grid = {
@@ -66,9 +68,9 @@ ns.HUD.DefineClass({
     },
 
     debuffRow = {
-        { key = "serpentSting",  id = 13555 },
-        { key = "viperSting",    id = 14280 },
-        { key = "scorpidSting",  id = 14277 },
+        { key = "serpentSting",  id = 13555, castsDot = true },
+        { key = "viperSting",    id = 14280, castsDot = true },
+        { key = "scorpidSting",  id = 14277, castsDot = true },
         { key = "wyvern",        id = 19386 },
         { key = "huntersMark",   id = 14325 },
         { key = "wingClip",      id = 14268 },
@@ -98,5 +100,76 @@ ns.HUD.DefineClass({
           end },
     },
 
+
+    -- Class HUD v2 (HUD_V2_Sources): the utility row's spells (off until
+    -- the row is turned on), the roles "Set up for" can tick, a game
+    -- version's own additions. Nothing here changes the HUD as it is.
+    utility = {
+        { key = "huntersMark",   kind = "spell", spell = "huntersMark",   label = "Hunter's Mark" },
+        { key = "raptorStrike",  kind = "spell", spell = "raptorStrike",  label = "Raptor Strike", nextSwing = true },
+        { key = "mongooseBite",  kind = "spell", spell = "mongooseBite",  label = "Mongoose Bite" },
+        { key = "wingClip",      kind = "spell", spell = "wingClip",      label = "Wing Clip" },
+        { key = "arcaneShot",    kind = "spell", spell = "arcaneShot",    label = "Arcane Shot" },
+        { key = "immolationTrap", kind = "spell", spell = "immolationTrap", label = "Immolation Trap", noRange = true },
+        { key = "volley",        kind = "spell", spell = "volley",        label = "Volley", noRange = true },
+        { key = "tranqShot",     kind = "spell", spell = "tranqShot",     label = "Tranquilizing Shot" },
+        { key = "scareBeast",    kind = "spell", spell = "scareBeast",    label = "Scare Beast" },
+        { key = "mendPet",       kind = "spell", spell = "mendPet",       label = "Mend Pet", noRange = true },
+        { key = "revivePet",     kind = "spell", spell = "revivePet",     label = "Revive Pet", noRange = true },
+    },
+    -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
+    -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
+    -- section 13: Icy Veins' Classic and TBC hunter guides). The base
+    -- lists are Classic Era's (WoW Forever plays them too); a spec's tbc
+    -- block replaces the rows it names on TBC. Your own ticks always win.
+    roles = {
+        { key = "bm", label = "Beast Mastery", tab = 1, aux = true, show = {
+            main = { "rapidFire", "bestialWrath", "aimed", "multi", "feign", "potion", "rune" },
+            utility = { "huntersMark", "mendPet", "revivePet", "tranqShot", "arcaneShot" },
+            buffs = { "rapidFire", "quickShots", "aspectHawk", "zhc" },
+            debuffs = { "huntersMark" } },
+          glows = { rapidFire = { { when = "ready", style = "edge", combatOnly = true } },
+                    bestialWrath = { { when = "ready", style = "edge", combatOnly = true } } },
+          tbc = { show = {
+              main = { "rapidFire", "bestialWrath", "killCommand", "multi", "misdirection", "feign", "potion", "rune" },
+              buffs = { "rapidFire", "quickShots", "aspectHawk", "aspectViper", "zhc" } },
+            glows = { rapidFire = { { when = "ready", style = "edge", combatOnly = true } },
+                      bestialWrath = { { when = "ready", style = "edge", combatOnly = true } },
+                      killCommand = { { when = "usable", style = "pulse", combatOnly = true } } } } },
+        { key = "mm", label = "Marksmanship", tab = 2, aux = true, show = {
+            main = { "rapidFire", "aimed", "multi", "feign", "potion", "rune" },
+            utility = { "huntersMark", "arcaneShot", "tranqShot", "mendPet" },
+            buffs = { "rapidFire", "quickShots", "aspectHawk", "trueshot", "zhc" },
+            debuffs = { "huntersMark" } },
+          glows = { rapidFire = { { when = "ready", style = "edge", combatOnly = true } },
+                    aimed = { { when = "ready", style = "edge", combatOnly = true } } },
+          tbc = { show = {
+              main = { "rapidFire", "killCommand", "multi", "silencingShot", "misdirection", "feign", "potion", "rune" },
+              buffs = { "rapidFire", "quickShots", "aspectHawk", "aspectViper", "trueshot", "zhc" } },
+            glows = { rapidFire = { { when = "ready", style = "edge", combatOnly = true } },
+                      killCommand = { { when = "usable", style = "pulse", combatOnly = true } } } } },
+        { key = "sv", label = "Survival", tab = 3, aux = true, res = { queued = true, rangeDim = true }, show = {
+            main = { "rapidFire", "aimed", "multi", "feign", "potion", "rune" },
+            utility = { "huntersMark", "raptorStrike", "mongooseBite", "wingClip", "tranqShot", "mendPet" },
+            buffs = { "rapidFire", "quickShots", "aspectHawk", "zhc" },
+            debuffs = { "huntersMark" } },
+          glows = { rapidFire = { { when = "ready", style = "edge", combatOnly = true } } },
+          tbc = { res = {}, show = {
+              main = { "rapidFire", "killCommand", "multi", "misdirection", "feign", "potion", "rune" },
+              utility = { "huntersMark", "arcaneShot", "tranqShot", "mendPet" },
+              buffs = { "rapidFire", "quickShots", "aspectHawk", "aspectViper", "zhc" } },
+            glows = { rapidFire = { { when = "ready", style = "edge", combatOnly = true } },
+                      killCommand = { { when = "usable", style = "pulse", combatOnly = true } } } } },
+    },
+    flavors = {
+        tbc = { add = {
+            { key = "misdirection",  kind = "spell", spell = "misdirection",  spellId = 34477, label = "Misdirection" },
+            { key = "killCommand",   kind = "spell", spell = "killCommand",   spellId = 34026, label = "Kill Command", noRange = true },
+            { key = "silencingShot", kind = "spell", spell = "silencingShot", spellId = 34490, label = "Silencing Shot" },
+            { key = "snakeTrap",     kind = "spell", spell = "snakeTrap",     spellId = 34600, label = "Snake Trap", noRange = true },
+            { key = "aspectViper",   id = 34074, label = "Aspect of the Viper", row = "buffs" },
+        }, spells = { aspectViper = 34074 } },
+    },
+    buffBars = { "rapidFire", "quickShots" },
     bars = { "mana", "fsr", "ranged", "swing" },
 })

@@ -25,82 +25,231 @@ local UI = ns.UI
 local VisibleRows = ns.VisibleRows
 local ZUI = ns.ZUI
 local Search = ns.ConfigSearch
+local SearchBox = ns.ConfigSearchBox
 local Preview = ns.ConfigPreview
 
 local M, F = UI.M, UI.F
 
-local WIDTH, HEIGHT = 780, 560
-local MIN_W, MAX_W = 640, 1600
+local WIDTH, HEIGHT = 1300, 946
+-- the part on/off glyph (Media/Icons/power, drawn for ZacUI 2026-11-07)
+ns.ICON_POWER = ns.ICON_POWER or ((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\power")
+local MIN_W, MAX_W = 1000, 1600
 
 local window, navScroll, navChild, content, contentScroll, pane
 -- head: the pinned top of the content pane (the page's title and the
 -- preview strip), shown only on a page with a preview.
-local head, pinnedHeader
-local stripY = 8      -- where the strip starts in head (under the title)
+local head, pinnedHeader, pinnedTabs, headTabBand, headStripBand, headStripDiv
+local S = UI.S
+local stripY = 0      -- where the strip starts in head (under the title and tabs)
 local pageW = WIDTH   -- the window's width, as you sized it
 local rowPool = {}
 
--- SEARCH STATE. searchMode: the content pane is showing results rather
--- than a page. lastReal: what the page on screen contains (with live
--- widgets), read back after every build, so a jump can find the exact
--- frame to scroll to and flash.
-local searchMode = false
-local lastQuery, lastResults, lastHits = "", {}, {}
+-- SEARCH. The box and its dropdown of results are Config_SearchBox's
+-- (the index and ranking Config_Search's); this file lends them the nav
+-- column, and does the jump. lastReal: what the page on screen contains
+-- (with live widgets), read back after every build, so a jump can find
+-- the exact frame to scroll to and flash.
 local lastReal
-local JumpTo, ShowResults
+local JumpTo
+-- the window comforts (finish pass, defined below Build, used in it)
+local badge, fightWatch, WatchFights, ApplyOpacity, Opacity
 
 -- ============================================================
--- NAV ROWS
+-- NAV ROWS (match pass 2026-11-07: EllesmereUI's sidebar, UI.S)
 -- ============================================================
+-- Three kinds, one pooled shape: a GROUP (a category: its name in the
+-- accent at 15, a +/- after it while hovered, 28 tall), a CHILD (a page
+-- in a category: 14 px at 36, 28 tall) and a PAGE at the top level (as a
+-- child, 20 in). A selected row: a 3 px accent bar on its left edge, an
+-- accent wash fading right (0.15 to 0), a hairline above and below; under
+-- the mouse: white 0.06, a pale wash (0.03) and a pale bar (0.25). The
+-- label: 1.0 selected, 0.60 at rest, 0.86 hovered; a part that is off
+-- 0.11 (0.39 hovered).
+local function Grad(tex, c, a0)
+    if CreateColor and tex.SetGradient then
+        tex:SetVertexColor(1, 1, 1, 1)
+        tex:SetGradient("HORIZONTAL", CreateColor(c.r, c.g, c.b, a0), CreateColor(c.r, c.g, c.b, 0))
+    elseif tex.SetGradientAlpha then
+        tex:SetVertexColor(1, 1, 1, 1)
+        tex:SetGradientAlpha("HORIZONTAL", c.r, c.g, c.b, a0, c.r, c.g, c.b, 0)
+    else
+        tex:SetVertexColor(c.r, c.g, c.b, a0 / 2)
+    end
+end
+
 local function PaintRow(self)
-    local key = "rowNormal"
-    if self._zSelected then
-        key = "rowSelected"
-    elseif self._zHot then
-        key = "rowHover"
+    local a = GetColor("ui", "accent")
+    local sel, hot, kind = self._zSelected, self._zHot, self._zKind
+    local group = kind == "group"
+    -- a part that is off (or waits for a reload to come on)
+    local off = false
+    -- THE PART'S SWITCH (2026-11-08, EllesmereUI's toggle at its small
+    -- size): the knob right and the track in the accent when the part
+    -- loads next time, left and #444 when it does not, the track orange
+    -- while a reload is waiting to change it. A part that is simply on
+    -- shows only its label; the switch comes up under the mouse.
+    local pw = self._zPower
+    if pw and pw:IsShown() and pw._zItem then
+        local state, pending = ns.PartState(pw._zItem.addon)
+        off = state ~= "on"
+        local nextOn = (state == "on") ~= (pending and true or false)
+        local c, al
+        if pending then c, al = GetColor("text", "orange"), S.TG_ON_A
+        elseif nextOn then c, al = a, S.TG_ON_A
+        else c, al = S.TG_OFF, S.TG_OFF_A end
+        pw._zPill:Color(c.r, c.g, c.b, al)
+        local k = pw._zKnob
+        k:ClearAllPoints()
+        if nextOn then k:SetPoint("RIGHT", pw, "RIGHT", -S.KNOB_PAD, 0)
+        else k:SetPoint("LEFT", pw, "LEFT", S.KNOB_PAD, 0) end
+        k:SetVertexColor(1, 1, 1, nextOn and 1 or S.KNOB_OFF_A)
+        -- (still there for the mouse while it is see-through)
+        pw:SetAlpha((off or pending or hot or pw._zHot) and 1 or 0)
     end
-    local c = GetColor("sidebar", key)
-    self._zFill:SetVertexColor(c.r, c.g, c.b, c.a or 1)
-    local b = GetColor("ui", "border")
-    for _, t in ipairs(self._zBorder) do t:SetVertexColor(b.r, b.g, b.b, 1) end
-
-    local ind = GetColor("sidebar", "indicator")
-    self._zInd:SetVertexColor(ind.r, ind.g, ind.b, self._zSelected and 1 or 0)
-
-    local tc = self._zSelected and GetColor("text", "green") or GetColor("text", "normal")
-    self._zText:SetTextColor(tc.r, tc.g, tc.b, 1)
-    if self._zChevron then
-        local a = GetColor("ui", "accent")
-        self._zChevron:SetVertexColor(a.r, a.g, a.b, self._zHot and 1 or 0.65)
+    local showSel = sel and not group
+    self._zInd:SetShown(showSel)
+    self._zInd:SetVertexColor(a.r, a.g, a.b, 1)
+    self._zGlow:SetShown(showSel)
+    if showSel then Grad(self._zGlow, a, S.NAV_GLOW) end
+    self._zEdgeT:SetShown(showSel)
+    self._zEdgeB:SetShown(showSel)
+    if showSel then Grad(self._zEdgeT, S.EDGE_TINT, S.NAV_EDGE) Grad(self._zEdgeB, S.EDGE_TINT, S.NAV_EDGE) end
+    local hover = hot and not showSel and not group
+    self._zHL:SetShown(hover)
+    self._zHL:SetVertexColor(1, 1, 1, S.NAV_HL)
+    self._zHoverGlow:SetShown(hover)
+    if hover then Grad(self._zHoverGlow, S.HOVER_TINT, S.NAV_HOVER_GLOW) end
+    self._zHoverInd:SetShown(hover)
+    local h = S.HOVER_TINT
+    self._zHoverInd:SetVertexColor(h.r, h.g, h.b, S.NAV_HOVER_IND)
+    if group then
+        local k = hot and 1.25 or 1
+        local r, g, b = math.min(1, a.r * k), math.min(1, a.g * k), math.min(1, a.b * k)
+        self._zText:SetTextColor(r, g, b, 1)
+        self._zSign:SetVertexColor(r, g, b, 1)
+        self._zSign:SetShown(hot and true or false)
+        return
     end
+    self._zSign:Hide()
+    local ta
+    if sel then ta = 1
+    elseif off then ta = hot and S.NAV_OFF_HOVER or S.NAV_OFF
+    else ta = hot and S.NAV_HOVER or S.NAV_EN end
+    self._zText:SetTextColor(1, 1, 1, ta)
 end
 
 local function AcquireRow(index)
     local row = rowPool[index]
     if row then return row end
     row = CreateFrame("Button", nil, navChild)
-    row:SetHeight(M.ROW_H)
-    UI.Fill(row, "sidebar", "rowNormal")
-    UI.Border(row, "ui", "border")
+    row:SetHeight(S.CHILD_ROW)
+    local function Tex(layer, sub)
+        local t = row:CreateTexture(nil, layer, nil, sub)
+        t._zui_own = true
+        t:SetTexture(FLAT)
+        t:Hide()
+        return t
+    end
+    row._zGlow = Tex("BACKGROUND", 1)
+    row._zGlow:SetAllPoints()
+    row._zHoverGlow = Tex("BACKGROUND", 2)
+    row._zHoverGlow:SetAllPoints()
+    row._zHL = Tex("BACKGROUND", 3)
+    row._zHL:SetAllPoints()
+    local function Edge(side)
+        local g = Tex("BORDER", 0)
+        if ns.Pixel then ns.Pixel.Edge(g, side, row) else g:SetHeight(1) end
+        g:SetPoint(side .. "LEFT", row, side .. "LEFT", 0, 0)
+        g:SetPoint(side .. "RIGHT", row, side .. "RIGHT", 0, 0)
+        return g
+    end
+    row._zEdgeT, row._zEdgeB = Edge("TOP"), Edge("BOTTOM")
+    local function Bar(sub)
+        local t = Tex("ARTWORK", sub)
+        t:SetWidth(3)
+        t:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        t:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        return t
+    end
+    row._zInd, row._zHoverInd = Bar(2), Bar(1)
 
-    local ind = row:CreateTexture(nil, "ARTWORK")
-    ind:SetTexture(FLAT)
-    ind:SetWidth(3)
-    ind:SetPoint("TOPLEFT", 1, -1)
-    ind:SetPoint("BOTTOMLEFT", 1, 1)
-    row._zInd = ind
-
-    row._zText = UI.Font(row, F.NAV, { justify = "LEFT" })
+    row._zText = UI.SFont(row, S.F_NAV, { justify = "LEFT" })
     row._zText:SetWordWrap(false)
-
-    -- The chevron only exists on category rows, but building it for every
-    -- row and hiding it keeps the pool homogeneous - a pool where entry 3
-    -- has fields entry 4 lacks is how recycled rows end up half-dressed.
+    -- a group's +/- (ZacUI's add / minus icons), right after its name
+    local sign = row:CreateTexture(nil, "ARTWORK")
+    sign._zui_own = true
+    sign:SetSize(14, 14)
+    sign:SetPoint("LEFT", row._zText, "RIGHT", 4, 0)
+    sign:Hide()
+    row._zSign = sign
+    -- (an invisible marker, shown on a group row: the tour and older code
+    -- tell a category row from a page row by it)
     local chev = row:CreateTexture(nil, "ARTWORK")
-    chev:SetSize(8, 8)
-    chev:SetPoint("RIGHT", -8, 0)
-    chev:SetTexture(ns.TEX_ARROW)
+    chev._zui_own = true
+    chev:SetSize(1, 1)
+    chev:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    chev:SetAlpha(0)
     row._zChevron = chev
+
+    -- THE PART'S SWITCH (finish pass; a switch since 2026-11-08): on every
+    -- row, shown on the rows that are a part (item.addon); PaintRow draws
+    -- it. A click asks "Turn off and reload" (ns.AskPart).
+    -- (EllesmereUI's toggle at its inline size, 0.8: a 32 x 16 pill, a
+    -- 12 px round knob two in - our disc art, UI.Pill / UI.DiscArt)
+    local SW, SH = math.floor(S.TOGGLE_W * 0.8 + 0.5), math.floor(S.TOGGLE_H * 0.8 + 0.5)
+    local pw = CreateFrame("Button", nil, row)
+    pw:SetSize(SW, SH)
+    pw:SetPoint("RIGHT", -18, 0)
+    pw:SetFrameLevel(row:GetFrameLevel() + 2)
+    pw:SetHitRectInsets(-4, -4, -6, -6)
+    local pill = UI.Pill(pw, "ARTWORK", 1, SH)
+    pw._zPill = pill
+    pw._zTex = pill.m
+    local knob = pw:CreateTexture(nil, "ARTWORK", nil, 2)
+    knob._zui_own = true
+    local kd = SH - 2 * S.KNOB_PAD
+    UI.DiscArt(knob, kd)
+    knob:SetSize(kd, kd)
+    pw._zKnob = knob
+    pw:SetScript("OnEnter", function(self)
+        self._zHot = true
+        row._zHot = true
+        row:_zPaint()
+        local item = self._zItem
+        if not item then return end
+        local state, pending = ns.PartState(item.addon)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        local t = GetColor("tooltip", "title")
+        GameTooltip:AddLine(item.label, t.r, t.g, t.b)
+        local o, g = GetColor("text", "orange"), GetColor("text", "gray")
+        local now, click
+        if state == "on" then
+            now = pending and "Turns off at the next reload." or "On."
+            click = pending and "Click to keep it on (reloads)." or "Click to turn it off (reloads)."
+        else
+            now = pending and "Turns on at the next reload." or "Off for this character."
+            click = pending and "Click to keep it off (reloads)." or "Click to turn it on (reloads)."
+        end
+        local nc = (pending or state ~= "on") and o or GetColor("text", "green")
+        GameTooltip:AddLine(now, nc.r, nc.g, nc.b)
+        GameTooltip:AddLine(click, g.r, g.g, g.b)
+        GameTooltip:Show()
+    end)
+    pw:SetScript("OnLeave", function(self)
+        self._zHot = nil
+        row._zHot = nil
+        row:_zPaint()
+        GameTooltip:Hide()
+    end)
+    pw:SetScript("OnClick", function(self)
+        local item = self._zItem
+        if not item then return end
+        local state, pending = ns.PartState(item.addon)
+        -- the switch flips what the NEXT load does
+        local nextOn = (state == "on") ~= (pending and true or false)
+        ns.AskPart(item.addon, item.label, not nextOn)
+    end)
+    row._zPower = pw
 
     row._zPaint = PaintRow
     row:HookScript("OnEnter", function(self) self._zHot = true; self:_zPaint() end)
@@ -133,7 +282,17 @@ local function ClearContent()
         pinnedHeader:SetParent(nil)
         pinnedHeader = nil
     end
-    stripY = 8
+    -- and its tab bar (a pooled one went back with the pool, above)
+    if pinnedTabs then
+        if not pinnedTabs._zPoolKey then
+            pinnedTabs:Hide()
+            pinnedTabs:ClearAllPoints()
+            pinnedTabs:SetParent(nil)
+        end
+        pinnedTabs = nil
+    end
+    if headTabBand then headTabBand:Hide() end
+    stripY = 0
     -- Dropdown menus are parented to UIParent so they are not clipped by
     -- their card. That also means this loop cannot reach them: without
     -- this, an open list survives a page change and floats over the new
@@ -169,43 +328,48 @@ local function ShiftUp(obj, dy)
     end
 end
 
+-- THE PAGE'S TOP, PINNED (match pass: EllesmereUI's header). The page's
+-- title (UI.PageHeader: 138 tall) moves out of the scrolled page into
+-- head; everything else moves up so the page (its tab bar first, on its
+-- black 0.20 band) starts 10 under the top of the scroll area. Returns how
+-- far the page moved up.
 local function PinHeader(layout)
+    stripY = 0
     local hf = layout and layout.headerFrame
-    if not (hf and hf:GetParent() == content) then
-        stripY = 8
-        return 0
-    end
+    if not (hf and hf:GetParent() == content) then return 0 end
     local _, _, _, _, hy = hf:GetPoint(1)
-    hy = hy or -14
+    hy = hy or 0
     -- only the page's own title at its top, not a heading further down
-    if hy < -30 then
-        stripY = 8
-        return 0
-    end
-    for _, list in ipairs({ { content:GetChildren() }, { content:GetRegions() } }) do
-        for _, o in ipairs(list) do
-            if o ~= hf and o:IsShown() and (o.GetNumPoints and o:GetNumPoints() or 0) > 0 then
-                local _, rel, rp, _, y = o:GetPoint(1)
-                if (rel == nil or rel == content) and rp and rp:find("TOP") and (y or 0) > hy + 0.5 then
-                    stripY = 8
-                    return 0
-                end
-            end
-        end
-    end
-    local hh = hf:GetHeight() or 30
+    if hy < -30 then return 0 end
+    local hh = hf:GetHeight() or S.HEADER
     hf:SetParent(head)
     hf:ClearAllPoints()
-    hf:SetPoint("TOPLEFT", head, "TOPLEFT", M.MARGIN, hy)
-    hf:SetPoint("RIGHT", head, "RIGHT", -M.MARGIN, 0)
+    hf:SetPoint("TOPLEFT", head, "TOPLEFT", 0, 0)
+    hf:SetPoint("RIGHT", head, "RIGHT", 0, 0)
     hf:Show()
     pinnedHeader = hf
-    stripY = -hy + hh + 10
-    -- the page went on 12 under the title; its first card now sits 6 down
-    local shift = -hy + hh + 6
-    for _, child in ipairs({ content:GetChildren() }) do ShiftUp(child, shift) end
-    for _, region in ipairs({ content:GetRegions() }) do ShiftUp(region, shift) end
-    return shift
+    -- (the tab bar stays the first thing on the scrolled page, right under
+    -- the pinned title and preview: every page and suite finds its tabs on
+    -- the page, as before)
+    local tabY, tabH
+    if headTabBand then headTabBand:Hide() end
+    stripY = hh + (tabH or 0)
+    -- above the tab row: up by the title; below it: by the title and the row
+    local upA = (-hy) + hh - S.TOP_PAD
+    local upB = tabY and (upA + tabH) or upA
+    local function Move(o)
+        local n = o.GetNumPoints and o:GetNumPoints() or 0
+        if n == 0 then return end
+        local _, rel, rp, _, y = o:GetPoint(1)
+        if (rel == nil or rel == content) and rp and rp:find("TOP") and tabY and (y or 0) <= tabY - tabH + 0.5 then
+            ShiftUp(o, upB)
+        else
+            ShiftUp(o, upA)
+        end
+    end
+    for _, child in ipairs({ content:GetChildren() }) do Move(child) end
+    for _, region in ipairs({ content:GetRegions() }) do Move(region) end
+    return upB
 end
 
 local ShowPage
@@ -214,50 +378,55 @@ local ShowPage
 -- variable, so without this the callback captures a global nil and the
 -- window silently stops refreshing after a resize.
 local RefreshConfig
+local BuildNav
 
-local function BuildNav()
+local function BuildNavInner()
     local s = ConfigState()
     local filter = window and window.search and window.search:GetText() or ""
     local searching = filter:find("%S") ~= nil
-    local rows = VisibleRows(filter, searching and lastHits or nil)
-    local y = -4
+    local rows = VisibleRows(filter, searching and SearchBox.Hits() or nil)
+    local y = 0
+    local groups = 0
 
     for i, entry in ipairs(rows) do
         local item, row = entry.item, AcquireRow(i)
-        local indent = entry.isChild and 14 or 4
+        local kind = entry.isCategory and "group" or (entry.isChild and "child" or "page")
+        -- EllesmereUI's sidebar: 10 between groups, 28 a row
+        if kind ~= "child" and groups > 0 then y = y - S.GROUP_GAP end
+        if kind ~= "child" then groups = groups + 1 end
+        local rh = (kind == "group") and S.GROUP_ROW or S.CHILD_ROW
+        row._zKind = kind
+        row._zChevron:SetShown(kind == "group")
+        row:SetHeight(rh)
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", navChild, "TOPLEFT", indent, y)
-        row:SetPoint("RIGHT", navChild, "RIGHT", -4, 0)
+        row:SetPoint("TOPLEFT", navChild, "TOPLEFT", 0, y)
+        row:SetPoint("RIGHT", navChild, "RIGHT", 0, 0)
 
         -- a page whose part this game version does not run is marked
         local label = item.label
         if ns.FeatureOffForPage and ns.FeatureOffForPage(item.id) then
-            local g = GetColor("text", "gray")
-            label = label .. string.format("  |cff%02x%02x%02xoff|r",
-                math.floor(g.r * 255 + 0.5), math.floor(g.g * 255 + 0.5), math.floor(g.b * 255 + 0.5))
+            label = label .. "  |cff8a8a8aoff|r"
         end
-        row._zText:SetText(label)
-        row._zText:ClearAllPoints()
-        row._zText:SetPoint("LEFT", entry.isChild and 10 or 9, 0)
-        row._zText:SetPoint("RIGHT", -20, 0)
+        local fs = row._zText
+        UI._zFontDress(fs, (kind == "group") and S.F_GROUP or S.F_NAV)
+        fs:SetText(label)
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", row, "LEFT", (kind == "child") and S.CHILD_X or S.NAV_LEFT, 0)
+        -- a part's power button (ns.PartState: in the AddOns folder)
+        local part = item.addon and ns.PartState and ns.PartState(item.addon) ~= "missing"
+        local pw = row._zPower
+        pw._zItem = part and item or nil
+        pw:SetShown(part and true or false)
+        if kind == "group" then
+            -- the label takes its text's width, so the +/- follows it
+            fs:SetWidth(0)
+            row._zSign:SetTexture(((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\")
+                .. (s.expanded[item.id] and "minus" or "add"))
+        else
+            fs:SetPoint("RIGHT", row, "RIGHT", part and -(18 + math.floor(S.TOGGLE_W * 0.8 + 0.5) + 12) or -18, 0)
+        end
 
         row._zSelected = (s.selected == item.id)
-        row._zChevron:SetShown(entry.isCategory and true or false)
-        if entry.isCategory then
-            -- Down when open, right when closed. The addon ships a down
-            -- arrow and a left arrow; the right-pointing one is the left
-            -- arrow mirrored on X, which is why the texcoord is reset on
-            -- the open branch - leaving a stale mirror flips the down
-            -- arrow too.
-            if s.expanded[item.id] then
-                row._zChevron:SetTexture(ns.TEX_ARROW)
-                row._zChevron:SetTexCoord(0, 1, 0, 1)
-            else
-                row._zChevron:SetTexture(ns.TEX_ARROWL)
-                row._zChevron:SetTexCoord(1, 0, 0, 1)
-            end
-        end
-
         row:SetScript("OnClick", function()
             if entry.isCategory and item.children then
                 s.expanded[item.id] = not s.expanded[item.id]
@@ -273,23 +442,30 @@ local function BuildNav()
             -- While searching, a page in the filtered list opens at the
             -- best thing it matched, not at its top.
             if searching then
-                for _, r in ipairs(lastResults) do
-                    if r.item == item.id then
-                        JumpTo(r)
-                        return
-                    end
+                local best = SearchBox.BestFor(item.id)
+                if best then
+                    SearchBox.Go(best)
+                    return
                 end
             end
             ShowPage(item.id)
         end)
         row:Show()
         row:_zPaint()
-        y = y - M.ROW_H - 2
+        y = y - rh
     end
 
     for i = #rows + 1, #rowPool do rowPool[i]:Hide() end
     navChild:SetHeight(math.max(1, -y + 8))
     navScroll:Recalculate(-y + 8)
+end
+
+function BuildNav()
+    local was = UI._zSettings
+    UI._zSettings = true
+    local ok, err = pcall(BuildNavInner)
+    UI._zSettings = was
+    if not ok then error(err, 0) end
 end
 
 -- The page the scroll offset below belongs to. Kept beside it so the two
@@ -315,7 +491,7 @@ local scrolledPage, scrolledTo = nil, 0
 -- touches something that opens the config would do the same.
 local building, queuedPage = nil, nil
 
-ShowPage = function(id)
+local function ShowPageInner(id)
     local s = ConfigState()
     -- An old id that is a tab on another page now lands on that tab.
     local alias = ns.ConfigAliases and ns.ConfigAliases[id]
@@ -343,7 +519,6 @@ ShowPage = function(id)
         return
     end
     building = id
-    searchMode = false
     -- the page declares its preview (if any) while it builds
     if Preview then Preview.BeginPage() end
 
@@ -369,16 +544,17 @@ ShowPage = function(id)
     ClearContent()
 
     local fn = item.page and ConfigPages[item.page]
-    local layout = ConfigLayout.New(content, -14)
+    local layout = ConfigLayout.New(content, 0)
     layout.pageId = id   -- Layout:Tabs keys its remembered tab by this
     layout.live = true   -- the build on screen, not one for the search index
     -- the widgets it asks for come from the pool (UIF_Pool), per page
     if ns.UIPool then ns.UIPool.Begin(content, id) end
-    -- A part or feature this game version does not run (Core_Flavor):
-    -- its page says why instead of building; a page that keeps working
-    -- says which of its features are off, under its title.
+    -- A part this game version does not run (Core_Flavor) has no page
+    -- in the menu; reached some other way, its page says why instead of
+    -- building. A page that keeps working shows only what runs here: a
+    -- switched-off feature on it is left out, not explained (General >
+    -- Game versions is the one place that lists it).
     local offId = ns.FeatureOffForPage and ns.FeatureOffForPage(id)
-    if not offId and ns.FlavorPageNotes then layout.flavorNotes = ns.FlavorPageNotes(id) end
     if offId then
         layout:Header(item.label)
         layout:Notice("flavor", ns.FeatureOffNote(offId))
@@ -390,8 +566,21 @@ ShowPage = function(id)
         end
     elseif item.addon then
         layout:Header(item.label)
-        layout:Notice("missing", "This part of ZacUI is not loaded. Enable '" .. item.addon
-            .. "' in the AddOns list (character select, or the game menu) and reload.")
+        local state, pending = ns.PartState and ns.PartState(item.addon)
+        if state == "off" then
+            -- one click from here (the sidebar's power button does the same)
+            layout:Notice("missing", pending and ("This part of ZacUI turns on at your next reload.")
+                or ("This part of ZacUI is off for this character."))
+            layout:Card("Turn it on")
+            local on = UI.Button(layout.current, "Turn on and reload", { width = 160,
+                onClick = function() ns.AskPart(item.addon, item.label, true) end })
+            on:SetActive(true)
+            layout:Row(on, S.BTN_H)
+            layout:EndCard()
+        else
+            layout:Notice("missing", "This part of ZacUI is not loaded. Enable '" .. item.addon
+                .. "' in the AddOns list (character select, or the game menu) and reload.")
+        end
     else
         layout:Header(item.label)
         layout:Notice("warn", "Nothing to configure here yet.")
@@ -401,8 +590,8 @@ ShowPage = function(id)
     -- A page with a preview: its title is pinned at the top with the strip
     -- under it, and the strip is placed (or taken away) before the page is
     -- measured, since it moves the top of the scroll area.
-    local shift = 0
-    if Preview and Preview.Declared() then shift = PinHeader(layout) end
+    -- (every page: EllesmereUI's header is never part of the scroll)
+    local shift = PinHeader(layout)
     if Preview then
         local ok, err = pcall(Preview.EndPage)
         if not ok then Print("preview: " .. tostring(err)) end
@@ -454,17 +643,21 @@ ShowPage = function(id)
     end
 end
 
--- ============================================================
--- SEARCH RESULTS
--- ============================================================
-local MAX_RESULTS = 60
-
-local function AccentHex()
-    local a = GetColor("ui", "accent")
-    return string.format("%02x%02x%02x", math.floor(a.r * 255 + 0.5),
-        math.floor(a.g * 255 + 0.5), math.floor(a.b * 255 + 0.5))
+-- every build in the settings window's look (UI.S)
+ShowPage = function(id)
+    local was = UI._zSettings
+    UI._zSettings = true
+    local ok, err = pcall(ShowPageInner, id)
+    UI._zSettings = was
+    if not ok then
+        building = nil
+        error(err, 0)
+    end
 end
 
+-- ============================================================
+-- THE JUMP
+-- ============================================================
 -- A gold box over the setting a jump landed on, fading out, so the eye
 -- finds it after the page has moved under it.
 local function Flash(widget)
@@ -501,6 +694,16 @@ JumpTo = function(r)
     if ns.ConfigScrollTop then ns.ConfigScrollTop() end
     ShowPage(r.item)
     if not e or e.kind == "tab" then return end
+    -- not on the page as built: folded away as less common (Layout:Fold) -
+    -- built again with the page's folds open (they stay open)
+    local seen = false
+    for _, x in ipairs(lastReal or {}) do if x.key == e.key then seen = true break end end
+    if not seen then
+        ns._zFoldsOpen = true
+        local okShow, errShow = pcall(ShowPage, r.item)
+        ns._zFoldsOpen = nil
+        if not okShow then error(errShow, 0) end
+    end
 
     -- The fresh build's own entry for this setting, when it is there:
     -- its position is exact and it holds the real frame.
@@ -519,159 +722,14 @@ JumpTo = function(r)
     if target.widget then Flash(target.widget) end
 end
 
-local function ResultRow(card, r, query, hex)
-    local b = CreateFrame("Button", nil, card)
-    b:SetHeight(24)
-    local hl = b:CreateTexture(nil, "HIGHLIGHT")
-    hl._zui_own = true
-    hl:SetAllPoints()
-    hl:SetColorTexture(1, 1, 1, 0.05)
-    hl:SetBlendMode("ADD")
-
-    local e = r.entry
-    local where
-    if r.kind == "page" then
-        where = "open page"
-    elseif r.kind == "tab" then
-        where = "tab"
-    else
-        local bits = {}
-        if e and e.tabLabel then bits[#bits + 1] = e.tabLabel end
-        if e and e.card and r.kind ~= "card" then bits[#bits + 1] = e.card end
-        if r.kind == "card" then bits[#bits + 1] = "section" end
-        if r.kind == "desc" then bits[#bits + 1] = "in its description" end
-        if r.kind == "tip" then bits[#bits + 1] = "in its tooltip" end
-        where = table.concat(bits, "  >  ")
-    end
-
-    local crumb = UI.Font(b, F.SMALL, { text = where, cat = "text", key = "gray", justify = "RIGHT" })
-    crumb:SetPoint("RIGHT", -8, 0)
-    crumb:SetWordWrap(false)
-    local label = UI.Font(b, F.LABEL, { justify = "LEFT" })
-    label:SetPoint("LEFT", 8, 0)
-    label:SetPoint("RIGHT", crumb, "LEFT", -12, 0)
-    label:SetWordWrap(false)
-    label:SetText(Search.Highlight(r.label or "", query, hex))
-
-    if (r.kind == "desc" or r.kind == "tip") and e and e.text then
-        UI.Tooltip(b, r.label, e.text)
-    end
-    b:SetScript("OnClick", function() JumpTo(r) end)
-    return b
-end
-
-ShowResults = function(query)
-    if not window or building then return end
-    searchMode = true
-    if ns.Auras and ns.Auras.ExitEditMode then ns.Auras.ExitEditMode() end
-    ClearContent()
-    -- results are not a page: no preview
-    if Preview then Preview.BeginPage() pcall(Preview.EndPage) end
-    local layout = ConfigLayout.New(content, -14)
-    local n = #lastResults
-    local indexing = Search.IsIndexing()
-    local sub
-    if n == 0 then
-        sub = indexing and "Still reading the pages - results appear as they come in."
-            or "Nothing matches. Try fewer words, or the start of a word."
-    else
-        sub = n .. (n == 1 and " match" or " matches")
-            .. ". Click one to go straight to it - Enter opens the top one."
-            .. (indexing and " Still reading pages..." or "")
-    end
-    layout:Header("Search: " .. query, sub)
-
-    -- Grouped by page, pages in the order of their best match.
-    local groups, order = {}, {}
-    for i, r in ipairs(lastResults) do
-        if i > MAX_RESULTS then break end
-        local g = groups[r.item]
-        if not g then
-            g = { title = r.parent and (r.parent .. "  >  " .. r.page) or r.page, list = {} }
-            groups[r.item] = g
-            order[#order + 1] = g
-        end
-        g.list[#g.list + 1] = r
-    end
-    local hex = AccentHex()
-    for _, g in ipairs(order) do
-        layout:Card(g.title)
-        for _, r in ipairs(g.list) do
-            local row = ResultRow(layout.current, r, query, hex)
-            layout:Row(row, 25, 6)
-            row:SetPoint("RIGHT", layout.current, "RIGHT", -6, 0)
-        end
-        layout:EndCard()
-    end
-    if n > MAX_RESULTS then
-        layout:Card(nil)
-        layout:Desc("Showing the best " .. MAX_RESULTS .. ". Add another word to narrow it down.")
-        layout:EndCard()
-    end
-
-    local h = layout:Height()
-    content:SetHeight(h)
-    contentScroll:Recalculate(h)
-    contentScroll.bar:SetScript("OnValueChanged", function(_, v)
-        contentScroll:SetVerticalScroll(v)
-    end)
-    contentScroll.bar:SetValue(0)
-    contentScroll:SetVerticalScroll(0)
-    scrolledPage, scrolledTo = nil, 0
-    BuildNav()
-end
-
-local function RunSearch(text)
-    lastQuery = text or ""
-    lastResults, lastHits = Search.Run(lastQuery)
-end
-
--- The index fills in over a few frames; once it is complete, redraw
--- whatever is showing so partial results become whole.
-local function OnIndexed()
-    if not window or not window:IsShown() then return end
-    local text = window.search:GetText() or ""
-    if not text:find("%S") then return end
-    RunSearch(text)
-    if searchMode then ShowResults(text) else BuildNav() end
-end
-
--- Typing waits a beat before searching, so a fast word is one search,
--- not six half-word redraws.
-local searchSerial = 0
-local function OnSearchChanged()
-    searchSerial = searchSerial + 1
-    local mine = searchSerial
-    C_Timer.After(0.12, function()
-        if mine ~= searchSerial or not window or not window:IsShown() then return end
-        local text = window.search:GetText() or ""
-        if not text:find("%S") then
-            lastQuery, lastResults, lastHits = "", {}, {}
-            if searchMode then
-                ShowPage(ConfigState().selected)
-            else
-                BuildNav()
-            end
-            return
-        end
-        Search.EnsureIndex(OnIndexed)
-        RunSearch(text)
-        ShowResults(text)
-    end)
-end
-
-local function OnSearchEnter(text)
-    if not (text or ""):find("%S") then return end
-    searchSerial = searchSerial + 1   -- a pending redraw would undo the jump
-    Search.EnsureIndex(OnIndexed)
-    RunSearch(text)
-    if lastResults[1] then JumpTo(lastResults[1]) else ShowResults(text) end
-end
-
 -- Escape or the X can close the window with a list still open, and a
 -- FULLSCREEN_DIALOG menu outlives its owner happily.
 local function OnWindowHide()
+    -- folded to its badge (Fold, below): put away, not closed - previews,
+    -- Edit Mode and the aura editor keep running
+    if window and window._zFolded then return end
     UI.CloseAllDropdowns()
+    SearchBox.Hide()
     -- Leaving the config window leaves aura edit mode: the engine resumes,
     -- the fake states clear and the drag handles come off. Without this the
     -- auras stay paused and pinned on screen after the window closes, which
@@ -679,13 +737,16 @@ local function OnWindowHide()
     if ns.Auras and ns.Auras.ExitEditMode then ns.Auras.ExitEditMode() end
     -- the profile this character wears picks up what was just changed
     if ns.Profiles and ns.Profiles.WriteBack then pcall(ns.Profiles.WriteBack) end
+    -- a look picked but not applied is dropped with the window (Core_Look)
+    if ns.Look and ns.Look.Discard then ns.Look.Discard() end
 end
 
 -- ============================================================
 -- WINDOW
 -- ============================================================
+-- the scrolled page spans the right side (its 45 px pads hold the bar)
 local function ContentWidth()
-    return pageW - M.SIDEBAR_W - M.SCROLL_W - 8
+    return pageW - S.SIDEBAR
 end
 
 -- How far across a frame each anchor point sits (0 left, 1 right).
@@ -715,59 +776,129 @@ local function KeepOnScreen()
     window:SetPoint(p, UIParent, rp, (x or 0) + shift / s, y or 0)
 end
 
+-- ============================================================
+-- PIXEL-EXACT (finish pass; the ZacUI look, through ns.Pixel)
+-- ============================================================
+-- One unit of this window is (window scale / one physical pixel) screen
+-- pixels: 1.055 at 1080p and UI scale 0.75, so its 11 px text and 1 px
+-- rules land between pixels. When that is within 10% of a whole number
+-- the window's scale is nudged onto it (one unit = exactly 1 or 2 px);
+-- further off the size is left as chosen. Either way its top-left corner
+-- lands on a whole pixel after an open, a drag, a resize and a scale
+-- change. Off under the other looks (ns.Pixel.On), so they are as
+-- before.
+local function UserScale() return (ZacUIDB and ZacUIDB.config and ZacUIDB.config.scale) or 1 end
+local function ExactScale(s)
+    local P = ns.Pixel
+    if not (P and P.On and P.On() and P.One) then return s end
+    local unit = P.One(UIParent)
+    if not (type(unit) == "number" and unit > 0) then return s end
+    local r = s / unit
+    local n = math.floor(r + 0.5)
+    if n >= 1 and math.abs(r - n) <= 0.10 * r then return n * unit end
+    return s
+end
+ns.ConfigExactScale = ExactScale
+
+local function SnapWindow()
+    local P = ns.Pixel
+    if not (window and window:IsShown() and P and P.On and P.On() and P.Snap) then return end
+    if window._zAnim then return end
+    local left, top = window:GetLeft(), window:GetTop()
+    if not (left and top) then return end
+    -- (its size stays the whole units you sized it to: at an exact scale
+    -- those are whole pixels already, and the saved size never drifts)
+    local x, y = P.Snap(left, window), P.Snap(top, window)
+    window:ClearAllPoints()
+    window:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+end
+ns.ConfigSnapWindow = SnapWindow
+
 -- Config_Preview's way to place its strip (see Preview.Attach): a strip
 -- h high under the pinned title (0: none), the scroll area below it.
 -- Returns the strip's width (the page's cards' width).
 local function PlaceStrip(h)
     if not (head and contentScroll) then return 0 end
     local cw = ContentWidth()
-    local sw = cw - 2 * M.MARGIN
+    local sw = cw - 2 * S.PAD
     head:SetWidth(cw)
-    local top = 0
+    local top = stripY
     local dock = Preview and Preview.Frame()
+    -- the preview: EllesmereUI's content header - a black 0.10 band the
+    -- width of the right side, a white 0.06 hairline at its foot, the
+    -- strip 10 in from its top and bottom
+    if not headStripBand then
+        headStripBand = head:CreateTexture(nil, "BACKGROUND", nil, -6)
+        headStripBand._zui_own = true
+        headStripBand:SetTexture(FLAT)
+        headStripDiv = head:CreateTexture(nil, "ARTWORK")
+        headStripDiv._zui_own = true
+        headStripDiv:SetTexture(FLAT)
+        if ns.Pixel then ns.Pixel.Edge(headStripDiv, "BOTTOM", head) else headStripDiv:SetHeight(1) end
+    end
     if h and h > 0 and dock then
         dock:ClearAllPoints()
-        dock:SetPoint("TOPLEFT", head, "TOPLEFT", M.MARGIN, -stripY)
+        dock:SetPoint("TOPLEFT", head, "TOPLEFT", S.PAD, -(stripY + S.TOP_PAD))
         dock:SetWidth(sw)
-        top = stripY + h + 8
-    elseif pinnedHeader then
-        -- (a strip that failed to come up: the title alone)
-        top = stripY
+        top = stripY + S.TOP_PAD + h + S.TOP_PAD
+        headStripBand:ClearAllPoints()
+        headStripBand:SetPoint("TOPLEFT", head, "TOPLEFT", 0, -stripY)
+        headStripBand:SetPoint("TOPRIGHT", head, "TOPRIGHT", 0, -stripY)
+        headStripBand:SetHeight(top - stripY)
+        headStripBand:SetVertexColor(0, 0, 0, S.HEAD_BAND_A)
+        headStripBand:Show()
+        headStripDiv:ClearAllPoints()
+        headStripDiv:SetPoint("BOTTOMLEFT", head, "TOPLEFT", 0, -top)
+        headStripDiv:SetPoint("BOTTOMRIGHT", head, "TOPRIGHT", 0, -top)
+        headStripDiv:SetVertexColor(1, 1, 1, S.HEAD_DIV_A)
+        headStripDiv:Show()
+    else
+        headStripBand:Hide()
+        headStripDiv:Hide()
     end
     head:SetHeight(math.max(1, top))
     head:SetShown(top > 0)
     contentScroll:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, -top)
-    contentScroll.bar:SetPoint("TOPRIGHT", pane, "TOPRIGHT", -2, -4 - top)
+    contentScroll.bar:SetPoint("TOPRIGHT", pane, "TOPRIGHT", -6, -4 - top)
     contentScroll:Recalculate(content:GetHeight())
     return sw
 end
 
+-- THE WINDOW (match pass 2026-11-07): EllesmereUI's options window built
+-- from its numbers (zui_tests/MATCH_OPTIONS_1107.md) - a 295 px sidebar
+-- (the ZacUI mark, Edit Mode, the search, the groups), on the right a
+-- 138 px header with the page's title, a 40 px tab bar, the preview band,
+-- the page, and an 82 px footer (Reload, the window scale, Close).
 local function Build()
-    window = UI.Window("ZacUIConfigFrame", WIDTH, HEIGHT, "ZacUI",
-        { hero = { first = "Zac", second = "UI", version = "v" .. ZUI.VERSION,
-                   stepX = M.SIDEBAR_W, left = { "sidebar", "bg" } } })
+    -- Class HUDs keep a sidebar row while their part is off (Config_Base)
+    if ns.KeepPartRow then pcall(ns.KeepPartRow, "classhuds", "Class HUDs", "Zacui_HUD", "combat") end
+    -- a first open: 1300 x 946, no more than 92% of the screen
+    local sw0 = (UIParent and UIParent:GetWidth()) or 0
+    local sh0 = (UIParent and UIParent:GetHeight()) or 0
+    local w0, h0 = WIDTH, HEIGHT
+    if sw0 > 0 then w0 = math.max(MIN_W, math.min(w0, math.floor(sw0 * 0.92))) end
+    if sh0 > 0 then h0 = math.max(S.MIN_H, math.min(h0, math.floor(sh0 * 0.92))) end
+    pageW = w0
+    window = UI.Window("ZacUIConfigFrame", w0, h0, "ZacUI", { bare = true })
+    local tb = window.titleBar
 
-    -- RESIZABLE, and the size persists. The aura tree in particular wants
-    -- more room than a fixed 780x560 gives it, and a window that forgets
-    -- how big you made it is a window you resize every session.
-    --
-    -- The nav column and content pane are anchored to the window's edges
-    -- rather than sized, so they follow a resize on their own; only the
-    -- content's scroll child needs its width recomputed, which is what the
-    -- callback does.
-    --
-    -- The saved width is the window's (it never changes for a preview;
-    -- the column the preview used to be never counted towards it).
+    -- RESIZABLE, and the size persists (a saved size wins over the
+    -- default). The sidebar and the right side are anchored to the
+    -- window's edges, so they follow a resize; the page is rebuilt for its
+    -- new width when the resize ends.
     do
         local saved = ZacUIDB and ZacUIDB.config
         if saved and saved.w and saved.h then
             pageW = math.min(math.max(saved.w, MIN_W), MAX_W)
-            window:SetSize(pageW, math.max(saved.h, 420))
+            window:SetSize(pageW, math.min(math.max(saved.h, S.MIN_H), S.MAX_H))
         end
         UI.AttachResizeGrip(window, {
-            minW = MIN_W, minH = 420, maxW = MAX_W, maxH = 1100,
+            minW = MIN_W, minH = S.MIN_H, maxW = MAX_W, maxH = S.MAX_H,
             onResizeStopped = function(f)
+                SnapWindow()
                 pageW = math.max(MIN_W, f:GetWidth())
+                if f:GetWidth() < MIN_W then f:SetWidth(MIN_W) end
+                if f:GetHeight() < S.MIN_H then f:SetHeight(S.MIN_H) end
                 ZacUIDB.config = ZacUIDB.config or {}
                 ZacUIDB.config.w = math.floor(pageW + 0.5)
                 ZacUIDB.config.h = math.floor(f:GetHeight() + 0.5)
@@ -775,115 +906,227 @@ local function Build()
                 RefreshConfig()
             end,
         })
+        window._zGrip:SetFrameLevel(window:GetFrameLevel() + 40)
     end
 
-    -- NAV COLUMN
+    -- THE SIDEBAR
     local nav = CreateFrame("Frame", nil, window)
-    nav:SetPoint("TOPLEFT", 1, -(window.headerHeight + 1))
-    nav:SetPoint("BOTTOMLEFT", 1, 1)
-    nav:SetWidth(M.SIDEBAR_W)
+    nav:SetPoint("TOPLEFT", 0, 0)
+    nav:SetPoint("BOTTOMLEFT", 0, 0)
+    nav:SetWidth(S.SIDEBAR)
+    nav:SetFrameLevel(window:GetFrameLevel() + 3)
     UI.Fill(nav, "sidebar", "bg")
-    nav._zPaint = UI.PaintBox
+    nav._zPaint = function(self) self._zFill:SetVertexColor(0, 0, 0, S.SIDEBAR_A) end
     nav:_zPaint()
-
     local rule = nav:CreateTexture(nil, "OVERLAY")
+    rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetWidth(1)
+    if ns.Pixel then ns.Pixel.Edge(rule, "RIGHT", nav) else rule:SetWidth(1) end
     rule:SetPoint("TOPRIGHT")
     rule:SetPoint("BOTTOMRIGHT")
-    rule:SetVertexColor(0, 0, 0, 1)
+    rule:SetVertexColor(1, 1, 1, S.BORDER_A)
 
-    window.search = UI.EditBox(nav, { width = M.SIDEBAR_W - 12, height = 21,
-        hint = "Search settings", onChange = OnSearchChanged, onEnter = OnSearchEnter })
-    window.search:SetPoint("TOPLEFT", 6, -6)
-    window.search.editBox:SetScript("OnEscapePressed", function(self)
-        self:SetText("")
-        self:ClearFocus()
-        OnSearchChanged()
-    end)
-    -- Reading the pages starts the moment the box is clicked, so by the
-    -- time a word is typed most of the index is already there.
-    window.search.editBox:HookScript("OnEditFocusGained", function()
-        Search.EnsureIndex(OnIndexed)
-    end)
+    -- the mark and the name in the sidebar's top 114 (EllesmereUI's logo
+    -- band); the mark keeps its opening (UI.AnimateMark)
+    local logo = CreateFrame("Frame", nil, nav)
+    logo:SetPoint("TOPLEFT", nav, "TOPLEFT", 0, 0)
+    logo:SetPoint("TOPRIGHT", nav, "TOPRIGHT", -1, 0)
+    logo:SetHeight(S.NAV_TOP)
+    logo:EnableMouse(false)
+    local mark = logo:CreateTexture(nil, "ARTWORK", nil, 3)
+    mark._zui_own = true
+    mark:SetSize(40, 40)
+    mark:SetPoint("TOPLEFT", logo, "TOPLEFT", 22, -30)
+    mark:SetTexture(ns.TEX_ICON)
+    if ns.SharpenIcon then ns.SharpenIcon(mark) end
+    local first = UI.SFont(logo, 28, { text = "Zac" })
+    first:SetPoint("BOTTOMLEFT", mark, "RIGHT", 10, -7)
+    first._zPaint = function(self) self:SetTextColor(1, 1, 1, 1) end
+    first:_zPaint()
+    local second = UI.SFont(logo, 28, { text = "UI" })
+    second:SetPoint("LEFT", first, "RIGHT", 0, 0)
+    second._zPaint = function(self) local a = GetColor("ui", "accent") self:SetTextColor(a.r, a.g, a.b, 1) end
+    second:_zPaint()
+    local version = UI.SFont(logo, S.F_VALUE, { text = "v" .. ZUI.VERSION })
+    version:SetPoint("TOPLEFT", first, "BOTTOMLEFT", 1, -3)
+    version._zPaint = function(self) self:SetTextColor(1, 1, 1, S.DIM_A) end
+    version:_zPaint()
+    logo._zPaint = function() first:_zPaint() second:_zPaint() version:_zPaint() end
+    window.titleText = first
+    if UI.AnimateMark then pcall(UI.AnimateMark, mark, logo, { inset = 0 }) end
 
-    navScroll, navChild = UI.ScrollArea(nav)
-    navScroll:SetPoint("TOPLEFT", 0, -32)
-    navScroll:SetPoint("BOTTOMRIGHT", -M.SCROLL_W, 4)
-    navChild:SetWidth(M.SIDEBAR_W - M.SCROLL_W)
-    navScroll.bar:SetPoint("TOPRIGHT", nav, "TOPRIGHT", -2, -32)
-    navScroll.bar:SetPoint("BOTTOMRIGHT", nav, "BOTTOMRIGHT", -2, 4)
+    -- EDIT MODE: the sidebar's one fixed row (EllesmereUI's Unlock Mode
+    -- row: 40 tall, a 45 x 32 icon box 20 in, the label 10 after it)
+    do
+        -- (on the window's drag surface, over the sidebar: the window's
+        -- buttons all live there)
+        local row = CreateFrame("Button", nil, tb)
+        row:SetHeight(S.NAV_ROW)
+        row:SetPoint("TOPLEFT", nav, "TOPLEFT", 0, -S.NAV_TOP)
+        row:SetPoint("RIGHT", nav, "RIGHT", -1, 0)
+        row:SetFrameLevel(nav:GetFrameLevel() + 5)
+        local function Tex(layer, sub)
+            local t = row:CreateTexture(nil, layer, nil, sub)
+            t._zui_own = true
+            t:SetTexture(FLAT)
+            return t
+        end
+        local hl = Tex("BACKGROUND", 3) hl:SetAllPoints()
+        local glow = Tex("BACKGROUND", 2) glow:SetAllPoints()
+        local ind = Tex("ARTWORK", 1) ind:SetWidth(3)
+        ind:SetPoint("TOPLEFT") ind:SetPoint("BOTTOMLEFT")
+        local icon = row:CreateTexture(nil, "ARTWORK", nil, 2)
+        icon._zui_own = true
+        icon:SetSize(S.NAV_ICON_H, S.NAV_ICON_H)
+        icon:SetPoint("LEFT", row, "LEFT", S.NAV_LEFT + (S.NAV_ICON_W - S.NAV_ICON_H) / 2, 0)
+        icon:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\mode")
+        local label = UI.SFont(row, S.F_NAV, { text = "Edit Mode" })
+        label:SetPoint("LEFT", row, "LEFT", S.NAV_LEFT + S.NAV_ICON_W + S.NAV_GAP, 0)
+        row._zText = label
+        row._zPaint = function(self)
+            local hot = self._zHot
+            hl:SetShown(hot and true or false)
+            hl:SetVertexColor(1, 1, 1, S.NAV_HL)
+            glow:SetShown(hot and true or false)
+            if hot then Grad(glow, S.HOVER_TINT, S.NAV_HOVER_GLOW) end
+            ind:SetShown(hot and true or false)
+            local h = S.HOVER_TINT
+            ind:SetVertexColor(h.r, h.g, h.b, S.NAV_HOVER_IND)
+            local a = hot and S.NAV_HOVER or S.NAV_EN
+            label:SetTextColor(1, 1, 1, a)
+            icon:SetVertexColor(1, 1, 1, a)
+        end
+        row:SetScript("OnEnter", function(self)
+            self._zHot = true
+            self:_zPaint()
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            local t = GetColor("tooltip", "title")
+            GameTooltip:AddLine("Edit Mode", t.r, t.g, t.b)
+            local c = GetColor("tooltip", "body")
+            GameTooltip:AddLine("Show every movable ZacUI element at once over a grid, drag them into place, then lock.",
+                c.r, c.g, c.b, true)
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", function(self) self._zHot = nil self:_zPaint() GameTooltip:Hide() end)
+        row:SetScript("OnClick", function() if ns.EnterEditMode then ns.EnterEditMode() end end)
+        row:_zPaint()
+        window.editButton = row
+    end
 
-    -- CONTENT COLUMN
+    -- the search box and its dropdown of results (Config_SearchBox); the
+    -- jump below opens what is picked
+    window.search = SearchBox.Attach(nav, window, { JumpTo = function(r) JumpTo(r) end,
+        BuildNav = function() BuildNav() end })
+    local listTop = S.NAV_TOP + S.NAV_ROW + S.SB_TOP + S.SB_H + S.SB_BOT
+
+    navScroll, navChild = UI.ScrollArea(nav, { style = "nav" })
+    navScroll:SetPoint("TOPLEFT", 0, -listTop)
+    navScroll:SetPoint("BOTTOMRIGHT", -1, 12)
+    if navScroll.SetClipsChildren then navScroll:SetClipsChildren(true) end
+    navChild:SetWidth(S.SIDEBAR - 1)
+    navScroll.bar:SetPoint("TOPRIGHT", nav, "TOPRIGHT", (M.SCROLL_W - 3) / 2 - 2, -listTop - 2)
+    navScroll.bar:SetPoint("BOTTOMRIGHT", nav, "BOTTOMRIGHT", (M.SCROLL_W - 3) / 2 - 2, 14)
+    navScroll.bar:SetFrameLevel(nav:GetFrameLevel() + 6)
+
+    -- THE RIGHT SIDE: above the footer
     pane = CreateFrame("Frame", nil, window)
-    pane:SetPoint("TOPLEFT", nav, "TOPRIGHT", 1, 0)
-    pane:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -1, 1)
+    pane:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
+    pane:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", 0, S.FOOTER)
+    pane:SetFrameLevel(window:GetFrameLevel() + 3)
 
-    contentScroll, content = UI.ScrollArea(pane)
+    contentScroll, content = UI.ScrollArea(pane, { style = "settings" })
     contentScroll:SetPoint("TOPLEFT", 0, 0)
-    contentScroll:SetPoint("BOTTOMRIGHT", -M.SCROLL_W - 2, 0)
+    contentScroll:SetPoint("BOTTOMRIGHT", 0, 0)
+    if contentScroll.SetClipsChildren then contentScroll:SetClipsChildren(true) end
     content:SetWidth(ContentWidth())
-    contentScroll.bar:SetPoint("TOPRIGHT", pane, "TOPRIGHT", -2, -4)
-    contentScroll.bar:SetPoint("BOTTOMRIGHT", pane, "BOTTOMRIGHT", -2, 4)
+    contentScroll.bar:SetPoint("TOPRIGHT", pane, "TOPRIGHT", -6, -4)
+    contentScroll.bar:SetPoint("BOTTOMRIGHT", pane, "BOTTOMRIGHT", -6, 4)
 
-    -- THE PINNED TOP: the title of a page with a preview and its strip,
-    -- above the scroll area (PlaceStrip moves the scroll area under it).
+    -- THE PINNED TOP: the page's title, its tabs and its preview, above
+    -- the scroll area (PlaceStrip moves the scroll area under it).
     head = CreateFrame("Frame", nil, pane)
     head:SetPoint("TOPLEFT", pane, "TOPLEFT", 0, 0)
     head:SetSize(ContentWidth(), 1)
+    head:SetFrameLevel(pane:GetFrameLevel() + 4)
     head:Hide()
     if Preview then
         Preview.Attach(window, { holder = head, Place = PlaceStrip,
-            -- the strip's width (the page's cards'), and the pane's height
-            -- (the strip's cap is a share of it)
-            Width = function() return ContentWidth() - 2 * M.MARGIN end,
+            -- the strip's width (the page's sections'), and the pane's
+            -- height (the strip's cap is a share of it)
+            Width = function() return ContentWidth() - 2 * S.PAD end,
             PaneHeight = function() return pane:GetHeight() or 0 end })
     end
 
-    -- TITLE BAR TOOLS, right of the title, left of the X: Edit Mode
-    -- (every placeholder at once, see UIF_EditMode), a reload, and the
-    -- window's own scale. The scale is the window's, not the UI's - a
-    -- 780px config on a 4k screen is a postage stamp, and SetScale on the
-    -- frame is the one knob that fixes that without touching anything
-    -- else. Persisted with the size.
+    -- THE HEADER'S CORNER: fold to a badge, left of the close box (40 x 40
+    -- boxes, as EllesmereUI's collapse and close)
     do
-        local tb = window.titleBar
-        local edit = UI.Button(tb, "Edit Mode", { width = 78, height = 20,
-            tooltip = "Show every movable ZacUI element at once over a "
-                .. "grid, drag them into place, then lock.",
-            onClick = function()
-                if ns.EnterEditMode then ns.EnterEditMode() end
-            end })
-        edit:SetPoint("RIGHT", window.closeButton, "LEFT", -10, 0)
-        local reload = UI.Button(tb, "Reload", { width = 60, height = 20,
-            tooltip = "/reload - the settings that say they need one.",
-            onClick = function() ReloadUI() end })
-        reload:SetPoint("RIGHT", edit, "LEFT", -6, 0)
+        local fold = CreateFrame("Button", nil, tb)
+        fold:SetSize(40, 40)
+        fold:SetPoint("TOPRIGHT", window, "TOPRIGHT", -(14 + 40 + 4), -11)
+        fold:SetFrameLevel(window:GetFrameLevel() + 30)
+        local ft = fold:CreateTexture(nil, "ARTWORK")
+        ft._zui_own = true
+        ft:SetSize(32, 32)
+        ft:SetPoint("CENTER")
+        ft:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\collapse")
+        fold._zPaint = function(self) ft:SetVertexColor(1, 1, 1, self._zHot and 1 or S.DIM_A) end
+        fold:SetScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
+        fold:SetScript("OnLeave", function(self) self._zHot = nil self:_zPaint() GameTooltip:Hide() end)
+        fold:SetScript("OnClick", function() ns.ConfigFold() end)
+        fold:_zPaint()
+        UI.Tooltip(fold, "Fold", "Fold this window to a small badge so you can see the game. Previews and Edit Mode keep "
+            .. "running; the badge's + brings it back.")
+        window.foldButton = fold
+    end
 
-        local function Scale() return (ZacUIDB.config and ZacUIDB.config.scale) or 1 end
+    -- THE FOOTER (82): Reload on the left, Close on the right (EllesmereUI's
+    -- 180 / 160 x 36 at 24 in), the window's own scale between them. The
+    -- buttons are the window's (on its drag surface), as before.
+    do
+        local reload = UI.Button(tb, "Reload", { width = S.FOOT_BTN_W, height = S.FOOT_BTN_H, style = "footer",
+            tooltip = "/reload - the settings that say they need one.",
+            onClick = function() ns.RequestReload() end })
+        reload:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", S.SIDEBAR + S.FOOT_PAD, S.FOOT_PAD)
+        reload:SetFrameLevel(window:GetFrameLevel() + 20)
+        local close = UI.Button(tb, "Close", { width = S.FOOT_CLOSE_W, height = S.FOOT_BTN_H, style = "close",
+            onClick = function() UI.CloseWindow(window) end })
+        close:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -S.FOOT_PAD, S.FOOT_PAD)
+        close:SetFrameLevel(window:GetFrameLevel() + 20)
+        window.doneButton = close
+
+        -- THE WINDOW'S SCALE: the window's, not the UI's - a big config on
+        -- a 4k screen is a postage stamp, and SetScale on the frame is the
+        -- one knob that fixes that without touching anything else.
+        -- Persisted with the size.
+        local Scale = UserScale
         local function SetScale(v)
             v = math.max(0.6, math.min(1.4, v))
             ZacUIDB.config = ZacUIDB.config or {}
             ZacUIDB.config.scale = v
-            window:SetScale(v)
+            window:SetScale(ExactScale(v))
+            SnapWindow()
             -- bigger, the window may now run off the right edge
             KeepOnScreen()
             -- the preview keeps its sample at the real, in-game size
             if Preview and Preview.Place then Preview.Place() end
         end
-        local plus = UI.Button(tb, "+", { width = 20, height = 20,
+        local plus = UI.Button(tb, "+", { width = S.FOOT_BTN_H, height = S.FOOT_BTN_H, style = "footer",
             onClick = function() SetScale(Scale() + 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end })
-        plus:SetPoint("RIGHT", reload, "LEFT", -12, 0)
-        local pct = UI.Font(tb, F.SMALL, { text = math.floor(Scale() * 100 + 0.5) .. "%",
-            justify = "CENTER", cat = "text", key = "gray" })
-        pct:SetWidth(34)
-        pct:SetPoint("RIGHT", plus, "LEFT", -2, 0)
+        plus:SetPoint("RIGHT", close, "LEFT", -20, 0)
+        plus:SetFrameLevel(window:GetFrameLevel() + 20)
+        local pct = UI.SFont(tb, S.F_VALUE, { text = math.floor(Scale() * 100 + 0.5) .. "%", justify = "CENTER" })
+        pct._zPaint = function(self) self:SetTextColor(1, 1, 1, S.DIM_A) end
+        pct:_zPaint()
+        pct:SetWidth(52)
+        pct:SetPoint("RIGHT", plus, "LEFT", 0, 0)
         window.scaleText = pct
-        local minus = UI.Button(tb, "-", { width = 20, height = 20,
+        local minus = UI.Button(tb, "-", { width = S.FOOT_BTN_H, height = S.FOOT_BTN_H, style = "footer",
             onClick = function() SetScale(Scale() - 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end })
-        minus:SetPoint("RIGHT", pct, "LEFT", -2, 0)
-        UI.Tooltip(pct, "Window scale", "Grows or shrinks this window only.")
-        window:SetScale(Scale())
+        minus:SetPoint("RIGHT", pct, "LEFT", 0, 0)
+        minus:SetFrameLevel(window:GetFrameLevel() + 20)
+        UI.Tooltip(pct, "Window scale", "Grows or shrinks this window only. Under the ZacUI look a size "
+            .. "close to whole screen pixels is nudged onto them, so text and lines stay sharp.")
+        window:SetScale(ExactScale(Scale()))
     end
 
     window.nav, window.content = nav, content
@@ -892,22 +1135,219 @@ local function Build()
     window:SetScript("OnShow", function()
         -- A fresh open starts unfiltered; a stale search from last time
         -- would hide most of the sidebar for no visible reason.
-        searchSerial = searchSerial + 1
-        window.search:SetText("")
-        lastQuery, lastResults, lastHits = "", {}, {}
+        SearchBox.Reset()
         ShowPage(ConfigState().selected)
     end)
     window:HookScript("OnHide", OnWindowHide)
+    -- whole pixels once it has settled after an open (the pop-in scales
+    -- it), and after a drag; then the window's one-time hints, pointing
+    -- at what they are about (Tutorial_Hints, UI.Callout)
+    window:HookScript("OnShow", function()
+        -- opened another way while folded: the badge goes
+        if badge and badge:IsShown() then badge._zUnfolding = true badge:Hide() end
+        window._zFolded = nil
+        WatchFights()
+        if Opacity() < 1 then C_Timer.After(0.2, ApplyOpacity) end
+        C_Timer.After(0.3, SnapWindow)
+        C_Timer.After(0.6, function()
+            local H = ns.Hints
+            if not (H and H.Callout and window:IsShown()) then return end
+            if ns.Tutorial and ns.Tutorial.TourActive and ns.Tutorial.TourActive() then return end
+            if InCombatLockdown and InCombatLockdown() then return end
+            H.Callout("cfg_editmode", window.editButton,
+                "Edit Mode shows every ZacUI frame at once over a grid. Drag them where you want them.", "RIGHT")
+            for _, row in ipairs(rowPool) do
+                if row:IsShown() and row._zPower and row._zPower:IsShown() then
+                    H.Callout("cfg_power", row._zPower, "Each part has its own switch. Off means not loaded at all, "
+                        .. "and it asks before the reload.", "RIGHT")
+                    break
+                end
+            end
+        end)
+    end)
+    window._zOnMoved = SnapWindow
     return window
 end
 
+-- ============================================================
+-- WINDOW COMFORTS (finish pass)
+-- ============================================================
+-- Fold to a badge, an opacity, and what it does when a fight starts.
+-- Window state (ZacUIDB.config: opacity, combat), nil = as before: fully
+-- opaque, and it stays as it is in a fight.
+local function Cfg()
+    ZacUIDB.config = ZacUIDB.config or {}
+    return ZacUIDB.config
+end
+Opacity = function()
+    local o = tonumber(ZacUIDB and ZacUIDB.config and ZacUIDB.config.opacity)
+    return o and math.max(0.5, math.min(1, o)) or 1
+end
+ApplyOpacity = function()
+    if not (window and window:IsShown()) or window._zAnim or window._zFightFaded then return end
+    local op = Opacity()
+    if math.abs((window:GetAlpha() or 1) - op) < 0.005 then return end
+    if ns.Motion and ns.Motion.FadeTo then ns.Motion.FadeTo(window, op, { style = "fade", duration = 0.15 })
+    else window:SetAlpha(op) end
+end
+ns.ConfigApplyOpacity = ApplyOpacity
+
+-- a point on screen in another frame's units
+local function Into(v, from, to)
+    return v * (from:GetEffectiveScale() or 1) / (to:GetEffectiveScale() or 1)
+end
+
+local function BuildBadge()
+    local b = CreateFrame("Frame", "ZacUIConfigBadge", UIParent)
+    b:SetSize(150, 30)
+    b:SetFrameStrata("DIALOG")
+    b:SetToplevel(true)
+    b:SetClampedToScreen(true)
+    b:EnableMouse(true)
+    b:SetMovable(true)
+    b:RegisterForDrag("LeftButton")
+    b:SetScript("OnDragStart", b.StartMoving)
+    b:SetScript("OnDragStop", b.StopMovingOrSizing)
+    UI.Fill(b, "ui", "headerBg")
+    UI.Border(b, "ui", "border")
+    b._zPaint = UI.PaintBox
+    b:_zPaint()
+    local icon = b:CreateTexture(nil, "ARTWORK")
+    icon._zui_own = true
+    icon:SetSize(18, 18)
+    icon:SetPoint("LEFT", 9, 0)
+    icon:SetTexture(ns.TEX_ICON)
+    local label = UI.Font(b, F.TITLE, { text = "ZacUI", cat = "text", key = "gold" })
+    label:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+    local close = UI.CloseX(b, 22, function() ns.ConfigUnfold(true) end)
+    close:SetPoint("RIGHT", -4, 0)
+    local open = UI.Button(b, "", { width = 20, height = 20, tooltip = "Back to the settings window.",
+        onClick = function() ns.ConfigUnfold() end })
+    local ot = open:CreateTexture(nil, "ARTWORK")
+    ot._zui_own = true
+    ot:SetSize(14, 14)
+    ot:SetPoint("CENTER")
+    ot:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\expand")
+    open:SetPoint("RIGHT", close, "LEFT", -4, 0)
+    b.open, b.close = open, close
+    if UISpecialFrames then tinsert(UISpecialFrames, "ZacUIConfigBadge") end
+    -- Escape on the badge closes the window for real
+    b:SetScript("OnHide", function(self)
+        if window and window._zFolded and not self._zUnfolding then
+            window._zFolded = nil
+            OnWindowHide()
+        end
+        self._zUnfolding = nil
+    end)
+    b:Hide()
+    badge = b
+    return b
+end
+
+function ns.ConfigFold()
+    if not (window and window:IsShown()) or window._zFolded then return false end
+    local b = badge or BuildBadge()
+    local left, top = window:GetLeft(), window:GetTop()
+    if left and top then
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", Into(left, window, UIParent), Into(top, window, UIParent))
+    end
+    window._zFolded = true
+    if ns.StopAnim then ns.StopAnim(window) end
+    window:Hide()
+    b:Show()
+    return true
+end
+
+-- back: the window where the badge is now; closeIt = the badge's X (the
+-- window closes for real)
+function ns.ConfigUnfold(closeIt)
+    if not (badge and badge:IsShown()) then return false end
+    local left, top = badge:GetLeft(), badge:GetTop()
+    badge._zUnfolding = not closeIt
+    if closeIt then
+        badge:Hide()
+        return true
+    end
+    badge:Hide()
+    if window and left and top then
+        window:ClearAllPoints()
+        window:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", Into(left, UIParent, window), Into(top, UIParent, window))
+    end
+    if window then window._zFolded = nil end
+    ns.OpenConfig()
+    return true
+end
+
+function ns.ConfigFolded() return window ~= nil and window._zFolded == true end
+
+-- a fight: fade it out, or close it (Cfg().combat); made with the window
+WatchFights = function()
+    if fightWatch then return end
+    fightWatch = CreateFrame("Frame")
+    fightWatch:RegisterEvent("PLAYER_REGEN_DISABLED")
+    fightWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
+    fightWatch:SetScript("OnEvent", function(_, event)
+        if not window then return end
+        local rule = ZacUIDB and ZacUIDB.config and ZacUIDB.config.combat
+        if event == "PLAYER_REGEN_DISABLED" then
+            if not window:IsShown() then return end
+            if rule == "close" then
+                window:Hide()
+                if Print then Print("Settings closed for the fight - /zui opens them again.") end
+            elseif rule == "fade" then
+                window._zFightFaded = true
+                if ns.Motion and ns.Motion.FadeTo then ns.Motion.FadeTo(window, 0.25, { style = "fade", duration = 0.2 })
+                else window:SetAlpha(0.25) end
+            end
+        elseif window._zFightFaded then
+            window._zFightFaded = nil
+            if window:IsShown() then
+                if ns.Motion and ns.Motion.FadeTo then ns.Motion.FadeTo(window, Opacity(), { style = "fade", duration = 0.2 })
+                else window:SetAlpha(Opacity()) end
+            end
+        end
+    end)
+end
+
+-- General > Overview's card for this window
+function ns.ConfigWindowCard(L)
+    L:Card("This window")
+    local pctOf = function(v) return math.floor(v * 100 + 0.5) end
+    local sl = UI.Slider(L.current, { width = 200, min = 50, max = 100, step = 5, label = "Opacity",
+        value = pctOf(Opacity()), format = function(v) return v .. "%" end,
+        onChange = function(v)
+            Cfg().opacity = (v < 100) and (v / 100) or nil
+            ApplyOpacity()
+        end })
+    L:Row(sl, 40)
+    local RULES = { { text = "Stay as it is", value = "stay" }, { text = "Fade it out", value = "fade" },
+        { text = "Close it", value = "close" } }
+    local function RuleText(v)
+        for _, r in ipairs(RULES) do if r.value == v then return r.text end end
+        return RULES[1].text
+    end
+    local dd = UI.Field(L.current, "In a fight", function(h)
+        return UI.Dropdown(h, { width = 200, items = function() return RULES end,
+            selected = function() return RuleText(Cfg().combat or "stay") end,
+            selectedValue = function() return Cfg().combat or "stay" end,
+            onSelect = function(v) Cfg().combat = (v ~= "stay") and v or nil end })
+    end, { width = 200 })
+    L:Add(dd, 8)
+    L:Desc("Fade it out: down to a quarter until the fight ends. The - beside the window scale folds it to a "
+        .. "small badge any time.")
+    L:EndCard()
+end
+
 local function OpenConfig(pageId)
-    if not window then Build() end
+    if not window then UI.SettingsBuild(Build) end
     if pageId then ConfigState().selected = pageId end
     if window:IsShown() then
         if pageId then ShowPage(pageId) end
         return
     end
+    -- the UI scale may have changed since: the exact scale again
+    if not window._zAnim then window:SetScale(ExactScale(UserScale())) end
     UI.OpenWindow(window)
 end
 
@@ -925,11 +1365,6 @@ RefreshConfig = function()
     -- here and stops; the next open builds fresh anyway.
     if not window:IsShown() then return end
     UI.Repaint(window)
-    if searchMode and lastQuery:find("%S") then
-        RunSearch(lastQuery)
-        ShowResults(lastQuery)
-        return
-    end
     BuildNav()
     ShowPage(ConfigState().selected)
 end

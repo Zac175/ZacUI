@@ -579,6 +579,8 @@ function Native:Start() end
 function Native:QueryUnit(unit, now)
     local mine = UnitGetIncomingHeals(unit, "player") or 0
     local total = UnitGetIncomingHeals(unit) or 0
+    -- hidden (WoW Forever): no maths on it, so no chips
+    if issecretvalue ~= nil and (issecretvalue(mine) or issecretvalue(total)) then return end
     local others = total - mine
     if mine > 0 then push(playerGUID, mine, now, false, false) end
     if others > 0 then push(nil, others, now + 0.001, false, true) end

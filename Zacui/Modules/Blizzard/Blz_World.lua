@@ -57,11 +57,17 @@ Modules.worldmap = function()
             or map.CloseButton
         if close then SkinCloseButton(close) end
 
+        -- Forever's (modern) map hangs the quest-panel toggle over the
+        -- canvas as one of its overlay frames, drawn as two arrow
+        -- pictures: skinned as text buttons they were empty dark boxes
+        -- (2026-11-07). There it keeps Blizzard's arrows; the Classic
+        -- map has no overlay frames and is treated as before.
+        local modernToggle = map.SidePanelToggle and type(map.overlayFrames) == "table"
         for _, key in ipairs({ "SidePanelToggle", "NavBar", "TitleCanvasSpacerFrame" }) do
             local piece = map[key]
-            if piece then StripTextures(piece) end
+            if piece and not (modernToggle and key == "SidePanelToggle") then StripTextures(piece) end
         end
-        if map.SidePanelToggle then
+        if map.SidePanelToggle and not modernToggle then
             for _, b in ipairs({ map.SidePanelToggle.OpenButton,
                                  map.SidePanelToggle.CloseButton }) do
                 if b then SkinButton(b) end

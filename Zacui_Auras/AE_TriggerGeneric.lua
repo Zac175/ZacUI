@@ -54,6 +54,7 @@ G.Compare = Compare
 
 local function NpcId(guid)
     if type(guid) ~= "string" then return nil end
+    if issecretvalue and issecretvalue(guid) then return nil end   -- (hidden on WoW Forever)
     local kind, _, _, _, _, id = strsplit("-", guid)
     if kind == "Creature" or kind == "Vehicle" or kind == "Pet" then return id end
     return nil
@@ -119,6 +120,8 @@ end
 local function NameRealm(unit)
     if not UnitName then return nil, nil end
     local name, realm = UnitName(unit)
+    -- (WoW Forever hides an enemy's name in a fight: no name then)
+    if issecretvalue and (issecretvalue(name) or issecretvalue(realm)) then return nil, nil end
     if name and (not realm or realm == "") then realm = GetRealmName and GetRealmName() or "" end
     return name, realm
 end
@@ -173,6 +176,7 @@ local function UnitInfo(unit, v)
     v.role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit) or nil
     v.raid_role = RaidRole(unit)
     v.raidMarkIndex = GetRaidTargetIndex and GetRaidTargetIndex(unit) or 0
+    if issecretvalue and issecretvalue(v.raidMarkIndex) then v.raidMarkIndex = 0 end   -- (WoW Forever)
     v.raidMark = (v.raidMarkIndex or 0) > 0 and ("{rt" .. v.raidMarkIndex .. "}") or ""
     v.nameplateType = Reaction(unit)
     v.ignoreSelf = not UnitIsUnit("player", unit)
@@ -489,6 +493,7 @@ RUN["Health"] = Unit({ kind = "health",
         v.percenthealth = max ~= 0 and cur / max * 100 or nil
         v.deficit, v.maxhealth = max - cur, max
         v.healprediction = UnitGetIncomingHeals and UnitGetIncomingHeals(unit) or 0
+        if Secret(v.healprediction) then v.healprediction = 0 end   -- (WoW Forever)
         return true
     end,
     State = function(ctx, st, v)
@@ -538,6 +543,7 @@ RUN["Cast"] = Unit({ kind = "cast",
             if Secret(name, startMS) or Secret(endMS) then return false end
             channel = name ~= nil
         end
+        if Secret(notInt) then notInt = nil end   -- (WoW Forever: unknown, so interruptible)
         UnitInfo(unit, v)
         v.spell, v.spellName, v.spellId, v.icon = name, name, spellId, icon
         v.castType = name and (channel and "channel" or "cast") or nil
@@ -581,6 +587,8 @@ RUN["Threat Situation"] = Unit({ kind = "threat",
         local aggro, status, pct, raw, value
         local fn = UnitDetailedThreatSituation
         if fn then aggro, status, pct, raw, value = fn("player", unit) end
+        -- (WoW Forever hides threat in a fight: no reading)
+        if ns.Hidden(aggro, status, pct, raw, value) then return false end
         v.aggro, v.status = aggro and true or false, status
         v.threatpct, v.rawthreatpct, v.threatvalue = pct or 0, raw or 0, value or 0
         v.value = value or 0
@@ -590,6 +598,7 @@ RUN["Threat Situation"] = Unit({ kind = "threat",
     Missing = function(ctx, unit, v)
         if ctx.trigger.unit ~= "none" then return false end
         local status = UnitThreatSituation and UnitThreatSituation("player")
+        if ns.Hidden(status) then return false end   -- (WoW Forever)
         v.status = status
         v.aggro = status == 2 or status == 3
         v.threatpct, v.rawthreatpct, v.threatvalue, v.value, v.total = 100, 100, 0, 0, 100
@@ -646,7 +655,11 @@ RUN["Stance/Form/Aura"] = One({ kind = "form",
 local function SpellPower()
     if not GetSpellBonusDamage then return 0 end
     local best = 0
-    for school = 2, 7 do best = math.max(best, GetSpellBonusDamage(school) or 0) end
+    for school = 2, 7 do
+        local d = GetSpellBonusDamage(school) or 0
+        if Secret(d) then d = 0 end   -- (hidden on WoW Forever)
+        best = math.max(best, d)
+    end
     return best
 end
 
@@ -655,24 +668,27 @@ RUN["Character Stats"] = One({ kind = "stats",
         "UNIT_AURA", "COMBAT_RATING_UPDATE", "PLAYER_DAMAGE_DONE_MODS", "SPELL_POWER_CHANGED", "UNIT_DAMAGE",
         "UNIT_ATTACK_SPEED", "PLAYER_ENTERING_WORLD" },
     Fetch = function(ctx, _, v)
-        local function Stat(i) return UnitStat and select(2, UnitStat("player", i)) or 0 end
+        -- (WoW Forever can hand your stats back hidden: each reads as 0)
+        local function P(x) if Secret(x) then return 0 end return x end
+        local function Stat(i) return UnitStat and P(select(2, UnitStat("player", i))) or 0 end
         v.strength, v.agility, v.stamina, v.intellect, v.spirit = Stat(1), Stat(2), Stat(3), Stat(4), Stat(5)
-        v.criticalpercent = GetCritChance and GetCritChance() or 0
-        v.hastepercent = GetHaste and GetHaste() or 0
+        v.criticalpercent = GetCritChance and P(GetCritChance()) or 0
+        v.hastepercent = GetHaste and P(GetHaste()) or 0
         local base, pos, neg = UnitAttackPower("player")
+        base, pos, neg = P(base), P(pos), P(neg)
         v.attackpower = (base or 0) + (pos or 0) + (neg or 0)
         v.spellpower = SpellPower()
         if GetUnitSpeed then
             local cur, run = GetUnitSpeed("player")
             v.movespeedpercent, v.runspeedpercent = (cur or 0) / 7 * 100, (run or 0) / 7 * 100
         end
-        v.dodgepercent = GetDodgeChance and GetDodgeChance() or 0
-        v.parrypercent = GetParryChance and GetParryChance() or 0
-        v.blockpercent = GetBlockChance and GetBlockChance() or 0
-        v.blockvalue = GetShieldBlock and GetShieldBlock() or 0
-        v.armorrating = UnitArmor and select(2, UnitArmor("player")) or 0
+        v.dodgepercent = GetDodgeChance and P(GetDodgeChance()) or 0
+        v.parrypercent = GetParryChance and P(GetParryChance()) or 0
+        v.blockpercent = GetBlockChance and P(GetBlockChance()) or 0
+        v.blockvalue = GetShieldBlock and P(GetShieldBlock()) or 0
+        v.armorrating = UnitArmor and P(select(2, UnitArmor("player"))) or 0
         for i, k in ipairs({ "holy", "fire", "nature", "frost", "shadow", "arcane" }) do
-            v["resistance" .. k] = UnitResistance and select(2, UnitResistance("player", i)) or 0
+            v["resistance" .. k] = UnitResistance and P(select(2, UnitResistance("player", i))) or 0
         end
         return true
     end,
@@ -741,6 +757,7 @@ local function SwingStart(hand)
     local ms, os_ = UnitAttackSpeed("player")
     local dur = (hand == "off") and (os_ or ms) or ms
     if hand == "ranged" and UnitRangedDamage then dur = (UnitRangedDamage("player")) end
+    if Secret(dur) then return end   -- (hidden on WoW Forever)
     if not dur then return end
     swing[hand].duration = dur
     swing[hand].expirationTime = GetTime() + dur
@@ -892,7 +909,7 @@ RUN["Crowd Controlled"] = One({ kind = "cc", events = { "LOSS_OF_CONTROL_UPDATE"
 -- ============================================================
 local function GCDInfo()
     if not GetSpellCooldown then return 0, 0 end
-    local ok, start, dur = pcall(GetSpellCooldown, 61304)
+    local ok, start, dur = pcall(GetSpellCooldown, ns.GCDSpell and ns.GCDSpell() or 61304)
     if ok and start then return start, dur end
     return 0, 0
 end
@@ -1210,6 +1227,7 @@ local function ItemCD(slot)
             if slot then
                 local s = tonumber(tr.itemSlot) or 13
                 start, dur, enabled = GetInventoryItemCooldown("player", s)
+                if Secret(start, dur) or Secret(enabled) then start, dur, enabled = 0, 0, 1 end   -- (WoW Forever)
                 v.icon = GetInventoryItemTexture("player", s)
                 local link = GetInventoryItemLink("player", s)
                 v.name = link and link:match("%[(.-)%]") or nil
@@ -1267,6 +1285,7 @@ local function ReadyKind(slot)
             if slot then
                 local s = tonumber(tr.itemSlot) or 13
                 start, dur = GetInventoryItemCooldown("player", s)
+                if Secret(start, dur) then start, dur = 0, 0 end   -- (WoW Forever)
                 icon = GetInventoryItemTexture("player", s)
                 local link = GetInventoryItemLink("player", s)
                 name = link and link:match("%[(.-)%]") or nil

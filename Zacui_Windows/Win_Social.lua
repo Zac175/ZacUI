@@ -53,6 +53,52 @@ local function Enabled(key)
     return ZacUIDB and ZacUIDB.modules and ZacUIDB.modules[key] ~= false
 end
 
+-- WHERE THE FRIENDS LIVE. Classic Era and TBC: FriendsFrame and its
+-- sub-pages. WoW Forever (2026-11-07, Zac: "this looks horrible") has
+-- the modern social window instead, SocialUIFrame, with a Battle.net bar
+-- across its top and the Friends and Raid lists as content frames
+-- (FriendsList, RaidFrame) under tabs down its right edge; no Who page
+-- and no guild page (the guild went to Communities). So on Forever the
+-- Friends cover hangs on SocialUIFrame.FriendsList, under the (flattened)
+-- Battle.net bar, with ZacUI's title bar from Kit.ModernHeader on top.
+-- BOTH WINDOWS CAN EXIST ON FOREVER, and the game picks which one opens
+-- (a server-side switch that can flip mid-session). So the Friends cover
+-- is not tied to one: it hangs on whichever friends list is showing,
+-- moving between the two hosts as they open (ApplyFriends). The mode in
+-- use is the one the cover sits in now.
+local socialMode                     -- "modern" (SocialUIFrame) | nil (FriendsFrame)
+local function Modern() return socialMode == "modern" end
+local function Panel()
+    if Modern() then return _G.SocialUIFrame end
+    return _G.FriendsFrame
+end
+local function ModernList()
+    local sui = _G.SocialUIFrame
+    local list = sui and rawget(sui, "FriendsList")
+    return type(list) == "table" and list or nil
+end
+-- every friends list the client has (classic, modern), and the one to use
+-- now: the host showing, else the one the cover is already in, else the
+-- modern one, else the classic
+local function FriendsHosts()
+    local t = {}
+    if _G.FriendsListFrame then t[#t + 1] = _G.FriendsListFrame end
+    local m = ModernList()
+    if m then t[#t + 1] = m end
+    return t
+end
+local fr = { query = "" }
+local function FriendsHost(shown)
+    if shown then return shown end
+    for _, h in ipairs(FriendsHosts()) do if h:IsVisible() then return h end end
+    if fr.host then return fr.host end
+    return ModernList() or _G.FriendsListFrame
+end
+local function SetFriendsHost(host)
+    fr.host = host
+    socialMode = (host ~= nil and host == ModernList()) and "modern" or nil
+end
+
 -- ============================================================
 -- SHARED HELPERS
 -- ============================================================
@@ -130,17 +176,33 @@ end
 local function PageCover(host, name, topFn)
     local win = Kit.Cover(host, {
         name = name,
-        insetName = "FriendsFrame",
-        onClose = function() HideUIPanel(FriendsFrame) end,
+        insetName = Modern() and "SocialUIFrame" or "FriendsFrame",
+        onClose = function() HideUIPanel(Panel()) end,
     })
     -- Blizzard's header above carries the title and the (secure) X.
     win.titleBar:Hide()
+    -- (Forever: ZacUI's title bar on the social window stays up over a
+    -- page cover - the cover brings none of its own)
+    win._zKeepHeader = Modern() or nil
     win.top = -Kit.PAD
     win.Reanchor = function()
-        local ins = ns.GetPanelInset("FriendsFrame", FriendsFrame)
+        local panel = Panel()
+        if not panel then return end
+        local ins = ns.GetPanelInset(Modern() and "SocialUIFrame" or "FriendsFrame", panel)
+        local top = topFn(ins)
+        if Modern() then
+            -- under the Battle.net bar, which hangs 22px down from the top
+            -- and is 50 tall (SocialUI.xml); measured when it has a size
+            local bar = rawget(panel, "BattleNetBar")
+            -- (Forever can keep a window's edges secret: then the bar's
+            -- XML place, 22 down and 50 tall)
+            local pt, bb = panel:GetTop(), type(bar) == "table" and bar.GetBottom and bar:GetBottom()
+            if ns.IsSecret and (ns.IsSecret(pt) or ns.IsSecret(bb)) then pt, bb = nil, nil end
+            top = (pt and bb) and -(pt - bb) - 2 or -74
+        end
         win:ClearAllPoints()
-        win:SetPoint("TOPLEFT", FriendsFrame, "TOPLEFT", ins.l or 0, topFn(ins))
-        win:SetPoint("BOTTOMRIGHT", FriendsFrame, "BOTTOMRIGHT", -(ins.r or 0), ins.b or 0)
+        win:SetPoint("TOPLEFT", panel, "TOPLEFT", ins.l or 0, top)
+        win:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -(ins.r or 0), ins.b or 0)
     end
     win.Reanchor()
     return win
@@ -160,6 +222,7 @@ local function BelowFriendTabs(ins)
     if strip then return math.min(BelowHairline(ins), strip) end
     local tab = _G.FriendsTabHeaderTab1
     local h = (tab and tab:GetHeight()) or 32
+    if ns.IsSecret and ns.IsSecret(h) then h = 32 end      -- (Forever may keep it secret)
     if not h or h < 16 then h = 32 end
     -- The tabs sit 51px down (FriendsFrame.xml); the cover starts where
     -- Blizzard's own list inset does.
@@ -287,7 +350,8 @@ local function Portrait()
     if portrait then return portrait end
     portrait = {}
     local function Add(x) if x then portrait[#portrait + 1] = x end end
-    Add(FriendsFrame.PortraitContainer)
+    Add(_G.FriendsFrame and _G.FriendsFrame.PortraitContainer)
+    Add(_G.SocialUIFrame and rawget(_G.SocialUIFrame, "PortraitContainer"))
     Add(_G.FriendsFramePortrait)
     return portrait
 end
@@ -306,11 +370,15 @@ local function SyncSilence()
     if raid and raid:IsVisible() then need = true end
     for _, f in ipairs(Portrait()) do
         if need then
-            if f._zKitAlpha == nil then f._zKitAlpha = f:GetAlpha() or 1 end
+            if not f._zKitQuiet then
+                f._zKitQuiet = true
+                f._zKitAlpha = f:GetAlpha() or 1
+            end
             f:SetAlpha(0)
-        elseif f._zKitAlpha ~= nil then
+        elseif f._zKitQuiet then
             f:SetAlpha(f._zKitAlpha)
             f._zKitAlpha = nil
+            f._zKitQuiet = nil
         end
     end
 end
@@ -318,7 +386,6 @@ end
 -- ============================================================
 -- FRIENDS
 -- ============================================================
-local fr = { query = "" }
 
 local function FriendRows()
     local data = {}
@@ -346,10 +413,21 @@ local function FriendRows()
             guid = info.guid,
         })
     end
+    -- BNGetFriendInfo's tuple, or the same from C_BattleNet's account info
+    -- (Forever has only the latter)
+    local function BNetInfo(i)
+        if BNGetFriendInfo then return BNGetFriendInfo(i) end
+        local a = C_BattleNet and C_BattleNet.GetFriendAccountInfo and C_BattleNet.GetFriendAccountInfo(i)
+        if type(a) ~= "table" then return nil end
+        local g = type(a.gameAccountInfo) == "table" and a.gameAccountInfo or {}
+        return a.bnetAccountID, a.accountName, a.battleTag, a.isBattleTagFriend, g.characterName,
+            g.gameAccountID, g.clientProgram, g.isOnline, a.lastOnlineTime, a.isAFK, a.isDND,
+            a.customMessage, a.note
+    end
     local function BNet(i)
         local bnetIDAccount, accountName, battleTag, isBattleTag, characterName,
             bnetIDGameAccount, client, isOnline, lastOnline, isAFK, isDND,
-            messageText, noteText = BNGetFriendInfo(i)
+            messageText, noteText = BNetInfo(i)
         if not bnetIDAccount then return end
         local e = {
             kind = "bnet", id = i, key = "b:" .. bnetIDAccount, bnet = bnetIDAccount,
@@ -517,7 +595,7 @@ end
 
 local function BuildFriends()
     if fr.win then return fr.win end
-    local win = PageCover(FriendsListFrame, "ZacUIFriendsWindow", BelowFriendTabs)
+    local win = PageCover(fr.host, "ZacUIFriendsWindow", BelowFriendTabs)
     fr.win = win
     local y = win.top
 
@@ -604,10 +682,18 @@ local function BuildFriends()
     return win
 end
 
-local function ApplyFriends()
-    if not FriendsFrame or not FriendsListFrame then return end
+local function ApplyFriends(shown)
+    local host = FriendsHost(type(shown) == "table" and shown or nil)
+    if not host then return end
+    SetFriendsHost(host)
+    if not Panel() then return end
     if Enabled("friendswin") then
         BuildFriends()
+        -- the other window opened: the cover moves over to it
+        if fr.win:GetParent() ~= host then
+            fr.win:SetParent(host)
+            fr.win._zKeepHeader = Modern() or nil
+        end
         fr.win.Reanchor()
         fr.win:Show()
         if fr.win:IsVisible() then FriendsRefresh() end
@@ -621,6 +707,20 @@ end
 -- WHO
 -- ============================================================
 local who = {}
+
+-- WHERE THE WHO LIST LIVES. Classic: WhoFrame, a page of FriendsFrame.
+-- WoW Forever: a page of the group finder, LFGWhoListFrame (there is no
+-- Who in its social window), reached by the Who tab ZacUI's group
+-- finder window gains there (Win_LFG). The cover then hangs on that page,
+-- in the group finder window's page area, under its tabs.
+local function WhoHost()
+    if _G.WhoFrame then return _G.WhoFrame end
+    local f = _G.LFGWhoListFrame
+    return type(f) == "table" and f or nil
+end
+local function WhoInLFG()
+    return _G.WhoFrame == nil and _G.LFGWhoListFrame ~= nil
+end
 
 local WHO_SORT = {
     name  = function(e) return string.lower(e.name or "") end,
@@ -730,7 +830,32 @@ end
 
 local function BuildWho()
     if who.win then return who.win end
-    local win = PageCover(WhoFrame, "ZacUIWhoWindow", BelowHairline)
+    local win
+    if WhoInLFG() then
+        win = Kit.Cover(WhoHost(), {
+            name = "ZacUIWhoWindow",
+            insetName = "LFGParentFrame",
+            onClose = function() HideUIPanel(_G.LFGParentFrame) end,
+        })
+        win.titleBar:Hide()
+        win._zKeepHeader = true
+        win.top = -Kit.PAD
+        win.Reanchor = function()
+            -- ZacUI's group finder window's page area, under its tabs;
+            -- the whole page while that window is off
+            local lfg = _G.ZacUILFGWindow
+            win:ClearAllPoints()
+            if lfg and lfg:IsShown() and lfg.pageTop then
+                win:SetPoint("TOPLEFT", lfg, "TOPLEFT", Kit.PAD, lfg.pageTop)
+                win:SetPoint("BOTTOMRIGHT", lfg, "BOTTOMRIGHT", -Kit.PAD, Kit.PAD)
+            else
+                win:SetAllPoints(WhoHost())
+            end
+        end
+        win.Reanchor()
+    else
+        win = PageCover(WhoFrame, "ZacUIWhoWindow", BelowHairline)
+    end
     who.win = win
     local y = win.top
 
@@ -813,18 +938,22 @@ local function BuildWho()
         Kit.Unsilence(who.leftovers)
         SyncSilence()
     end)
-    covers.who = { win = win, needsPortrait = true }
+    covers.who = { win = win, needsPortrait = not WhoInLFG() }
     return win
 end
 
 local function ApplyWho()
-    if not FriendsFrame or not WhoFrame then return end
+    local host = WhoHost()
+    if not host or (not WhoInLFG() and not FriendsFrame) then return end
     if Enabled("whowin") then
         BuildWho()
         who.win.Reanchor()
         who.win:Show()
         if who.win:IsVisible() then
             Kit.Silence(who.leftovers)
+            -- (Forever's Who page keeps its search box and button in the
+            -- HIGH strata and wears a title bar: ZacUI's group finder
+            -- window silences them with the rest of that page, Win_LFG)
             WhoRefresh()
         end
     elseif who.win then
@@ -1300,17 +1429,43 @@ end
 -- Each page checks its own toggle every time its page opens, so turning
 -- one off never needs a reload.
 Modules.friendswin = function()
-    if not FriendsFrame or not FriendsListFrame or not C_FriendList or ns._zFriendsWin then return end
+    local hosts = FriendsHosts()
+    if #hosts == 0 or not C_FriendList or ns._zFriendsWin then return end
     ns._zFriendsWin = true
     ApplyFriends()
-    FriendsListFrame:HookScript("OnShow", ApplyFriends)
+    -- every friends list the client has: the cover follows the one opening
+    for _, h in ipairs(hosts) do h:HookScript("OnShow", function(self) ApplyFriends(self) end) end
+    -- Forever's modern list sits at the window's own level; anything of
+    -- the page that still draws above the cover is hidden under it
+    if ModernList() and fr.win then
+        fr.win:HookScript("OnShow", function(self)
+            if Modern() then Kit.Silence(Kit.AboveCover(self:GetParent(), self)) end
+        end)
+        fr.win:HookScript("OnHide", function(self)
+            if Modern() then Kit.Unsilence(Kit.AboveCover(self:GetParent(), self)) end
+        end)
+    end
 end
 
 Modules.whowin = function()
-    if not FriendsFrame or not WhoFrame or not C_FriendList or ns._zWhoWin then return end
+    local host = WhoHost()
+    if not host and not _G.WhoFrame and C_FriendList and not ns._zWhoWin and not ns._zWhoWait then
+        -- Forever: the Who list comes with the group finder, loaded on
+        -- demand - come back when it is in (a frame late, after its skin)
+        ns._zWhoWait = true
+        local watch = CreateFrame("Frame")
+        watch:RegisterEvent("ADDON_LOADED")
+        watch:SetScript("OnEvent", function(self, _, name)
+            if name ~= "Blizzard_GroupFinder_VanillaStyle" then return end
+            self:UnregisterEvent("ADDON_LOADED")
+            C_Timer.After(0, function() if Modules.whowin then Modules.whowin() end end)
+        end)
+        return
+    end
+    if not host or (not WhoInLFG() and not FriendsFrame) or not C_FriendList or ns._zWhoWin then return end
     ns._zWhoWin = true
     ApplyWho()
-    WhoFrame:HookScript("OnShow", ApplyWho)
+    host:HookScript("OnShow", ApplyWho)
 end
 
 Modules.guildwin = function()

@@ -519,7 +519,7 @@ local function NewWindow(A)
         icon._zui_own = true
         icon:SetSize(16, 16)
         icon:SetPoint("LEFT", 5, 0)
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(icon)
         SharpenIcon(icon)
         b.icon = icon
         b._zText = UI.Font(b, F.LABEL, { justify = "LEFT" })
@@ -1026,7 +1026,7 @@ local function NewWindow(A)
         icon._zui_own = true
         icon:SetSize(LIST_ROW_H - 4, LIST_ROW_H - 4)
         icon:SetPoint("LEFT", 16, 0)
-        icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(icon)
         SharpenIcon(icon)
         row.icon = icon
 

@@ -7,7 +7,7 @@
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
 
-local ARMORS = { "iceArmor", "frostArmor", "mageArmor" }
+local ARMORS = { "iceArmor", "frostArmor", "mageArmor", "moltenArmor" }
 
 ns.HUD.DefineClass({
     class = "MAGE", className = "Mage", label = "Mage HUD", store = "mage",
@@ -24,6 +24,8 @@ ns.HUD.DefineClass({
         polymorph = 12826, fireBlast = 10199, manaShield = 10193,
         arcaneIntellect = 10157, iceArmor = 10220, frostArmor = 7301, mageArmor = 22783,
         fireWard = 10225, frostWard = 10177,
+        removeCurse = 475, slowFall = 130, dampen = 10174, amplifyMagic = 10170, arcaneExplosion = 10202,
+        blizzard = 10187, flamestrike = 10216, scorch = 10207, arcaneBrilliance = 23028, conjureGem = 10054,
     },
 
     grid = {
@@ -89,5 +91,85 @@ ns.HUD.DefineClass({
           end },
     },
 
+
+    -- Class HUD v2: the utility row, the roles, TBC's additions (and the
+    -- ids TBC moved: Cold Snap, Ice Block, Icy Veins)
+    utility = {
+        { key = "manaShield",      kind = "spell", spell = "manaShield",      label = "Mana Shield", noRange = true },
+        { key = "removeCurse",     kind = "spell", spell = "removeCurse",     label = "Remove Lesser Curse" },
+        { key = "arcaneExplosion", kind = "spell", spell = "arcaneExplosion", label = "Arcane Explosion", noRange = true },
+        { key = "blizzard",        kind = "spell", spell = "blizzard",        label = "Blizzard", noRange = true },
+        { key = "flamestrike",     kind = "spell", spell = "flamestrike",     label = "Flamestrike", noRange = true },
+        { key = "scorch",          kind = "spell", spell = "scorch",          label = "Scorch" },
+        { key = "arcaneIntellect", kind = "spell", spell = "arcaneIntellect", label = "Arcane Intellect" },
+        { key = "arcaneBrilliance", kind = "spell", spell = "arcaneBrilliance", label = "Arcane Brilliance" },
+        { key = "conjureGem",      kind = "spell", spell = "conjureGem",      label = "Conjure Mana Gem", noRange = true },
+        { key = "slowFall",        kind = "spell", spell = "slowFall",        label = "Slow Fall" },
+        { key = "dampen",          kind = "spell", spell = "dampen",          label = "Dampen Magic" },
+        { key = "amplifyMagic",    kind = "spell", spell = "amplifyMagic",    label = "Amplify Magic" },
+    },
+    -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
+    -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
+    -- section 13: Icy Veins' Classic mage guide, its TBC Arcane / Fire /
+    -- Frost guides, Warcraft Tavern's Classic Fire guide). The base lists
+    -- are Classic Era's (WoW Forever plays them too); a spec's tbc block
+    -- replaces the rows it names on TBC.
+    roles = {
+        { key = "arcane", label = "Arcane", tab = 1, aux = true, res = { regen = true }, show = {
+            main = { "arcanePower", "pom", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
+            utility = { "arcaneExplosion", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem" },
+            buffs = { "arcanePower", "pom", "clearcasting", "evocation", "mqg", "zhc" },
+            debuffs = {} },
+          glows = { arcanePower = { { when = "ready", style = "edge", combatOnly = true } },
+                    ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
+          tbc = { show = {
+              main = { "arcanePower", "icyVeins", "coldSnap", "pom", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
+              utility = { "arcaneExplosion", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem", "spellsteal", "invisibility" },
+              buffs = { "arcanePower", "icyVeinsBuff", "pom", "clearcasting", "evocation", "zhc" } },
+            glows = { arcanePower = { { when = "ready", style = "edge", combatOnly = true } },
+                      icyVeins = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
+        { key = "fire", label = "Fire", tab = 2, aux = true, res = { regen = true }, show = {
+            main = { "combustion", "fireBlast", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
+            utility = { "scorch", "flamestrike", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem" },
+            buffs = { "combustion", "clearcasting", "evocation", "mqg", "zhc" },
+            debuffs = { "fireVuln", "ignite" } },
+          glows = { combustion = { { when = "ready", style = "edge", combatOnly = true } },
+                    ["debuffs:fireVuln"] = { { when = "expiring", style = "pulse" } },
+                    ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
+          tbc = { show = {
+              main = { "combustion", "icyVeins", "coldSnap", "fireBlast", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
+              utility = { "scorch", "flamestrike", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem", "spellsteal", "invisibility" },
+              buffs = { "combustion", "icyVeinsBuff", "clearcasting", "evocation", "zhc" } },
+            glows = { combustion = { { when = "ready", style = "edge", combatOnly = true } },
+                      icyVeins = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["debuffs:fireVuln"] = { { when = "expiring", style = "pulse" } } } } },
+        { key = "frost", label = "Frost", tab = 3, aux = true, res = { regen = true }, show = {
+            main = { "coldSnap", "iceBlock", "evocation", "counterspell", "blink", "gem", "potion", "rune" },
+            utility = { "blizzard", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem" },
+            buffs = { "clearcasting", "evocation", "mqg", "zhc" },
+            debuffs = { "wintersChill" } },
+          glows = { ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
+          tbc = { show = {
+              main = { "icyVeins", "waterElemental", "coldSnap", "iceBlock", "evocation", "counterspell", "blink", "gem", "potion", "rune" },
+              utility = { "blizzard", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem", "spellsteal", "invisibility" },
+              buffs = { "icyVeinsBuff", "clearcasting", "evocation", "zhc" } },
+            glows = { icyVeins = { { when = "ready", style = "edge", combatOnly = true } },
+                      waterElemental = { { when = "ready", style = "edge", combatOnly = true } } } } },
+    },
+    flavors = {
+        tbc = {
+            spells = { coldSnap = 11958, iceBlock = 45438, moltenArmor = 30482 },
+            add = {
+                { key = "icyVeins",       kind = "spell", spell = "icyVeins",       spellId = 12472, label = "Icy Veins", noRange = true },
+                { key = "dragonsBreath",  kind = "spell", spell = "dragonsBreath",  spellId = 31661, label = "Dragon's Breath", noRange = true },
+                { key = "waterElemental", kind = "spell", spell = "waterElemental", spellId = 31687, label = "Summon Water Elemental", noRange = true },
+                { key = "spellsteal",     kind = "spell", spell = "spellsteal",     spellId = 30449, label = "Spellsteal", row = "utility" },
+                { key = "invisibility",   kind = "spell", spell = "invisibility",   spellId = 66,    label = "Invisibility", noRange = true, row = "utility" },
+                { key = "icyVeinsBuff",   id = 12472, label = "Icy Veins", row = "buffs" },
+            },
+        },
+    },
+    buffBars = { "arcanePower", "pom", "iceBarrier", "clearcasting" },
     bars = { "mana", "fsr", "wand" },
 })

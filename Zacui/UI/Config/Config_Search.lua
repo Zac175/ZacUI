@@ -17,6 +17,16 @@
 -- Building runs one page per frame so the first keystroke never hitches,
 -- and a page you actually open refreshes its own entries, so the index
 -- never trails what is on screen.
+--
+-- MATCHING (2026-11-07, the way Zac liked in another addon's options):
+-- case-insensitive, every word of the query somewhere in the title, the
+-- description, the tooltip or the breadcrumb; a word may sit at the
+-- start (best), at a word start, inside a word, as letters in order
+-- ("castbar" finds "Cast Bar") or with one letter wrong. Results are
+-- ranked by that, then a setting before its section before the page.
+-- Slash commands are results too (kind "command"). A page this game
+-- version does not run is never indexed or listed.
+-- Config_SearchBox draws the results in a dropdown under the search box.
 
 local ADDON_NAME, ns = ...
 
@@ -25,6 +35,7 @@ local ConfigLayout = ns.ConfigLayout
 local ConfigMenu = ns.ConfigMenu
 local ConfigPages = ns.ConfigPages
 local Tokens = ns.ConfigTokens
+local UI = ns.UI
 
 local Search = {}
 
@@ -146,7 +157,9 @@ function Search.Scan(parent, layout, itemId)
         if box ~= layout.headerFrame and box ~= layout.tabBar and IsShownSafe(box) then
             local tab = tabOf[i]
             local boxY = OffsetY(box, parent)
-            local title = box._zTitle and Clean(box._zTitle:GetText()) or nil
+            -- (a settings section shows its title in capitals; the search
+            -- reads it as written)
+            local title = box._zTitle and Clean(rawget(box, "_zTitleText") or box._zTitle:GetText()) or nil
             if title == "" then title = nil end
             if title then
                 entries[#entries + 1] = { item = itemId, tab = tab, kind = "card",
@@ -234,6 +247,12 @@ local function EachItem(fn)
     end
 end
 
+-- a page this game version does not run has nothing to find (Core_Flavor):
+-- not built for the index, never a result
+local function Off(item)
+    return ns.FeatureOffForPage and ns.FeatureOffForPage(item.id) and true or false
+end
+
 local function IndexOne(item)
     if not scratch then
         scratch = CreateFrame("Frame", nil, UIParent)
@@ -242,13 +261,20 @@ local function IndexOne(item)
     end
     local fn = item.page and ConfigPages[item.page]
     if fn then
-        local layout = ConfigLayout.New(scratch, -14)
+        -- built in the settings window's look, as the window builds it
+        -- (UI.S: its rows, sizes and type)
+        local was = UI._zSettings
+        UI._zSettings = true
+        local layout = ConfigLayout.New(scratch, 0)
         layout.pageId, layout.indexAll = item.id, true
         if pcall(fn, layout, item) then
-            local entries = Search.Scan(scratch, layout, item.id)
-            for _, e in ipairs(entries) do e.widget = nil end
-            index[item.id] = entries
+            local ok, entries = pcall(Search.Scan, scratch, layout, item.id)
+            if ok then
+                for _, e in ipairs(entries) do e.widget = nil end
+                index[item.id] = entries
+            end
         end
+        UI._zSettings = was
     end
     -- Throw the scratch build away (WoW has no frame destructor: hidden,
     -- unparented and unreferenced is as gone as a frame gets).
@@ -263,13 +289,25 @@ end
 
 function Search.IsIndexing() return running end
 
+-- Forget a page's entries, so the next search reads it again (a part
+-- that adds a tab to a page after the page was indexed, see
+-- ns.AddPageTab; a whole new menu row is picked up on its own).
+function Search.Invalidate(itemId)
+    if itemId == nil then
+        for k in pairs(done) do done[k] = nil end
+        return
+    end
+    done[itemId] = nil
+end
+
 -- Start (once per session) the background build. onDone runs when every
 -- page is in, so the window can redraw results that were partial.
 function Search.EnsureIndex(onDone)
     if running then return end
     local todo = {}
-    EachItem(function(item)
-        if item.page and not done[item.id] and not SKIP[item.id] then
+    EachItem(function(item, parent)
+        if item.page and not done[item.id] and not SKIP[item.id] and not Off(item)
+            and not (parent and Off(parent)) then
             todo[#todo + 1] = item
         end
     end)
@@ -291,11 +329,188 @@ function Search.EnsureIndex(onDone)
 end
 
 -- ============================================================
+-- COMMANDS
+-- ============================================================
+-- Slash commands are found like settings (kind "command"): the text
+-- people type and what it does. One without a <placeholder> runs from a
+-- result; one with a hole, or marked paste, goes into the chat box to be
+-- finished. A part adds its own with ns.AddSearchCommand (words the
+-- entry already carries are not doubled: the key is the command text).
+--   ns.AddSearchCommand("/zui plate", "the sample nameplate", { feature = "nameplates" })
+local COMMANDS = {
+    { cmd = "/zui <page>",        desc = "jump straight to a page, e.g. /zui colors" },
+    { cmd = "/zui search <words>", desc = "open this window with a search typed" },
+    { cmd = "/zui tour",          desc = "a guided tour of this window", feature = "tutorial" },
+    { cmd = "/zui setup",         desc = "quick setup: the look, the parts, the basics", feature = "tutorial" },
+    { cmd = "/zui edit",          desc = "Edit Mode: every movable part of ZacUI at once" },
+    { cmd = "/zacui <mod> on",    desc = "turn a single module on or off" },
+    { cmd = "/zacui rescan",      desc = "re-run the classifier over every live frame" },
+    { cmd = "/zacui inset <Frame> l r t b", desc = "nudge a panel background that sits wrong" },
+    { cmd = "/zacui line <Frame> <y>",      desc = "move a panel's header hairline" },
+    { cmd = "/zacui status",      desc = "list every module and its state" },
+    { cmd = "/zacui id",          desc = "identify the next frame you click (its name in chat)" },
+    { cmd = "/zacui flavor",      desc = "what runs on this game version (era, tbc, forever)" },
+    { cmd = "/zacui version",     desc = "your version and the newest one seen in your guild and group" },
+    { cmd = "/zacui reset",       desc = "back to shipped defaults", paste = true },
+    { cmd = "/zui plate",         desc = "the sample nameplate with everything on", feature = "nameplates" },
+    { cmd = "/zui noob",          desc = "the hesitation scorecard of the last pull, in chat", feature = "hud" },
+    { cmd = "/zui raid",          desc = "the raid summary of the last raid", feature = "raid_summary" },
+    { cmd = "/zui bless",         desc = "the blessing assignments grid", feature = "blessings" },
+    { cmd = "/zui mount",         desc = "what the smart mount macro picks here" },
+    { cmd = "/zui msgs",          desc = "hide or show the raid messages over the raid frames", feature = "chat" },
+    { cmd = "/zui raidchat",      desc = "raid frames in the chat box while in a raid: on / off", feature = "chat" },
+    { cmd = "/zui testroll",      desc = "three made-up loot drops on screen", feature = "lootroll" },
+}
+local function CommandKey(cmd) return ((cmd or ""):lower():gsub("%s+", " ")) end
+local function AddSearchCommand(cmd, desc, opts)
+    if type(cmd) ~= "string" or cmd == "" then return false end
+    local key = CommandKey(cmd)
+    for _, c in ipairs(COMMANDS) do
+        if CommandKey(c.cmd) == key then
+            c.desc = desc or c.desc
+            return true
+        end
+    end
+    opts = opts or {}
+    COMMANDS[#COMMANDS + 1] = { cmd = cmd, desc = desc or "", feature = opts.feature, paste = opts.paste }
+    return true
+end
+ns.AddSearchCommand = AddSearchCommand
+ns.SearchCommands = COMMANDS
+
+-- true for a command that runs on this game version (Core_Flavor)
+local function CommandOn(c)
+    if c.feature and ns.FeatureOn and not ns.FeatureOn(c.feature) then return false end
+    return true
+end
+
+-- Run a command result: a complete command runs now, one with a hole in
+-- it (or marked paste) goes into the chat box to be finished.
+function Search.RunCommand(r)
+    local c = r and r.command
+    if not c then return false end
+    local text = c.cmd
+    if c.paste or text:find("<", 1, true) or text:find("|", 1, true) then
+        local open = (ChatFrameUtil and ChatFrameUtil.OpenChat) or ChatFrame_OpenChat
+        if open then open(text:gsub("%s*<.*$", "") .. " ") end
+        return "pasted"
+    end
+    local slash, rest = text:match("^(/%S+)%s*(.-)$")
+    if not slash then return false end
+    local list = SlashCmdList
+    local handler
+    if list then
+        -- the handler registered under this slash word (SLASH_X1 = "/zui")
+        for name, fn in pairs(list) do
+            local i = 1
+            while true do
+                local s = _G["SLASH_" .. name .. i]
+                if not s then break end
+                if s:lower() == slash:lower() then handler = fn break end
+                i = i + 1
+            end
+            if handler then break end
+        end
+    end
+    if not handler then return false end
+    handler(rest or "")
+    return "ran"
+end
+
+-- ============================================================
 -- RANKING
 -- ============================================================
-local function WordStart(hay, w)
-    return (" " .. hay):find(" " .. w, 1, true) ~= nil
+-- One word against one lowercase string. The quality says how it
+-- matched: at the start, at a word start, inside a word, as letters in
+-- order (a fuzzy hit: "castbar" in "cast bar", "aoc" in "auto open
+-- containers"), or with one letter wrong. nil when it does not.
+local Q_PREFIX, Q_WORD, Q_INSIDE = 100, 85, 65
+
+-- Letters in order. The forward pass finds where the earliest full match
+-- ends; the backward pass from there finds the latest start, so "stat"
+-- in "secondary stat display" lands on "stat" and not on the s of
+-- secondary. A match spread over much more than its own length is noise
+-- ("combat" scattered across a sentence, "cat" across "character
+-- settings"), not a hit: slack is how many extra letters the spread may
+-- hold, half the word's length unless given. Returns a quality 25..50 by
+-- how tight the letters sit, or nil.
+local function Subseq(hay, w, slack)
+    local hl, wl = #hay, #w
+    if wl > hl then return nil end
+    -- (find per letter: one C call each, not a Lua loop over the string)
+    local pos = 0
+    for i = 1, wl do
+        pos = hay:find(w:sub(i, i), pos + 1, true)
+        if not pos then return nil end
+    end
+    local last = pos
+    local hi, wi = last, wl
+    while wi >= 1 do
+        if hay:byte(hi) == w:byte(wi) then wi = wi - 1 end
+        hi = hi - 1
+    end
+    local span = last - hi
+    if span > wl + (slack or math.max(2, math.floor(wl / 2))) then return nil end
+    return 25 + math.floor(25 * wl / span)
 end
+
+-- One letter wrong, dropped or doubled: the first letter of the word the
+-- forward pass cannot place is left out and the rest must still be found
+-- in order, close together. Cheap (two passes) and good enough for a slip
+-- of the finger.
+local function Typo(hay, w)
+    local wl = #w
+    local pos, stuck = 0, nil
+    for i = 1, wl do
+        pos = hay:find(w:sub(i, i), pos + 1, true)
+        if not pos then stuck = i break end
+    end
+    if not stuck then return nil end   -- (it matched whole: not a typo)
+    local short = w:sub(1, stuck - 1) .. w:sub(stuck + 1)
+    if #short < 3 then return nil end
+    local q = Subseq(hay, short, 3)
+    return q and math.floor(q * 0.6) or nil
+end
+
+local function WordQuality(hay, w)
+    local i = hay:find(w, 1, true)
+    if i then
+        if i == 1 then return Q_PREFIX end
+        local prev = hay:byte(i - 1)
+        if prev == 32 or prev < 48 or (prev > 57 and prev < 65) then return Q_WORD end
+        return Q_INSIDE
+    end
+    local wl = #w
+    if wl < 3 then return nil end
+    local q = Subseq(hay, w)
+    if q then return q end
+    if wl >= 4 then return Typo(hay, w) end
+    return nil
+end
+Search.WordQuality = WordQuality
+
+-- Every word against the thing itself (own) and, failing that, against
+-- the words around it (ctx: its card, tab, page, part) at a quarter of
+-- the quality. nil unless every word landed and at least one landed on
+-- the thing itself; otherwise every row of a matching card would be a
+-- result.
+local function Score(own, ctx, tokens)
+    local total, hits = 0, 0
+    for _, w in ipairs(tokens) do
+        local q = WordQuality(own, w)
+        if q then
+            hits = hits + 1
+            total = total + q
+        else
+            q = ctx and WordQuality(ctx, w)
+            if not q then return nil end
+            total = total + math.floor(q / 4)
+        end
+    end
+    if hits == 0 then return nil end
+    return total
+end
+Search.Score = Score
 
 local function ModuleHay(item)
     local hay = ""
@@ -311,8 +526,14 @@ local function ModuleHay(item)
     return hay
 end
 
+-- Equal scores: a setting before its section, a section before a
+-- command, a command before a tab, a tab before a page.
+local KIND_RANK = { row = 1, desc = 1, tip = 1, card = 2, command = 3, tab = 4, page = 5 }
+
 -- Run a query. Returns the ranked results and the set of item ids that
--- have something, for the sidebar filter.
+-- have something, for the sidebar filter. Each result: item (the menu
+-- id), kind, label, score, page, parent, and entry (the indexed line)
+-- or command.
 function Search.Run(query)
     local tokens = Tokens(query)
     local results, hits = {}, {}
@@ -320,64 +541,67 @@ function Search.Run(query)
     local phrase = table.concat(tokens, " ")
 
     EachItem(function(item, parent)
-        if not item.page then return end
+        if not item.page or Off(item) or (parent and Off(parent)) then return end
         local pageName = item.label:lower()
-        local pageHay = pageName .. " " .. (item.keywords or ""):lower()
-            .. " " .. (parent and parent.label:lower() or "") .. ModuleHay(item)
+        local parentName = parent and parent.label:lower() or ""
 
-        -- The page itself, by name / keywords.
-        local all = true
-        for _, w in ipairs(tokens) do
-            if not pageHay:find(w, 1, true) then all = false break end
-        end
-        if all then
-            -- Below a setting that names the word itself: a hit on the
-            -- page's keywords alone should not outrank the setting.
-            local score = 20
-            if pageName:find(phrase, 1, true) then score = score + 50 end
+        -- The page itself: its name, then its keywords and module names.
+        local pageOwn = pageName .. " " .. (item.keywords or ""):lower() .. ModuleHay(item)
+        local score = Score(pageOwn, parentName, tokens)
+        if score then
+            -- a hit on the keywords alone sits below a setting that names
+            -- the word itself; the page's own name counts in full
+            if not Score(pageName, nil, tokens) then score = math.floor(score / 2) end
+            if pageName:find(phrase, 1, true) then score = score + 30 end
+            -- the page whose name is the query is what was asked for
+            if pageName == phrase then score = score + 60 end
             results[#results + 1] = { item = item.id, kind = "page", label = item.label,
-                score = score, page = item.label, parent = parent and parent.label }
+                score = score, page = item.label, parent = parent and parent.label, order = #results }
             hits[item.id] = true
         end
 
         -- Every setting on it.
         for _, e in ipairs(index[item.id] or {}) do
-            local ctx = (e.card or ""):lower() .. " " .. pageName
-            local score, ok, own = 0, true, 0
-            for _, w in ipairs(tokens) do
-                if e.hay:find(w, 1, true) then
-                    own = own + 1
-                    score = score + 10
-                    if WordStart(e.hay, w) then score = score + 6 end
-                elseif ctx:find(w, 1, true) then
-                    score = score + 2
-                else
-                    ok = false
-                    break
-                end
-            end
-            -- At least one word must be in the setting itself, or every
-            -- row of a matching card would come back.
-            if ok and own > 0 then
-                if e.hay:find(phrase, 1, true) then score = score + 25 end
-                if e.kind == "card" then score = score + 8
-                elseif e.kind == "tab" then score = score + 6
-                elseif e.kind == "desc" or e.kind == "tip" then score = score - 12 end
+            local ctx = (e.card or ""):lower() .. " " .. (e.tabLabel or ""):lower() .. " "
+                .. pageName .. " " .. parentName
+            local s = Score(e.hay, ctx, tokens)
+            if s then
+                local label = (e.label or ""):lower()
+                if label:find(phrase, 1, true) then s = s + 30 end
+                if label == phrase then s = s + 40 end
+                if e.kind == "card" then s = s + 4
+                elseif e.kind == "tab" then s = s + 3
+                elseif e.kind == "desc" or e.kind == "tip" then s = s - 10 end
                 -- Short labels that match are closer matches.
-                score = score + math.max(0, 12 - math.floor(#e.hay / 8))
+                s = s + math.max(0, 12 - math.floor(#label / 8))
                 results[#results + 1] = { entry = e, item = item.id, kind = e.kind,
-                    label = e.label, score = score, page = item.label,
+                    label = e.label, score = s, page = item.label,
                     parent = parent and parent.label, order = #results }
                 hits[item.id] = true
             end
         end
     end)
 
+    -- The slash commands.
+    for _, c in ipairs(COMMANDS) do
+        if CommandOn(c) then
+            local own = (c.cmd .. " " .. (c.desc or "")):lower()
+            local s = Score(own, nil, tokens)
+            if s then
+                if c.cmd:lower():find(phrase, 1, true) then s = s + 20 end
+                results[#results + 1] = { command = c, item = "_commands", kind = "command",
+                    label = c.cmd, score = s, page = "Slash commands", order = #results }
+            end
+        end
+    end
+
     -- One result per setting: a description hit that points at a row
     -- already in the list adds nothing.
     local seen, out = {}, {}
     table.sort(results, function(a, b)
         if a.score ~= b.score then return a.score > b.score end
+        local ra, rb = KIND_RANK[a.kind] or 9, KIND_RANK[b.kind] or 9
+        if ra ~= rb then return ra < rb end
         return (a.order or 0) < (b.order or 0)
     end)
     for _, r in ipairs(results) do
@@ -389,6 +613,33 @@ function Search.Run(query)
         end
     end
     return out, hits
+end
+
+-- ============================================================
+-- HOW A RESULT READS
+-- ============================================================
+-- The kind label a result row wears, and its breadcrumb
+-- ("Part > Page > Tab > Card"), for whatever draws the results.
+local KIND_LABEL = { page = "Page", tab = "Section", card = "Section", command = "Command" }
+function Search.Kind(r)
+    return KIND_LABEL[r.kind] or "Setting"
+end
+
+function Search.Crumb(r)
+    local bits = {}
+    if r.kind == "command" then
+        bits[1] = "Slash commands"
+        if r.command and r.command.desc and r.command.desc ~= "" then bits[2] = r.command.desc end
+        return table.concat(bits, "  >  ")
+    end
+    if r.parent then bits[#bits + 1] = r.parent end
+    if r.kind ~= "page" and r.page then bits[#bits + 1] = r.page end
+    local e = r.entry
+    if e then
+        if e.tabLabel then bits[#bits + 1] = e.tabLabel end
+        if e.card and r.kind ~= "card" then bits[#bits + 1] = e.card end
+    end
+    return table.concat(bits, "  >  ")
 end
 
 -- Wrap each matched word in `hex` (case-insensitive), for result rows.

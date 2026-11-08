@@ -7,6 +7,7 @@
 -- here, nor WoW Forever's own zones. Corrections: cite a source.
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 
 ns.MapFishing = {
 	-- Eastern Kingdoms

@@ -445,7 +445,7 @@ function FT.NewBar(parent)
     icon:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
     icon:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
     icon:SetTexture(ICON)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(icon)
     f.icon = icon
     local div = f:CreateTexture(nil, "ARTWORK", nil, 1)
     div:SetTexture(ns.FLAT)

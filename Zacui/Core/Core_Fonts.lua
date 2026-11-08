@@ -15,6 +15,17 @@ function ns.GameFace(p)
     return p
 end
 
+-- THE LOOK'S FACE (Core_Look, which loads after this file, so it is looked
+-- up when asked). Under the Classic look the world's texts wear the game's
+-- own font whatever Fonts & Textures says: `part` is whose text (nil: the
+-- global look). The /zui window (FontDress, UIF_Controls) and Readycheck
+-- (Media.FontName) never come through here, so they keep the chosen font.
+local function LookGameFont(part)
+    local L = ns.Look
+    if L and L.For(part).font == "game" then return ns.GAME_FONT end
+    return nil
+end
+
 -- ============================================================
 -- FONT SYSTEM (/zacui font|fontsize|fontoutline|fontlist)
 -- ============================================================
@@ -142,6 +153,9 @@ local function ApplyFonts()
     local cfg = ZacUIDB and ZacUIDB.font
     if not cfg then return end
     local path = ResolveFontPath(cfg.name)
+    -- Classic look: the game's font objects keep their stock face (size
+    -- and outline still follow the sliders)
+    if LookGameFont(nil) then path = nil end
     local delta = cfg.delta or 0
     -- Deliberately NO early-out once anything has been applied: returning
     -- to defaults has to be able to walk the objects and put them back.
@@ -200,7 +214,7 @@ function HouseFont(fs, size, flags, fallback)
     local orig = HouseOrig(fs)
     local askFlags = flags
     -- (a string made without a template has no font: the game's, then)
-    local path = ResolveFontPath(cfg.name) or orig or ns.GameFace(fallback) or ns.GAME_FONT
+    local path = LookGameFont(nil) or ResolveFontPath(cfg.name) or orig or ns.GameFace(fallback) or ns.GAME_FONT
     if not path then return end
     if flags == nil then flags = (cfg.outline == "NONE") and "" or "OUTLINE" end
     -- a face whose file will not load returns false and leaves the string
@@ -229,7 +243,7 @@ local function FollowFont(fs, size, flags, fallback)
         rawset(fs, "_zHouseOrig", orig or false)
     end
     local cfg = ZacUIDB and ZacUIDB.font or {}
-    local path = ResolveFontPath(cfg.name) or orig or curPath
+    local path = LookGameFont(nil) or ResolveFontPath(cfg.name) or orig or curPath
     if not path then return end
     local useSize, useFlags = size or curSize or 12, flags
     if useFlags == nil then useFlags = curFlags or "" end
@@ -243,12 +257,16 @@ end
 -- imported aura asks for. nil while none is chosen (each text then wears
 -- its own shipped face, the game's for most). Sizes, outlines and
 -- shadows stay each text's own; only the face is forced.
-local function OneFace()
+-- `part`: whose text (a look part key, nil: the global look) - under the
+-- Classic look the answer is the game's own font.
+local function OneFace(part)
+    local game = LookGameFont(part)
+    if game then return game end
     local cfg = ZacUIDB and ZacUIDB.font
     return cfg and ResolveFontPath(cfg.name) or nil
 end
 -- the one face when chosen, else `fallback`
-local function OneFaceOr(fallback) return OneFace() or fallback end
+local function OneFaceOr(fallback, part) return OneFace(part) or fallback end
 
 -- shared with later ZacUI files
 ns.OneFace = OneFace

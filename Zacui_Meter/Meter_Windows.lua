@@ -1,6 +1,9 @@
--- Meter_Windows - the meter windows: rows, sorting, displays, the hover
--- toolbar, drag/resize and the refresh tick. The module entry point
--- (Modules.meter) lives at the bottom of this file.
+-- Meter_Windows - the meter windows' settings, rows, sorting, displays
+-- and the refresh tick. The module entry point (Modules.meter) lives at
+-- the bottom of this file. The window itself - its frame, header, lock
+-- and grip, drag and snap, the add / close of windows, the preview
+-- window and the restyle - is Meter_Win_Frame; its menus are
+-- Meter_Win_Menus (Meter v2, 2026-11-07).
 -- Part of ZacUI; load order is set by the TOC.
 --
 -- THE DEFAULTS ARE ZAC'S DETAILS SETUP, read from his SavedVariables
@@ -17,7 +20,9 @@
 --   * right text is his custom "{data1} I {data2}": total, a literal
 --     capital I, then the per-second value - no percent
 --   * toolbar icons only appear while the mouse is over the window
---     (auto_hide_menu), overlapping by 3px, close button hidden
+--     (auto_hide_menu), overlapping by 3px, close button hidden - the
+--     "hover" header of v2; since v2 every window wears the header bar
+--     (the rev-8 migration, the one deliberate change of look)
 --   * update tick every 3 seconds (his update_speed), gated on the
 --     parser's dirty flag so an idle meter costs nothing
 --   * windows are mouse-through during combat (clickthrough), window 1
@@ -195,6 +200,57 @@ local function DB()
         d.overallClearNewBoss = false
         d._rev = 7
     end
+    -- REV 8: METER V2 (2026-11-07). Zac: "his damage meters and stuff are
+    -- so much better than mine mine need a lot of cleanup and redoing."
+    -- Every window gets the header bar (the mode and the fight clock,
+    -- the icons at its right) and rank numbers before the names. The one
+    -- deliberate change of look since the rules said "nil = today's":
+    -- the redo was the ask, and the old look is one pick away (the
+    -- header's "Hover toolbar"). The header sits INSIDE the window now
+    -- (the old title bar sat on top of it), so every window grows by the
+    -- header's height once and keeps every row it had.
+    if (d._rev or 0) < 8 then
+        d.headerMode = "bar"
+        d.showRank = true
+        local hh = math.max(8, tonumber(d.titleHeight) or 18)
+        for _, w in ipairs(d.windows) do
+            if type(w.h) == "number" then w.h = w.h + hh end
+        end
+        d._rev = 8
+    end
+    -- REV 9: THE HEADER POLISHED (2026-11-07, Zac: "the headers you added
+    -- for the damage meters just looks like shit"). The header grows from
+    -- 18 to 22 px when it is still at the shipped 18 (every window grows
+    -- by the 4 px once, so no row is lost), and wears the rows' own dark
+    -- (black 0.69 instead of 0.6) when its colour is still the shipped one.
+    if (d._rev or 0) < 9 then
+        local th = tonumber(d.titleHeight)
+        if th == nil or th == 18 then
+            if th ~= nil then d.titleHeight = 22 end
+            for _, w in ipairs(d.windows) do
+                if type(w.h) == "number" then w.h = w.h + 4 end
+            end
+        end
+        local c = d.titleColor
+        if type(c) == "table" and c.r == 0 and c.g == 0 and c.b == 0 and c.a == 0.6 then
+            d.titleColor = { r = 0, g = 0, b = 0, a = 0.6899999976158142 }
+        end
+        d._rev = 9
+    end
+    -- REV 10: THE MATCH PASS (2026-11-07, Zac: make it match the reference
+    -- meter). The header wears the reference's opaque #1B1B1B and its icons
+    -- grow from 14 to 22, each only while it is still the value ZacUI
+    -- shipped (black at 0.69 / 14): a colour or size set by hand stays.
+    -- Nothing else moves: the header keeps its height, so no row is lost.
+    if (d._rev or 0) < 10 then
+        local c = d.titleColor
+        if type(c) == "table" and c.r == 0 and c.g == 0 and c.b == 0
+            and type(c.a) == "number" and math.abs(c.a - 0.6899999976158142) < 1e-6 then
+            d.titleColor = { r = 27 / 255, g = 27 / 255, b = 27 / 255, a = 1 }
+        end
+        if d.headerIconSize == 14 then d.headerIconSize = 22 end
+        d._rev = 10
+    end
     return d
 end
 Meter.DB = DB
@@ -224,16 +280,37 @@ local LOOK = {
     winBorderColor = { r = 0, g = 0, b = 0, a = 1 },
     winBorderSize = 1,
     titleBar = false,
-    titleHeight = 18,
-    titleColor = { r = 0, g = 0, b = 0, a = 0.6 },
+    titleHeight = 22,                       -- (rev 9: 18 -> 22)
+    titleColor = { r = 27 / 255, g = 27 / 255, b = 27 / 255, a = 1 },   -- #1B1B1B, opaque (rev 10, the match pass; was black 0.69)
     titleSegment = true,
-    toolbarMode = "hover",                  -- "hover" | "always"
+    toolbarMode = "hover",                  -- "hover" | "always" (the "hover" header)
+    -- METER V2: the header bar, the pinned row, the growth, the snap
+    headerMode = "bar",                     -- "bar" | "hover" (the old floating toolbar) | "none"
+    headerIconsOnHover = false,             -- the bar's icons only while the mouse is on the window
+    headerIconSize = 22,                    -- (rev 10, the match pass: 14 -> 22)
+    headerClock = true,                     -- "(2:13)" after the mode
+    titleAccent = true,                     -- (match pass) the mode's name in the accent colour, the clock white at 70%
+    pinSelf = "follow",                     -- "pin" (at the edge, with a line) | "follow" (the last row) | "off"
+    grow = "down",                          -- "down" | "up" (the header at the bottom, rows rising)
+    snapWindows = true,                     -- dragging and resizing line up with other meter windows
+    confirmReset = false,                   -- the reset icon asks first
+    -- THE POLISH (2026-11-07): a line under the header, the bars' soft
+    -- light and shade, thin-outlined text, the rank and the per-second
+    -- figure dimmed, and how your own row stands out
+    headerLine = true,
+    headerLineColor = { r = 1, g = 1, b = 1, a = 0.1 },
+    barFlat = true,                         -- no texture picked: a flat fill (off: the old faded bar)
+    rowGloss = false,                       -- light at the top of a bar, shade at the bottom (an option)
+    textOutline = true,                     -- a thin outline instead of the drop shadow
+    dimRank = true,                         -- "1." dimmer than the name
+    dimSecond = true,                       -- the per-second figure dimmer than the total
+    selfStyle = "color",                    -- "color" (your own bar colour) | "edge" (class colour, a light edge)
     nameColorMode = "white",                -- "white" | "class" | "custom"
     nameColor = { r = 1, g = 1, b = 1, a = 1 },
     numberColor = { r = 1, g = 1, b = 1, a = 1 },
     numberLayout = "both",                  -- see RightText
     numberSep = " I ",
-    showRank = false,
+    showRank = true,                        -- "1. " before the names (v2; the migration turns it on)
     threatIcons = true,
     threatIconSize = 14,
     -- a row fading in over 0.2s and going at once, the segment / display
@@ -377,13 +454,24 @@ local function ColorOf(c, fr, fg, fb, fa)
     end
     return fr, fg, fb, fa or 1
 end
-Meter.RowBgColor = function(d) return ColorOf(d.rowBgColor, 0, 0, 0, d.rowBgAlpha or 0.69) end
+Meter.ColorOf = ColorOf
+Meter.RowBgColor = function(d)
+    -- (2026-11-08) under the Classic look a bar's track is a quarter black,
+    -- the stock meter's, unless a row colour was picked
+    if d.rowBgColor == nil and Meter.IsClassicLook and Meter.IsClassicLook() then return 0, 0, 0, 0.25 end
+    return ColorOf(d.rowBgColor, 0, 0, 0, d.rowBgAlpha or 0.69)
+end
 Meter.WinBgColor = function(d) return ColorOf(d.bgColor, 0, 0, 0, d.bgAlpha or 0.4) end
 
 -- What a nil font field means for each text the meter draws: the
 -- meter's own font (the Fonts & Textures push, else the profile's),
 -- at the row font size, exactly as the text was set before.
 function Meter.NameFontDefaults(d)
+    -- (look.textOutline, on since the 2026-11-07 polish: a thin outline;
+    -- off, the drop shadow it always had)
+    if d.textOutline ~= false then
+        return { face = Meter.FontPath(), size = d.fontSize or 13, outline = "outline", shadow = false }
+    end
     return { face = Meter.FontPath(), size = d.fontSize or 13, outline = "none", shadow = true, shadowX = 1, shadowY = -1 }
 end
 Meter.NumberFontDefaults = Meter.NameFontDefaults
@@ -432,6 +520,12 @@ local DISPLAYS = {
         container = "damage",
         value = function(a) return a.friendlyFireTotal end, single = true,
         icon = true,
+    },
+    enemy_taken = {
+        label = "Enemy Damage Taken", desc = "The enemies of the fight, by how much the group hit each of them.",
+        container = "damage", enemies = true,
+        value = function(a) return a.damageTaken end,
+        ps = function(a, c, ct) return a.damageTaken / ct end, icon = true,
     },
     heal_done = {
         label = "Healing Done", desc = "Healing that landed, not counting overheal.",
@@ -499,12 +593,22 @@ local DISPLAYS = {
 }
 
 local DISPLAY_ORDER = {
-    "damage_done", "dps", "damage_taken", "friendly_fire",
+    "damage_done", "dps", "damage_taken", "friendly_fire", "enemy_taken",
     "heal_done", "hps", "overheal", "absorbs", "heal_taken",
     "deaths", "interrupts", "dispels", "cc_breaks", "ress",
     "threat",
 }
 Meter.DISPLAYS = DISPLAYS
+Meter.DISPLAY_ORDER = DISPLAY_ORDER
+-- the mode menu's groups (Meter_Win_Menus): threat is its own entry
+Meter.GROUPS = {
+    { label = "Damage", desc = "Damage done and taken, per second, friendly fire, the enemies.",
+      keys = { "damage_done", "dps", "damage_taken", "friendly_fire", "enemy_taken" } },
+    { label = "Healing", desc = "Healing done and taken, per second, overheal, shields.",
+      keys = { "heal_done", "hps", "overheal", "absorbs", "heal_taken" } },
+    { label = "Actions", desc = "Deaths, interrupts, dispels, broken crowd control, battle resurrections.",
+      keys = { "deaths", "interrupts", "dispels", "cc_breaks", "ress" } },
+}
 -- what the threat window shows, for the mode menu (it is not a DISPLAYS row)
 Meter.THREAT_DESC = "Your target's threat list: how close each player is to pulling it."
 
@@ -520,6 +624,9 @@ Meter.windowFrames = windows
 -- fail at the first wheel tick rather than at load.
 local winMeta = {}
 winMeta.__index = winMeta
+-- the window object's methods: the frame, header, drag and menus are
+-- added by Meter_Win_Frame / Meter_Win_Menus (Meter v2)
+Meter.winMeta = winMeta
 local RefreshMeterWindow
 
 -- ============================================================
@@ -567,7 +674,7 @@ end
 -- r, g, b, a for an actor's bar: the SELF red for my own bar (when
 -- asked), else one colour for everyone or the class colour
 local function BarColor(actor, d)
-    if actor.isSelf and d.useSelfColor then
+    if actor.isSelf and d.useSelfColor and d.selfStyle ~= "edge" then
         local s = CLASS_COLORS.SELF
         return ColorOf(d.selfColor, s[1], s[2], s[3], 1)
     end
@@ -579,10 +686,21 @@ end
 local function SetRowIcon(row, actor, d)
     local tex, l, r, t, b
     if d.useSpecIcons and actor.spec then tex, l, r, t, b = Meter.SpecIcon(actor.spec) end
-    if not tex then tex, l, r, t, b = Meter.ClassIcon(actor.class) end
+    if not tex then
+        -- the client's own class art (ns.ClassIcon, Core_Pixel) where the
+        -- core has it - only ever reached with the icons on (off by
+        -- default: Zac, 2026-11-03)
+        if ns.ClassIcon and actor.class then
+            local ok, done = pcall(ns.ClassIcon, row.icon, actor.class)
+            if ok and done then return end
+        end
+        tex, l, r, t, b = Meter.ClassIcon(actor.class)
+    end
     row.icon:SetTexture(tex)
     row.icon:SetTexCoord(l, r, t, b)
 end
+-- (Meter v2: the in-window breakdown paints its rows with these too)
+Meter.BarColor, Meter.SetRowIcon, Meter.DisplayName = BarColor, SetRowIcon, DisplayName
 
 -- n screen pixels in UI units. One is the hairline the row border has
 -- always been: Details' 0.54, snapped to one physical pixel.
@@ -597,8 +715,19 @@ end
 local function Hairline() return Pixels(1) end
 Meter.Pixels = Pixels
 
--- four edge textures just outside `owner`, `size` thick
-local function PlaceEdges(edges, owner, size)
+-- four edge textures just outside `owner`, `size` thick. `px` (the row
+-- borders, 2026-11-07 polish): under ZacUI's own look the thickness is
+-- that many PHYSICAL pixels (ns.Pixel.One, Core_Pixel) so a 1 px border is
+-- exactly one pixel at any UI scale; any other look, or a core without
+-- ns.Pixel, keeps `size`.
+local function PlaceEdges(edges, owner, size, px)
+    local LK = ns.Look
+    local lookId = LK and ((LK.For and LK.For("meter") and LK.For("meter").id) or (LK.Active and LK.Active()))
+    if px and ns.Pixel and ns.Pixel.One and lookId == "zacui" then
+        local ok, one = pcall(ns.Pixel.One, owner)
+        local n = tonumber(px) or 1
+        if ok and type(one) == "number" and one > 0 and n > 0 then size = one * n end
+    end
     local e1, e2, e3, e4 = edges[1], edges[2], edges[3], edges[4]
     for i = 1, 4 do edges[i]:ClearAllPoints() end
     e1:SetPoint("TOPLEFT", owner, "TOPLEFT", -size, size)
@@ -610,6 +739,7 @@ local function PlaceEdges(edges, owner, size)
     e4:SetPoint("TOPLEFT", owner, "TOPRIGHT", 0, 0)
     e4:SetPoint("BOTTOMRIGHT", owner, "BOTTOMRIGHT", size, 0)    -- right
 end
+Meter.PlaceEdges = PlaceEdges
 
 -- ============================================================
 -- ROW ANIMATIONS - through ns.Motion, so the global switch and speed
@@ -706,6 +836,70 @@ function Meter.AnchorDefaults(key)
     return { point = "LEFT", relPoint = "LEFT", x = 3, y = 0, justify = "LEFT" }
 end
 
+-- A texture's vertical gradient (the client's call of the day: SetGradient
+-- with colours, or the older SetGradientAlpha), from the bottom colour to
+-- the top one
+local function Gradient(tex, r1, g1, b1, a1, r2, g2, b2, a2)
+    if CreateColor and tex.SetGradient then
+        if pcall(tex.SetGradient, tex, "VERTICAL", CreateColor(r1, g1, b1, a1), CreateColor(r2, g2, b2, a2)) then return end
+    end
+    if tex.SetGradientAlpha then pcall(tex.SetGradientAlpha, tex, "VERTICAL", r1, g1, b1, a1, r2, g2, b2, a2) end
+end
+
+-- THE BAR'S LIGHT AND SHADE (look.rowGloss): two thin layers over the
+-- fill - light fading out from the top edge, shade fading in to the
+-- bottom - so a bar reads as a plate, whatever its texture and colour.
+-- On the fill texture's own area, so they end where the bar ends.
+local function Gloss(row, d)
+    local on = d.rowGloss == true
+    if not row.glossTop then
+        if not on then return end
+        row.glossTop = row.bar:CreateTexture(nil, "ARTWORK", nil, 3)
+        row.glossBot = row.bar:CreateTexture(nil, "ARTWORK", nil, 3)
+        for _, t in ipairs({ row.glossTop, row.glossBot }) do t:SetTexture(FLAT_TEX) end
+        row.glossTop:SetPoint("TOPLEFT", row.tex, "TOPLEFT", 0, 0)
+        row.glossTop:SetPoint("TOPRIGHT", row.tex, "TOPRIGHT", 0, 0)
+        row.glossBot:SetPoint("BOTTOMLEFT", row.tex, "BOTTOMLEFT", 0, 0)
+        row.glossBot:SetPoint("BOTTOMRIGHT", row.tex, "BOTTOMRIGHT", 0, 0)
+        Gradient(row.glossTop, 1, 1, 1, 0, 1, 1, 1, 0.18)
+        Gradient(row.glossBot, 0, 0, 0, 0.28, 0, 0, 0, 0)
+    end
+    local h = (d.rowHeight or 23) / 2
+    row.glossTop:SetHeight(h)
+    row.glossBot:SetHeight(h)
+    row.glossTop:SetShown(on)
+    row.glossBot:SetShown(on)
+end
+Meter.Gloss = Gloss
+
+-- YOUR ROW'S EDGE (look.selfStyle = "edge"): the row's border lit and a
+-- thin accent stripe at its left, over the class-coloured bar. Only
+-- touched when the row's state changes.
+function Meter.SelfEdge(row, on, d)
+    on = on and true or false
+    if (row._edge or false) == on then return end
+    row._edge = on
+    if on and not row.edgeStripe then
+        row.edgeStripe = row.bar:CreateTexture(nil, "OVERLAY", nil, 6)
+        row.edgeStripe:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
+        row.edgeStripe:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        row.edgeStripe:SetWidth(2)
+    end
+    if row.edgeStripe then
+        local a = ns.GetColor("ui", "accent")
+        row.edgeStripe:SetColorTexture(a.r, a.g, a.b, 1)
+        row.edgeStripe:SetShown(on)
+    end
+    d = d or Look()
+    local br, bg, bb, ba = ColorOf(d.rowBorderColor, 0, 0, 0, 1)
+    if on then br, bg, bb, ba = 1, 1, 1, 0.8 end
+    for i = 1, 4 do
+        local e = row.borders[i]
+        e:SetColorTexture(br, bg, bb, ba)
+        e:SetShown(on or d.rowBorder ~= false)
+    end
+end
+
 -- Everything a setting decides about a row, applied in place: the live
 -- rows and the preview's rows both come through here.
 function Meter.StyleRow(row)
@@ -719,15 +913,19 @@ function Meter.StyleRow(row)
         row.bg:SetVertexColor(Meter.RowBgColor(d))
     end
     row.tex:SetTexture(Meter.BarPath())
+    Gloss(row, d)
+    row._edge = nil         -- (the border is coloured below; the edge comes back on the next fill)
+    if row.edgeStripe then row.edgeStripe:Hide() end
 
-    local on = d.rowBorder ~= false
+    -- (the Classic look's bars are plain, as the stock meter's: no border)
+    local on = d.rowBorder ~= false and not (Meter.IsClassicLook and Meter.IsClassicLook())
     local br, bg, bb, ba = ColorOf(d.rowBorderColor, 0, 0, 0, 1)
     for i = 1, 4 do
         local e = row.borders[i]
         e:SetColorTexture(br, bg, bb, ba)
         e:SetShown(on)
     end
-    PlaceEdges(row.borders, row, Pixels(d.rowBorderSize))
+    PlaceEdges(row.borders, row, Pixels(d.rowBorderSize), d.rowBorderSize)
 
     local showIcon = d.showIcons ~= false
     local iconSize = math.max(1, h + (d.iconSizeOffset or 0))
@@ -808,7 +1006,7 @@ local function CreateRow(win, index)
 
     -- the Darkmoon Faire mark, just after the name (shown by FillRow)
     row.dmf = iconFrame:CreateTexture(nil, "OVERLAY", nil, 6)
-    row.dmf:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    ZacUI.Look.CropIcon(row.dmf)
     row.dmf:Hide()
     row.win = win
 
@@ -864,18 +1062,28 @@ local function CreateRow(win, index)
     return row
 end
 
+-- The rows fill the BODY (win.rowframe: under the header when there is
+-- one, the whole window otherwise), from the top, or from the bottom
+-- up when the window grows up.
 local function LayoutRows(win)
     local d = Look()
     local pitch = math.max(1, d.rowHeight + d.rowGap)
-    local fit = floor(win.frame:GetHeight() / pitch)
+    local body = win.rowframe or win.frame
+    local fit = floor((body:GetHeight() or 0) / pitch)
     win.rowsFit = fit
+    local up = d.grow == "up"
     for i = 1, max(fit, #win.rows) do
         local row = win.rows[i] or (i <= fit and CreateRow(win, i)) or nil
         if row then
             Meter.SettleRow(row)
             row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", win.frame, "TOPLEFT", 0, -((i - 1) * pitch))
-            row:SetWidth(win.frame:GetWidth())
+            if up then
+                row:SetPoint("BOTTOMLEFT", body, "BOTTOMLEFT", 0, (i - 1) * pitch)
+            else
+                row:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -((i - 1) * pitch))
+            end
+            -- (the Classic look's rows sit inside its rim: win.bodyInset)
+            row:SetWidth((win.frame:GetWidth() or 0) - 2 * (win.bodyInset or 0))
             row:SetHeight(d.rowHeight)
             if i > fit then row:Hide() end
         end
@@ -920,6 +1128,9 @@ function Meter.ValueDefaults(d)
     VAL_DEF.decimals = 1
     return VAL_DEF
 end
+-- the dimmer half of a row's texts (the rank, the per-second figure)
+local DIM = "|cffbdbdbd"
+Meter.DIM_CODE = DIM
 local function RightText(disp, v, ps, share, ToK, d)
     if disp.count then return floor(v) end
     local spec = type(d.formats) == "table" and d.formats.value
@@ -936,15 +1147,18 @@ local function RightText(disp, v, ps, share, ToK, d)
     end
     local layout = d.numberLayout or "both"
     local pct = (layout == "pct" or layout == "all") and format(" (%.1f%%)", share) or ""
-    if disp.single then return ToK(v) .. pct end
+    -- the second figure dimmer than the total (look.dimSecond)
+    local dim, undim = "", ""
+    if d.dimSecond ~= false then dim, undim = DIM, "|r" end
+    if disp.single then return ToK(v) .. (pct ~= "" and (dim .. pct .. undim) or "") end
     local sep = d.numberSep or " I "
     local total, per = ToK(v), ToK(floor(ps))
-    if layout == "paren" then return total .. " (" .. per .. ")"
+    if layout == "paren" then return total .. dim .. " (" .. per .. ")" .. undim
     elseif layout == "total" then return total
     elseif layout == "ps" then return per
-    elseif layout == "pct" then return total .. pct
-    elseif layout == "all" then return total .. sep .. per .. pct end
-    return total .. sep .. per
+    elseif layout == "pct" then return total .. dim .. pct .. undim
+    elseif layout == "all" then return total .. dim .. sep .. per .. pct .. undim end
+    return total .. dim .. sep .. per .. undim
 end
 Meter.RightText = RightText
 
@@ -1001,8 +1215,13 @@ local function FillRow(row, actor, v, top, right, d, rank)
     -- the names' format (look.formats.name: longest, case, before / after)
     local nf = type(d.formats) == "table" and d.formats.name
     if nf and ns.FormatName then name = ns.FormatName(name, nf) end
-    if d.showRank and rank then name = rank .. ". " .. name end
+    if d.showRank and rank then
+        if d.dimRank ~= false then name = DIM .. rank .. ".|r " .. name
+        else name = rank .. ". " .. name end
+    end
     row.leftText:SetText(name)
+    -- your own row marked by a light edge (look.selfStyle = "edge")
+    Meter.SelfEdge(row, actor.isSelf and d.useSelfColor and d.selfStyle == "edge", d)
     if d.nameColorMode == "class" then
         local c = CLASS_COLORS[actor.class or ""] or CLASS_COLORS.UNKNOW
         row.leftText:SetTextColor(c[1], c[2], c[3], 1)
@@ -1058,6 +1277,12 @@ RefreshMeterWindow = function(win, force)
     local settings = win.settings
     local disp = DISPLAYS[settings.display]
     if not disp then return end
+    -- Forever / Retail in a fight: the game's own meter paints the window
+    -- (Meter_Win_Live), and says so for a mode it does not keep
+    if Meter.Live and Meter.Live.Hook(win, force) then return end
+    -- a breakdown open in the window (Meter_Win_Breakdown) takes the tick
+    -- instead; the rows are hidden under it and catch up when it closes
+    if win.bd and Meter.Breakdown then return Meter.Breakdown.Refresh(win) end
     win.segRev = Meter.segmentsRev or 0
     local combat = CombatForWindow(win)
     if not combat then
@@ -1074,10 +1299,14 @@ RefreshMeterWindow = function(win, force)
     wipe(scratch)
     local valueOf = disp.value
     local sum = 0
+    local enemies = disp.enemies
     for _, actor in ipairs(container.actors) do
         if disp.prepare then disp.prepare(actor, combat, combatTime) end
         local v = valueOf(actor, combat, combatTime)
-        if v and v >= 1 and (actor.grupo or actor.ownerName) then
+        -- the group and its pets; the enemies for the one display that
+        -- lists them
+        local mine = actor.grupo or actor.ownerName
+        if v and v >= 1 and ((not enemies and mine) or (enemies and actor.enemy and not mine)) then
             scratch[#scratch + 1] = actor
             actor.sortValue = v
             sum = sum + v
@@ -1100,18 +1329,54 @@ RefreshMeterWindow = function(win, force)
     local offset = win.scroll or 0
     if offset > win.scrollMax then offset = win.scrollMax; win.scroll = offset end
 
+    -- MY OWN ROW (look.pinSelf): "follow" - when my bar is outside the
+    -- visible slice it claims the last visible row, unless you have
+    -- scrolled (you are looking for someone else then); "pin" - the same,
+    -- scrolled or not, at the top edge when I am above the slice and at
+    -- the bottom when below, with a line marking the pinned row; "off".
+    local pin = d.pinSelf or "follow"
+    local pinSlot, pinRank
+    if pin ~= "off" and win.rowsFit > 0 then
+        local first, last = offset + 1, offset + win.rowsFit
+        for j = 1, #scratch do
+            if scratch[j].isSelf then
+                if j < first and pin == "pin" then pinSlot, pinRank = 1, j
+                elseif j > last and (pin == "pin" or offset == 0) then pinSlot, pinRank = win.rowsFit, j end
+                break
+            end
+        end
+    end
     for i = 1, win.rowsFit do
         local row = win.rows[i]
         local rank = i + offset
         local actor = scratch[rank]
-        -- "following": if my own bar is outside the visible slice, it
-        -- claims the last visible row so I always see myself - unless
-        -- you have scrolled, in which case you are looking for someone
-        -- else and the row belongs to them.
-        if i == win.rowsFit and not playerRowShown and offset == 0 then
-            for j = win.rowsFit + 1, #scratch do
-                if scratch[j].isSelf then actor = scratch[j] rank = j break end
+        local pinned = false
+        if i == pinSlot and not playerRowShown then
+            actor, rank, pinned = scratch[pinRank], pinRank, pin == "pin"
+        end
+        if pinned then
+            -- the line between the pinned row and the list: under a row
+            -- pinned at the top, over one pinned at the bottom (placed
+            -- each time: the same row can be pinned at either edge)
+            local line = row.pinLine
+            if not line then
+                line = row:CreateTexture(nil, "OVERLAY", nil, 7)
+                row.pinLine = line
             end
+            local hl = Hairline()
+            line:SetHeight(hl)
+            line:SetColorTexture(ColorOf(d.rowBorderColor, 0, 0, 0, 1))
+            line:ClearAllPoints()
+            if pinSlot == 1 then
+                line:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, -hl)
+                line:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, -hl)
+            else
+                line:SetPoint("TOPLEFT", row, "TOPLEFT", 0, hl)
+                line:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, hl)
+            end
+            line:Show()
+        elseif row.pinLine then
+            row.pinLine:Hide()
         end
         if actor then
             local v = actor.sortValue
@@ -1139,6 +1404,8 @@ local function RefreshWindow(win, force)
     if win.settings.display == "threat" then return end -- the threat file drives it
     RefreshMeterWindow(win, force)
 end
+Meter.RefreshWindow = RefreshWindow
+Meter.RefreshMeterWindow = function(win, force) return RefreshMeterWindow(win, force) end
 
 function Meter.DirtyAll()
     for _, win in ipairs(windows) do RefreshWindow(win, true) end
@@ -1149,123 +1416,8 @@ function Meter.Windows.Each(fn)
     for _, win in ipairs(windows) do fn(win) end
 end
 
--- ============================================================
--- TOOLBAR - five 16x16 icons on the toolbar strip, revealed on hover,
--- overlapped by 3px, anchored above the window's top-right.
--- ============================================================
-local TOOLBAR_COORDS = {         -- ZacUI's toolbar sheet: five 32 px icons in a row
-    mode      = { 0 / 256, 32 / 256, 0, 1 },
-    segment   = { 32 / 256, 64 / 256, 0, 1 },
-    attribute = { 64 / 256, 96 / 256, 0, 1 },
-    report    = { 96 / 256, 128 / 256, 0, 1 },
-    reset     = { 128 / 256, 160 / 256, 0, 1 },
-}
-local TOOLBAR_ORDER = { "mode", "segment", "attribute", "report", "reset" }
-
-local function CreateToolbar(win)
-    local holder = CreateFrame("Frame", nil, win.frame)
-    holder:SetSize(80, 16)
-    holder:SetPoint("BOTTOMRIGHT", win.frame, "TOPRIGHT", 0, 2)
-    holder:SetAlpha(0)
-    win.toolbar = holder
-    win.toolbarButtons = {}
-    local last
-    for i = #TOOLBAR_ORDER, 1, -1 do
-        local key = TOOLBAR_ORDER[i]
-        local b = CreateFrame("Button", nil, holder)
-        b:SetSize(16, 16)
-        local t = b:CreateTexture(nil, "ARTWORK")
-        t:SetAllPoints()
-        t:SetTexture(Meter.TEX_TOOLBAR)
-        local c = TOOLBAR_COORDS[key]
-        t:SetTexCoord(c[1], c[2], c[3], c[4])
-        if not last then
-            b:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
-        else
-            b:SetPoint("RIGHT", last, "LEFT", 3, 0)   -- space = -3: overlap
-        end
-        last = b
-        b:SetScript("OnEnter", function() win:ShowToolbar(true) end)
-        b:SetScript("OnLeave", function() win:ShowToolbar(false) end)
-        b:SetScript("OnClick", function(_, button) win:ToolbarClick(key, button) end)
-        b:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
-        win.toolbarButtons[key] = b
-    end
-end
-
--- ============================================================
--- POPUP MENU - a tiny house-style list; no Blizzard dropdown taint.
--- ============================================================
-local menu
-local function GetMenu()
-    if menu then return menu end
-    menu = CreateFrame("Frame", "ZacUIMeterMenu", UIParent)
-    menu:SetFrameStrata("FULLSCREEN_DIALOG")
-    menu:SetClampedToScreen(true)
-    local bg = menu:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.05, 0.06, 0.97)
-    if ns.AddPixelBorder then ns.AddPixelBorder(menu) end
-    menu.buttons = {}
-    menu:Hide()
-    menu:SetScript("OnLeave", function()
-        C_Timer.After(0.35, function()
-            if menu:IsShown() and not menu:IsMouseOver() then menu:Hide() end
-        end)
-    end)
-    return menu
-end
-
-local function ShowMenu(anchor, items)
-    local m = GetMenu()
-    local width = 150
-    for i, item in ipairs(items) do
-        local b = m.buttons[i]
-        if not b then
-            b = CreateFrame("Button", nil, m)
-            b:SetHeight(18)
-            b:SetPoint("TOPLEFT", m, "TOPLEFT", 4, -((i - 1) * 18) - 4)
-            b:SetPoint("RIGHT", m, "RIGHT", -4, 0)
-            local hl = b:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.08)
-            b.text = b:CreateFontString(nil, "OVERLAY")
-            b.text:SetFont(Meter.FontPath(), 11)
-            -- (the meter's font, kept up when it changes)
-            if ns.TrackHouseFont then
-                ns.TrackHouseFont(b.text, function(s) pcall(s.SetFont, s, Meter.FontPath(), 11) end)
-            end
-            b.text:SetPoint("LEFT", 4, 0)
-            b.text:SetShadowColor(0, 0, 0, 1)
-            b.text:SetShadowOffset(1, -1)
-            m.buttons[i] = b
-        end
-        b.text:SetText(item.text)
-        b:SetScript("OnClick", function()
-            m:Hide()
-            GameTooltip:Hide()
-            item.func()
-        end)
-        -- what the entry means, while the mouse is on it
-        b:SetScript("OnEnter", item.tip and function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-            local t, c = ns.GetColor("tooltip", "title"), ns.GetColor("tooltip", "body")
-            GameTooltip:AddLine(item.text, t.r, t.g, t.b)
-            GameTooltip:AddLine(item.tip, c.r, c.g, c.b, true)
-            GameTooltip:Show()
-        end or nil)
-        b:SetScript("OnLeave", item.tip and function() GameTooltip:Hide() end or nil)
-        b:Show()
-    end
-    for i = #items + 1, #m.buttons do m.buttons[i]:Hide() end
-    m:SetSize(width, #items * 18 + 8)
-    m:ClearAllPoints()
-    m:SetPoint("TOPRIGHT", anchor, "BOTTOMRIGHT", 0, -2)
-    m:Show()
-end
-
 -- transient center label for segment / display feedback, over the
--- window (or over its title bar when one is shown). It shows at once and
+-- window (or over its header when one is shown). It shows at once and
 -- goes with the label animation - a 1.6s fade unless changed; "None"
 -- turns the label off. Held in a frame so ns.Motion can animate it.
 local function FlashLabel(win, text)
@@ -1297,397 +1449,6 @@ local function FlashLabel(win, text)
 end
 Meter.FlashLabel = FlashLabel
 
--- ============================================================
--- WINDOW OBJECT
--- ============================================================
-function winMeta:ShowToolbar(entering)
-    self.hoverCount = (self.hoverCount or 0) + (entering and 1 or -1)
-    if Look().toolbarMode == "always" then
-        self.toolbar:SetAlpha(0.92)
-        return
-    end
-    if entering then
-        self.toolbar:SetAlpha(0.92)
-    else
-        C_Timer.After(0.6, function()
-            if not self.frame:IsMouseOver() and not self.toolbar:IsMouseOver() then
-                self.toolbar:SetAlpha(0)
-            end
-        end)
-    end
-end
-
--- ============================================================
--- THE LOCK GUARDS THE GEOMETRY. THE DISPLAY IS FREE.
--- ============================================================
--- Lock used to veto display changes too, and both windows ship locked, so
--- every pick in the attribute menu bounced off a window that stayed on
--- damage forever. The guard was aimed at one real hazard - a threat
--- window quietly turning into a damage meter mid-pull - and it paid for
--- that by breaking the menu you actually use.
---
--- Split the two concerns instead. Lock means "I am done ARRANGING this":
--- it stops drag and resize, nothing else. The threat hazard is handled
--- where it belongs, by keeping threat out of the fifteen-entry attribute
--- menu entirely - it is a two-entry choice in the mode menu, which is a
--- place you have to mean to go. Picking a statistic is now one click, and
--- picking threat is still deliberate.
-function winMeta:SetDisplay(key)
-    self.scroll = 0
-    local settings = self.settings
-    if settings.display == key then return end
-    if settings.display ~= "threat" and DISPLAYS[settings.display] then
-        settings.lastMeterDisplay = settings.display
-    end
-    settings.display = key
-    if key == "threat" then
-        if Meter.Threat then Meter.Threat.Attach(self) end
-    else
-        if Meter.Threat then Meter.Threat.Detach(self) end
-        RefreshWindow(self, true)
-    end
-    Meter.UpdateTitle(self)
-    FlashLabel(self, key == "threat" and "Threat" or DISPLAYS[key].label)
-end
-
-function winMeta:SegmentLabel()
-    local seg = self.settings.segment or 0
-    if seg == 0 then return "Current fight" end
-    if seg == -1 then return Meter.inCombat and "Overall (live)" or "Overall" end
-    local combat = Meter.segments[seg]
-    return "#" .. seg .. (combat and (" " .. combat:Name()) or "")
-end
-
-function winMeta:SetSegment(seg)
-    self.settings.segment = seg
-    self.scroll = 0
-    RefreshWindow(self, true)
-    Meter.UpdateTitle(self)
-    FlashLabel(self, self:SegmentLabel())
-end
-
-function winMeta:ToolbarClick(key, button)
-    if self.preview then return end
-    if key == "mode" then
-        local items = {}
-        items[1] = { text = "Group meter", tip = "Damage, healing, deaths and the rest; pick which from the display menu.",
-            func = function()
-            self:SetDisplay(self.settings.lastMeterDisplay or "damage_done")
-        end }
-        items[2] = { text = "Threat (TinyThreat)", tip = Meter.THREAT_DESC, func = function()
-            self:SetDisplay("threat")
-        end }
-        -- Position lock only. It has nothing to say about which statistic
-        -- the window shows - that is the attribute menu, always live.
-        items[3] = { text = self.settings.locked and "Unlock position" or "Lock position",
-            func = function()
-                self.settings.locked = not self.settings.locked
-                Print("Meter window " .. self.id .. (self.settings.locked
-                    and " position locked - the display menu still works."
-                    or " unlocked - drag rows to move, corner to resize."))
-            end }
-        ShowMenu(self.toolbar, items)
-    elseif key == "segment" then
-        local used = #Meter.segments
-        local seg = self.settings.segment or 0
-        if button == "MiddleButton" then
-            self:SetSegment(0)
-        elseif button == "RightButton" then
-            seg = seg - 1
-            if seg < -1 then seg = used end
-            self:SetSegment(seg)
-        else
-            seg = seg + 1
-            if seg > used then seg = -1 end
-            self:SetSegment(seg)
-        end
-    elseif key == "attribute" then
-        self:OpenDisplayMenu()
-    elseif key == "report" then
-        if Meter.OpenReport then Meter.OpenReport(self) end
-    elseif key == "reset" then
-        Meter.ResetData()
-    end
-end
-
-function winMeta:OpenDisplayMenu()
-    local items = {}
-    for _, key in ipairs(DISPLAY_ORDER) do
-        -- Threat is deliberately NOT in this list. This is the "which
-        -- statistic" menu - fifteen damage and healing breakdowns - and
-        -- threat sitting at the bottom of it made the one switch you can
-        -- least afford the easiest one to hit by accident. It lives in
-        -- the mode menu, which is the two-entry choice it actually is.
-        if key ~= "threat" then
-            items[#items + 1] = { text = DISPLAYS[key].label, tip = DISPLAYS[key].desc,
-                func = function() self:SetDisplay(key) end }
-        end
-    end
-    ShowMenu(self.toolbar, items)
-end
-
-function winMeta:StopDrag()
-    local f = self.frame
-    f:StopMovingOrSizing()
-    local s = self.settings
-    local T = Meter.Threat
-    if T and T.IsDocked and T.IsDocked(self) then
-        -- docked under the target frame: a resize keeps its size, and
-        -- the window goes back under the frame (its own spot is kept)
-        T.ApplyDock()
-    else
-        local point, _, _, x, y = f:GetPoint(1)
-        s.point, s.x, s.y = point, x, y
-    end
-    s.w, s.h = f:GetWidth(), f:GetHeight()
-    LayoutRows(self)
-    if s.display == "threat" and Meter.Threat then Meter.Threat.SizeChanged(self) end
-    RefreshWindow(self, true)
-end
-
-function winMeta:ApplyClickthrough()
-    local through = self.settings.clickthrough and Meter.inCombat
-    self.frame:EnableMouse(not through)
-    for _, row in ipairs(self.rows) do
-        row:EnableMouse(not through)
-    end
-end
-
--- ============================================================
--- WINDOW CREATION
--- ============================================================
--- The title bar (off by default: his profile had none). It sits on top
--- of the window, outside it, so turning it on never changes how many
--- rows fit; the toolbar moves into it.
-local function EnsureTitle(win)
-    if win.title then return win.title end
-    local t = CreateFrame("Frame", nil, win.frame)
-    t:SetPoint("BOTTOMLEFT", win.frame, "TOPLEFT", 0, 0)
-    t:SetPoint("BOTTOMRIGHT", win.frame, "TOPRIGHT", 0, 0)
-    t.bg = t:CreateTexture(nil, "BACKGROUND")
-    t.bg:SetAllPoints()
-    t.text = t:CreateFontString(nil, "OVERLAY")
-    t.text:SetPoint("LEFT", t, "LEFT", 4, 0)
-    t.text:SetPoint("RIGHT", t, "RIGHT", -4, 0)
-    t.text:SetJustifyH("LEFT")
-    t.text:SetWordWrap(false)
-    t:Hide()
-    win.title = t
-    return t
-end
-
-function Meter.UpdateTitle(win)
-    local t = win.title
-    if not (t and t:IsShown()) then return end
-    local s = win.settings
-    if s.display == "threat" then t.text:SetText("Threat") return end
-    local disp = DISPLAYS[s.display]
-    local text = disp and disp.label or ""
-    if Look().titleSegment then text = text .. "  -  " .. win:SegmentLabel() end
-    t.text:SetText(text)
-end
-
--- Background, border, title bar and toolbar from the settings, applied
--- in place (live windows and the preview's alike).
-function Meter.StyleWindow(win)
-    local d = Look()
-    if d.bgShown then
-        win.bg:SetColorTexture(Meter.WinBgColor(d))
-    else
-        win.bg:SetColorTexture(0, 0, 0, 0)
-    end
-    local on = d.winBorder and true or false
-    local r, g, b, a = ColorOf(d.winBorderColor, 0, 0, 0, 1)
-    for i = 1, 4 do
-        win.edges[i]:SetColorTexture(r, g, b, a)
-        win.edges[i]:SetShown(on)
-    end
-    PlaceEdges(win.edges, win.frame, Pixels(d.winBorderSize))
-
-    local t = EnsureTitle(win)
-    local titleOn = d.titleBar and true or false
-    if titleOn then
-        t:SetHeight(math.max(8, tonumber(d.titleHeight) or 18))
-        t.bg:SetTexture(Meter.TexPath(d.titleTexture, FLAT_TEX))
-        t.bg:SetVertexColor(ColorOf(d.titleColor, 0, 0, 0, 0.6))
-        ns.ApplyFontSpec(t.text, d.titleFont, Meter.TitleFontDefaults(d))
-        -- its spot: the bar's left edge to its right edge, or the saved one
-        local td = t.anchorDef or {}
-        t.anchorDef = td
-        td.point, td.to, td.relPoint, td.x, td.y, td.justify = "LEFT", t, "LEFT", 4, 0, "LEFT"
-        td.point2, td.relPoint2, td.x2, td.y2 = "RIGHT", "RIGHT", -4, 0
-        if not t.anchorTo then
-            t.anchorTo = function(k) if k == "titlebar" then return t end end
-        end
-        local _, two = ns.ApplyAnchor(t.text, AnchorOf(d, "title"), td, t.anchorTo)
-        if not two then t.text:SetWidth(math.max(40, (win.frame:GetWidth() or 200) - 8)) end
-        t:Show()
-        Meter.UpdateTitle(win)
-    else
-        t:Hide()
-    end
-
-    local tb = win.toolbar
-    tb:ClearAllPoints()
-    if titleOn then
-        tb:SetPoint("RIGHT", t, "RIGHT", -2, 0)
-    else
-        tb:SetPoint("BOTTOMRIGHT", win.frame, "TOPRIGHT", 0, 2)
-    end
-    if d.toolbarMode == "always" then
-        tb:SetAlpha(0.92)
-    elseif not (win.frame:IsMouseOver() or tb:IsMouseOver()) then
-        tb:SetAlpha(0)
-    end
-    if win.flash then ns.ApplyFontSpec(win.flash.text, d.titleFont, Meter.TitleFontDefaults(d)) end
-end
-
--- the parts every window has, live or preview
-local function BuildWindowFrame(win, parent, name)
-    local settings = win.settings
-    local f = CreateFrame("Frame", name, parent)
-    f:SetSize(settings.w, settings.h)
-    win.frame = f
-
-    local bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
-    bg:SetAllPoints()
-    win.bg = bg
-    win.edges = {}
-    for i = 1, 4 do
-        local e = f:CreateTexture(nil, "BACKGROUND", nil, -8)
-        e:Hide()
-        win.edges[i] = e
-    end
-
-    win.rowframe = CreateFrame("Frame", nil, f)
-    win.rowframe:SetAllPoints()
-    return f
-end
-
-local function CreateWindow(id)
-    local d = Look()
-    local settings = d.windows[id]
-    local win = setmetatable({ id = id, settings = settings, rows = {} }, winMeta)
-
-    local f = BuildWindowFrame(win, UIParent, "ZacUIMeterWindow" .. id)
-    f:SetFrameStrata("LOW")
-    f:SetPoint(settings.point, UIParent, settings.point, settings.x, settings.y)
-    f:SetMovable(true)
-    f:SetResizable(true)
-    if f.SetResizeBounds then f:SetResizeBounds(100, 50)
-    elseif f.SetMinResize then f:SetMinResize(100, 50) end
-    f:SetClampedToScreen(true)
-
-    -- window-level mouse: hover reveals the toolbar, drag moves when
-    -- unlocked (the gaps between rows and the empty bottom are the frame)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function()
-        -- a window docked under the target frame is placed by the dock
-        local T = Meter.Threat
-        if not settings.locked and not (T and T.IsDocked and T.IsDocked(win)) then f:StartMoving() end
-    end)
-    f:SetScript("OnDragStop", function() win:StopDrag() end)
-    f:SetScript("OnEnter", function() win:ShowToolbar(true) end)
-    f:SetScript("OnLeave", function() win:ShowToolbar(false) end)
-    WireWheel(f, win)
-
-    -- resize grip, bottom-right, only bites when unlocked
-    local grip = CreateFrame("Button", nil, f)
-    grip:SetSize(14, 14)
-    grip:SetPoint("BOTTOMRIGHT")
-    grip:SetFrameLevel(f:GetFrameLevel() + 10)
-    grip:SetScript("OnMouseDown", function()
-        if not settings.locked then f:StartSizing("BOTTOMRIGHT") end
-    end)
-    grip:SetScript("OnMouseUp", function() win:StopDrag() end)
-
-    CreateToolbar(win)
-    Meter.StyleWindow(win)
-    LayoutRows(win)
-    -- when the windows show (look.visibility, ZacUI's visibility shape:
-    -- in combat, in a group, opacity, mouseover...). Alpha only; nothing
-    -- saved = the window is never touched, as before.
-    if ns.Visibility and ns.Visibility.Register then
-        ns.Visibility.Register(f, function() return Look().visibility end, { control = "alpha" })
-    end
-
-    if settings.display == "threat" and Meter.Threat then
-        Meter.Threat.Attach(win)
-    end
-
-    -- dense append: ipairs walks this everywhere, and a closed window 1
-    -- must never hide window 2 behind a nil hole (the ipairs lesson)
-    windows[#windows + 1] = win
-    return win
-end
-
--- ============================================================
--- PREVIEW WINDOW - a window for the settings page's preview: the same
--- frame, rows, toolbar and styling as a live one, parented to the
--- preview canvas, never in the window list (no refresh tick, no combat
--- hooks, no movers), with no tooltips, menus or dragging, fed a made-up
--- fight instead of a segment.
--- ============================================================
-function Meter.NewPreviewWindow(parent, w, h)
-    local settings = { display = "damage_done", segment = 0, locked = true, w = w or 226, h = h or 200 }
-    local win = setmetatable({ id = 0, settings = settings, rows = {}, preview = true }, winMeta)
-    BuildWindowFrame(win, parent, nil)
-    CreateToolbar(win)
-    win.frame:SetScript("OnEnter", function() win:ShowToolbar(true) end)
-    win.frame:SetScript("OnLeave", function() win:ShowToolbar(false) end)
-    Meter.StyleWindow(win)
-    LayoutRows(win)
-    return win
-end
-
--- restyle a preview window and refill it from `combat` showing `display`
-function Meter.FillPreviewWindow(win, combat, display)
-    win.fakeCombat = combat
-    win.settings.display = display
-    Meter.StyleWindow(win)
-    for _, row in ipairs(win.rows) do Meter.StyleRow(row) end
-    LayoutRows(win)
-    RefreshMeterWindow(win, true)
-    Meter.UpdateTitle(win)
-end
-
--- ============================================================
--- RESTYLE
--- ============================================================
--- Size and place a window from its settings (the Position tab), unless
--- the threat dock places it.
-local function ApplyGeometry(win)
-    local f, s = win.frame, win.settings
-    if s.w and s.h then f:SetSize(s.w, s.h) end
-    local T = Meter.Threat
-    if T and T.IsDocked and T.IsDocked(win) then
-        T.ApplyDock()
-    elseif s.point then
-        f:ClearAllPoints()
-        f:SetPoint(s.point, UIParent, s.point, s.x or 0, s.y or 0)
-    end
-end
-
--- Every setting onto what is already on screen: the settings page (each
--- change, coalesced to once a frame) and the Fonts & Textures push.
--- Rows made later read the same functions.
-function Meter.RestyleAll()
-    for _, win in ipairs(windows) do
-        ApplyGeometry(win)
-        Meter.StyleWindow(win)
-        for _, row in ipairs(win.rows) do Meter.StyleRow(row) end
-        LayoutRows(win)
-        local T = Meter.Threat
-        if win.threatRows and T then
-            for _, row in ipairs(win.threatRows) do T.StyleRow(row) end
-            T.SizeChanged(win)
-        end
-        RefreshWindow(win, true)
-        if ns.Visibility and ns.Visibility.Refresh then ns.Visibility.Refresh(win.frame) end
-    end
-end
-Meter.RestyleMedia = Meter.RestyleAll
 
 if ns.OnSettingsChanged and ns.Coalesce then
     local soon = ns.Coalesce(function()
@@ -1767,11 +1528,11 @@ local function StartRefreshTicker()
 end
 Meter.StartRefreshTicker = StartRefreshTicker
 
--- combat hooks for clickthrough + fresh-segment window snap
+-- combat hooks for clickthrough (Meter_Win_Frame wraps these: the
+-- fresh-segment snap of a window parked on a past fight, the clock)
 function Meter.OnCombatStart()
     for _, win in ipairs(windows) do
         win:ApplyClickthrough()
-        if (win.settings.segment or 0) > 0 then win.settings.segment = 0 end
     end
 end
 
@@ -1799,15 +1560,21 @@ Modules.meter = function()
     -- installed and enabled, stand down and say so.
     local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
     if isLoaded and isLoaded("Details") then
-        Print("meter: Details! is running, so ZacUI's meter is standing "
+        local line = ("meter: Details! is running, so ZacUI's meter is standing "
             .. "down. Disable or delete Details to switch over - your "
             .. "windows, skin and threat setup are already ported.")
+        -- after the login popups (Core_Popups), not under them
+        if ns.Popups then ns.Popups.Say(line) else Print(line) end
         return
     end
     Meter.enabled = true
     Meter.EnableParser()
-    for id = 1, #d.windows do
-        if d.windows[id].open then CreateWindow(id) end
+    -- the windows themselves: Meter_Win_Frame (Meter v2)
+    local Win = Meter.Win
+    if Win and Win.Create then
+        for id = 1, #d.windows do
+            if d.windows[id].open then Win.Create(id) end
+        end
     end
     StartRefreshTicker()
 end

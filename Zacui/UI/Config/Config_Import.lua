@@ -316,11 +316,11 @@ local function FirstRunImport()
     local names = {}
     for _, s in ipairs(pulls) do names[#names + 1] = s.label end
 
-    -- One frame's grace so the prompt lands after the login chat spam
-    -- rather than underneath it.
-    C_Timer.After(1, function()
+    -- First in the login popup queue (Core_Popups), a second after login
+    -- so it lands after the login chat rather than underneath it.
+    local function Show()
         ZacUIDB.importPrompted = true
-        UI.Confirm({
+        return UI.Confirm({
             title = "ZacUI - first run",
             text = "Found settings ZacUI can adopt so your interface "
                 .. "matches what you already have:\n\n"
@@ -333,10 +333,15 @@ local function FirstRunImport()
                 local keys = {}
                 for _, s in ipairs(pulls) do keys[s.key] = true end
                 Run(keys)
-                Print("Imported - /reload to repaint frames that are already skinned.")
+                ns.AskReload("Imported. Frames that are already drawn pick the new colours and font up after a reload.")
             end,
         })
-    end)
+    end
+    if ns.Popups then
+        ns.Popups.Want("import", Show, { delay = 1 })
+    else
+        C_Timer.After(1, Show)
+    end
 end
 
 -- ============================================================

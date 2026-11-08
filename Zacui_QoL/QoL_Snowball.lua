@@ -64,6 +64,10 @@ local ADDON_NAME = ...
 -- Zacui_QoL is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Zac, on Forever,
+-- "the snowball ... stuff is not needed"): the button stands down here,
+-- before it makes a frame; the page's Snowball tab goes with it.
+if ns.FeatureOn and not ns.FeatureOn("snowball") then return end
 
 -- shared state from earlier ZacUI files
 local Print = ns.Print
@@ -123,7 +127,7 @@ function SB.Face(f)
     local icon = f:CreateTexture(nil, "ARTWORK")
     icon:SetAllPoints()
     icon:SetTexture(ICON)
-    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    ZacUI.Look.CropIcon(icon)
     local count = f:CreateFontString(nil, "OVERLAY")
     count:SetPoint("BOTTOMRIGHT", -2, 2)
     -- a font from the start: the game refuses text on a string without one

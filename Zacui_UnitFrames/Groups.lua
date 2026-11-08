@@ -67,7 +67,7 @@ local function styleChild(button)
     button.__leanInit = true
     button.isGroupUnit = true   -- ns.GetUnitFrame prefers group slots, like LibGetFrame
 
-    ns.UI:Backdrop(button, button.cfg.bgColor, button.cfg.borderColor)
+    ns.UI:FrameBackdrop(button, button.cfg.bgColor, button.cfg.borderColor)
     if InCombatLockdown() then
         pendingClicks[button] = true
         clickWaiter:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -108,11 +108,15 @@ local function styleChild(button)
         if name == "unit" then bindUnit(self) end
     end)
     button:HookScript("OnShow", function(self) ns.UpdateAll(self) end)
-    button:HookScript("OnEnter", function(self) self.hovered = true;  ns.UpdatePvP(self) end)
-    button:HookScript("OnLeave", function(self) self.hovered = false; ns.UpdatePvP(self) end)
+    button:HookScript("OnEnter", function(self) self.hovered = true;  ns.UpdatePvP(self) ns.GroupBorder(self) end)
+    button:HookScript("OnLeave", function(self) self.hovered = false; ns.UpdatePvP(self) ns.GroupBorder(self) end)
+    -- (match pass: the target's white border follows target changes)
+    if ns.GroupBorderWatch then ns.GroupBorderWatch() end
 
     bindUnit(button)
 end
+-- (the tank frames' header styles its children the same way: Tanks.lua)
+ns.StyleGroupChild = styleChild
 
 -- The drag handle. Parented to UIParent (not the host) so it stays visible and
 -- clickable when the group is empty and the host has zero-ish size. `host` is the
@@ -433,7 +437,7 @@ function ns.SpawnHeader(kind)
             for _, child in ipairs({ h:GetChildren() }) do
                 if child.__leanInit then
                     child.__rangeFaded = nil   -- re-applied at the next range check (its opacity may have changed)
-                    ns.UI:Backdrop(child, child.cfg.bgColor, child.cfg.borderColor)
+                    ns.UI:FrameBackdrop(child, child.cfg.bgColor, child.cfg.borderColor)
                     ns.StyleElements(child)
                     ns.RegisterFrameEvents(child)
                     ns.UpdateAll(child)
@@ -493,6 +497,10 @@ ranger:SetScript("OnUpdate", function(_, e)
             applyRangeAlpha(b, true)
         else
             local inRange, checked = UnitInRange(unit)
+            -- (WoW Forever hands the range back hidden: no fading on it)
+            if issecretvalue ~= nil and (issecretvalue(inRange) or issecretvalue(checked)) then
+                inRange, checked = true, true
+            end
             if checked then
                 applyRangeAlpha(b, not inRange)
             else

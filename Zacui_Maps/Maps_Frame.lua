@@ -75,11 +75,15 @@ local function Detach(map)
     -- The windowed map rather than the fullscreen one. pcall because a
     -- CVar that does not exist on a given build throws rather than
     -- returning nil, and this is not worth taking the module down for.
-    pcall(SetCVar, "miniWorldMap", 1)
+    -- SETUP2: through ns.CVar (recorded; put back when Maps is off)
+    local function Set(name, value)
+        if ns.CVar then ns.CVar.Set(name, value, "maps") else pcall(SetCVar, name, value) end
+    end
+    Set("miniWorldMap", 1)
 
     -- Blizzard has its own map opacity system driven by a CVar. Ours
     -- would multiply with it, so it is zeroed once and left alone.
-    pcall(SetCVar, "worldMapOpacity", 0)
+    Set("worldMapOpacity", 0)
     if WorldMapFrame_SetOpacity then pcall(WorldMapFrame_SetOpacity, 0) end
 
     -- SetIgnoreParentScale IS DELIBERATELY NOT TOUCHED, and that matters
@@ -940,6 +944,10 @@ function F.StyleStrip(strip)
             strip.zone:ClearAllPoints()
             strip.zone:SetPoint("LEFT", step, 0)
         end
+        -- the step is where the zone sits unless "Player  x, y" is wider
+        -- than it (F.KeepZoneClear); a saved spot is the player's own
+        strip._zZoneStep = (not za) and step or nil
+        strip._zZoneX = strip._zZoneStep
     end
     -- your position and the cursor's: their spots, or the saved anchor on
     -- top (maps.anchors.<player|cursor>; nothing saved = never touched)
@@ -954,6 +962,25 @@ function F.StyleStrip(strip)
         d = D.cursor
         d.point, d.to, d.relPoint, d.x, d.y, d.justify = "RIGHT", strip, "RIGHT", -10, 0, "RIGHT"
         ns.ApplyAnchor(strip.cursor, ca, d, F.StripResolver(strip))
+    end
+end
+
+-- THE ZONE NEVER SITS ON YOUR POSITION (2026-11-07, Zac on Forever:
+-- "text overlap on the map"). The zone's fixed step after "Player  x, y"
+-- is a guess at that text's width; a bigger font, a wider face or a
+-- longer label can run past it. Measured after each position update
+-- (five times a second while the map is open) and the zone moved right
+-- only when the text actually reaches it, so the usual layout is exactly
+-- as before.
+function F.KeepZoneClear(strip)
+    local step, zone, player = strip._zZoneStep, strip.zone, strip.player
+    if not (step and zone and player and player.GetStringWidth) or strip._zMoved then return end
+    local w = (player:GetText() or "") ~= "" and (player:GetStringWidth() or 0) or 0
+    local x = math.max(step, math.ceil(10 + w + 14))
+    if x ~= strip._zZoneX then
+        strip._zZoneX = x
+        zone:ClearAllPoints()
+        zone:SetPoint("LEFT", x, 0)
     end
 end
 
@@ -1146,6 +1173,7 @@ local function BuildCoords(map)
                 -- where you were two zones ago is worse than none.
                 player:SetText("")
             end
+            F.KeepZoneClear(self)
         end
 
         tCursor = tCursor + dt
@@ -1179,6 +1207,8 @@ function F.ApplyCoords()
     if not coordsFrame then return end
     coordsFrame:SetShown(On("coords"))
     F.StyleStrip(coordsFrame)
+    -- the modern map's own coordinate readout steps aside for this strip
+    if ns.MapsSkin and ns.MapsSkin.SyncCoordsPanel then ns.MapsSkin.SyncCoordsPanel() end
 end
 
 -- ============================================================

@@ -336,7 +336,7 @@ function E.UnitFrame(unit)
         local ok, f = pcall(get, unit)
         if ok and f then return f end
     end
-    local guid = UnitGUID(unit)
+    local guid = ns.SafeGUID(unit)
     if not guid then return nil end
     for i = 1, 40 do
         local f = _G["CompactRaidFrame" .. i]

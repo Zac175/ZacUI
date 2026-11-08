@@ -97,6 +97,13 @@ RegisterPage("Font", function(L)
     L:Header("Fonts & Textures",
         "One font and one bar texture for the whole UI. The font is every "
         .. "text's, everywhere; 'Where it goes' picks which parts take the texture.")
+    -- the Classic look (Core_Look) puts the game's own font on the world:
+    -- the one-font promise then covers this window and Readycheck
+    if ns.Look and ns.Look.Active() == "classic" then
+        L:Notice("warn", "The Classic look is on: frames, plates, bars and the skinned windows wear the game's "
+            .. "own font. The font chosen here still dresses this window and Readycheck, and comes back "
+            .. "everywhere under the ZacUI look.")
+    end
 
     L:Preview({
         key = "appearance.font",
@@ -129,6 +136,24 @@ RegisterPage("Font", function(L)
             end,
         })
         L:Row(dd, M.DROPDOWN_H + 6)
+        -- HD polish (2026-11-07): ZacUI's crisp condensed face, one click
+        -- away (a fresh install starts on it; an existing one is never
+        -- moved off a font picked by hand)
+        local hd = ns.MEDIA_FONT_HD_NAME
+        if hd and ZacUIDB.font.name ~= hd and (not ns.Look or ns.Look.Active() == "zacui") then
+            local useHD = UI.Button(L.current, "Use ZacUI's HD font", {
+                width = 170,
+                tooltip = hd .. ": a condensed display face that stays crisp outlined at small sizes.",
+                onClick = function()
+                    if Media then Media.SetFont(hd) else
+                        ZacUIDB.font.name = hd
+                        ApplyFonts()
+                    end
+                    RefreshConfig()
+                end,
+            })
+            L:Row(useHD, M.BUTTON_H + 6)
+        end
         if not media then
             L:Desc("LibSharedMedia is not installed, so only the Blizzard default "
                 .. "is listed. You can still point ZacUI at any font file with "
@@ -260,7 +285,7 @@ RegisterPage("Font", function(L)
                         })
                     end,
                 })
-                if not here then btn:SetDisabled(true) end
+                if not here then btn:SetDisabled(true, "Needs the aura addon loaded.") end
                 L:Row(btn, M.BUTTON_H + 6)
                 L:Desc(t.desc .. (here and "" or "  Not loaded right now."))
             end
@@ -291,7 +316,8 @@ RegisterPage("Colors", function(L)
     local row = UI.Holder(L.current)
     row:SetSize(340, M.BUTTON_H)
     local reload = UI.Button(row, "Reload UI", { width = 100, onClick = function()
-        if type(ReloadUI) == "function" then ReloadUI()
+        if ns.RequestReload then ns.RequestReload()
+        elseif type(ReloadUI) == "function" then ReloadUI()
         elseif C_UI and C_UI.Reload then C_UI.Reload() end
     end })
     reload:SetPoint("LEFT")

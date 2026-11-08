@@ -6,6 +6,7 @@
 -- (12.1.5.70391, the wings) and the WoW Forever install's files; regenerate rather than edit.
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 
 ns.MapDungeonMaps = {
 	[33] = { -- Shadowfang Keep

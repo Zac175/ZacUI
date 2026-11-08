@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Class HUDs|r
 ## Notes: ZacUI class HUDs for every class, and the Drink Ticker. Native ports of the class-pack WeakAuras.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -23,6 +23,16 @@ HUD_Warrior_UI.lua
 HUD_Paladin.lua
 HUD_Priest.lua
 HUD_ClassHUD.lua
+HUD_V2_Sources.lua
+HUD_V2_Specs.lua
+HUD_V2_Modern.lua
+HUD_V2_Keybinds.lua
+HUD_V2_Rows.lua
+HUD_V2_Icon.lua
+HUD_V2_Glows.lua
+HUD_V2_Page.lua
+HUD_V2_BuffBars.lua
+HUD_V2_Resources.lua
 HUD_Hunter.lua
 HUD_Rogue.lua
 HUD_Shaman.lua
@@ -31,3 +41,6 @@ HUD_Warlock.lua
 HUD_Druid.lua
 HUD_DrinkTicker.lua
 HUD_Hesitation.lua
+# Drag to customise in the class HUD previews (ZacUI's UIF_PreviewDrag):
+# the rows' icon order.
+HUD_PreviewDrag.lua

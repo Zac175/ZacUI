@@ -4,6 +4,7 @@
 --   paths[i]  = { from, to, length (yards), cost (copper), { x1, y1, x2, y2, ... } }
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 
 ns.MapFlights = {
 	nodes = {

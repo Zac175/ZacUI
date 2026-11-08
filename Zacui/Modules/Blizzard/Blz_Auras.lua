@@ -53,7 +53,9 @@ local function ApplyBuffConsolidation()
     if get and set then
         local ok, current = pcall(get, "consolidateBuffs")
         if not ok or current ~= "0" then
-            pcall(set, "consolidateBuffs", "0")
+            -- SETUP2: recorded, so it goes back when the module is off
+            if ns.CVar then ns.CVar.Set("consolidateBuffs", "0", "auras")
+            else pcall(set, "consolidateBuffs", "0") end
         end
     end
 
@@ -206,7 +208,117 @@ local LOOK = {
     showCount = true,
     countPos = "TOPRIGHT",  -- a corner of the icon
     countX = -1, countY = -2,
+    swipe = "short",        -- the dark sweep as time runs out (ZacUI look):
+                            -- "off" | "short" (auras of 5 minutes or less) | "all"
 }
+
+-- ============================================================
+-- HD POLISH (2026-11-07, ZacUI look only)
+-- ============================================================
+-- The ZacUI look's buffs follow the HD standard (zui_tests/
+-- HD_POLISH_STANDARD_1107.md): a ring exactly one physical pixel wide drawn
+-- over the icon's edge, a lighter crop (0.07, proved to show none of
+-- Blizzard's frame at 12-64 px under that ring), the time on the icon's
+-- bottom edge in an 11 px outline (the row gap grown to its overhang;
+-- centred, under the icon or on the top edge are settings), the stack
+-- number 12 px outlined in the
+-- bottom-right corner, a 4 px gap, debuff rings in the HD dispel palette
+-- and a reversed dark sweep on short auras.
+--
+-- The settings above are SAVED as they are read (FillDefaults), so a
+-- profile from before holds the old defaults as values. Once, under the
+-- ZacUI look only, every setting still at its old shipped value moves to
+-- the HD one (auraStyle.hdRev); anything changed by hand is kept, and
+-- after this every value is the player's again (the old spots stay in
+-- the menus). The Classic, Blizzard and Forever looks never run it.
+local HD_CROP = 0.07
+local HD_TIMER_FONT = { size = 11, outline = "outline", shadow = false }
+local HD_COUNT_FONT = { size = 12, outline = "outline", shadow = false }
+-- Blizzard's DebuffTypeColor (what its border art is tinted with, read by
+-- TintFrom) -> the HD palette, matched by the nearest colour
+local DISPEL_BLIZZ = {
+    { 0.80, 0.00, 0.00, { 0.80, 0.10, 0.10 } },   -- none
+    { 0.20, 0.60, 1.00, { 0.35, 0.48, 1.00 } },   -- Magic
+    { 0.60, 0.00, 1.00, { 0.64, 0.00, 0.64 } },   -- Curse
+    { 0.60, 0.40, 0.00, { 0.67, 0.38, 0.10 } },   -- Disease
+    { 0.00, 0.60, 0.00, { 0.00, 0.71, 0.29 } },   -- Poison
+}
+-- THE GAME LOOKS' KIT (2026-11-08, zui_tests/AB_KITS_STUDY_1108.md section
+-- 6): under Classic WoW UI, Blizzard style and WoW Forever (Core_Look, part
+-- "auras") the buff buttons are Blizzard's own and wear Blizzard's own art,
+-- the way the reference UI's stock styles draw its player auras: the whole
+-- icon, no ZacUI ring, Blizzard's debuff and weapon-enchant borders left
+-- exactly as Blizzard paints them, Blizzard's own rows. The time stays a
+-- ZacUI text so it is outlined (Zac's black edge), but in Blizzard's spot
+-- (under the icon), words (its own duration text) and colours (gold, white
+-- under a minute); the stack number stays where Blizzard put it. Each only
+-- while the setting is still the value ZacUI shipped; nothing is written.
+local function Kit()
+    local L = ns.Look
+    local lk = L and L.For and L.For("auras")
+    local id = lk and lk.id
+    if id == "classic" or id == "blizzard" or id == "forever" then return id end
+    return nil
+end
+ns.AuraKit = Kit
+local function IsHD()
+    local L = ns.Look
+    return L ~= nil and L.Active ~= nil and L.Active() == "zacui" and not Kit()
+end
+-- the one-time moves below wait for the look to be settled (Core_Look's
+-- PLAYER_LOGIN re-read): before it a Classic save can read as ZacUI's
+-- look, and a move made then would be made for good (2026-11-08)
+local function Settled()
+    local L = ns.Look
+    return not (L and L.Settled) or L.Settled()
+end
+local function HDTint(r, g, b)
+    local best, bd
+    for _, e in ipairs(DISPEL_BLIZZ) do
+        local d = (e[1] - r) ^ 2 + (e[2] - g) ^ 2 + (e[3] - b) ^ 2
+        if not bd or d < bd then best, bd = e[4], d end
+    end
+    -- a colour nothing like Blizzard's five (another addon's): as it is
+    if bd and bd > 0.08 then return r, g, b end
+    return best[1], best[2], best[3]
+end
+-- THE MATCH PASS (2026-11-07, zui_tests/MATCH_BARS_1107.md): a second
+-- step on the same one-time move, ZacUI look only - 32 px icons, a 5 px
+-- gap, the stack number 11 px in the very corner, the sweep on every timed
+-- aura (the reference UI's numbers). The time stays on the bottom edge
+-- (Zac's pick). Only values still at the number shipped before move.
+local function HDMigrate2(t)
+    if (tonumber(t.hdRev) or 0) >= 2 or not Settled() or not IsHD() then return end
+    t.hdRev = 2
+    if (tonumber(t.iconSize) or 30) == 30 then t.iconSize = 32 end
+    if (tonumber(t.spacing) or 4) == 4 then t.spacing = 5 end
+    if t.countPos == "BOTTOMRIGHT" and (tonumber(t.countX) or -1) == -1 and (tonumber(t.countY) or 1) == 1 then
+        t.countX, t.countY = 0, 0
+    end
+    local cf = t.countFont
+    if type(cf) == "table" and cf.size == HD_COUNT_FONT.size and cf.face == nil
+        and (cf.outline or "outline") == "outline" and not cf.shadow then
+        cf.size = 11
+    end
+    if t.swipe == nil or t.swipe == "short" then t.swipe = "all" end
+end
+local function HDMigrate(t)
+    if not Settled() then return end
+    if t.hdRev or not IsHD() then return HDMigrate2(t) end
+    t.hdRev = 1
+    -- (the time stays on the bottom edge, Zac's pick: only its font moves)
+    if t.countPos == "TOPRIGHT" and (tonumber(t.countX) or -1) == -1 and (tonumber(t.countY) or -2) == -2 then
+        t.countPos, t.countX, t.countY = "BOTTOMRIGHT", -1, 1
+    end
+    if (tonumber(t.spacing) or -1) == -1 then t.spacing = 4 end
+    if type(t.timerFont) ~= "table" or next(t.timerFont) == nil then
+        t.timerFont = { size = HD_TIMER_FONT.size, outline = HD_TIMER_FONT.outline, shadow = HD_TIMER_FONT.shadow }
+    end
+    if type(t.countFont) ~= "table" or next(t.countFont) == nil then
+        t.countFont = { size = HD_COUNT_FONT.size, outline = HD_COUNT_FONT.outline, shadow = HD_COUNT_FONT.shadow }
+    end
+    HDMigrate2(t)
+end
 local TIMER_SIZE = 10       -- ZacUI's font, as UI.Font draws it
 
 local function Fill(dst, src)
@@ -219,7 +331,77 @@ local function Look()
     if not ZacUIDB then return Fill({}, LOOK) end
     local t = ZacUIDB.auraStyle
     if type(t) ~= "table" then t = {} ZacUIDB.auraStyle = t end
-    return Fill(t, LOOK)
+    Fill(t, LOOK)
+    HDMigrate(t)
+    return t
+end
+
+-- UNDER THE KIT: the values ZacUI shipped draw Blizzard's. The time's
+-- shipped spot (on the bottom edge, 0 / 1) is Blizzard's (under the icon);
+-- the shipped sizes (30, and the ZacUI look's 32 from its one-time move)
+-- are Blizzard's 30; the shipped gaps (-1, and that move's 4 / 5) are
+-- Blizzard's own; the HD fonts that move saved are the shipped fonts.
+local function SameFont(f, size)
+    return type(f) == "table" and f.face == nil and f.size == size
+        and (f.outline or "outline") == "outline" and not f.shadow
+end
+local function KitTimerSpot(cfg)
+    if not Kit() then return nil end
+    local a = type(cfg.anchors) == "table" and cfg.anchors.timer or nil
+    if a ~= nil then return nil end
+    if (cfg.timerPos or "edge") == "edge" and (tonumber(cfg.timerX) or 0) == 0 and (tonumber(cfg.timerY) or 1) == 1 then
+        return "below"
+    end
+    return nil
+end
+local function TimerPos(cfg)
+    return KitTimerSpot(cfg) or cfg.timerPos
+end
+local function KitSize(cfg)
+    local s = tonumber(cfg.iconSize) or 30
+    if Kit() and (s == 30 or (s == 32 and (tonumber(cfg.hdRev) or 0) >= 2)) then return 30 end
+    return s
+end
+local function KitSpacing(cfg)
+    local pad = tonumber(cfg.spacing) or -1
+    if Kit() and (pad == -1 or (pad == 4 and cfg.hdRev) or (pad == 5 and (tonumber(cfg.hdRev) or 0) >= 2)) then return -1 end
+    return pad
+end
+-- the timer's font as the settings say: nil while it is the shipped one
+local function TimerFontOf(cfg)
+    local f = cfg.timerFont
+    if Kit() and SameFont(f, 11) then return nil end
+    return f
+end
+-- the stack number stays Blizzard's while its spot and font are shipped
+local function KitCountStock(cfg)
+    if not Kit() then return false end
+    if type(cfg.anchors) == "table" and cfg.anchors.count ~= nil then return false end
+    local pos, x, y = cfg.countPos or "TOPRIGHT", tonumber(cfg.countX) or -1, tonumber(cfg.countY) or -2
+    local spot = (pos == "TOPRIGHT" and x == -1 and y == -2) or (pos == "BOTTOMRIGHT" and x == -1 and y == 1)
+        or (pos == "BOTTOMRIGHT" and x == 0 and y == 0)
+    if not spot then return false end
+    local f = cfg.countFont
+    if not (type(f) ~= "table" or next(f) == nil or SameFont(f, 12) or SameFont(f, 11)) then return false end
+    return type(cfg.countColor) ~= "table" and cfg.showCount ~= false
+end
+-- Blizzard's own border art on a button (debuff, weapon enchant), scaled
+-- with the icon from the size Blizzard gave it (read once)
+local function KitBlizzBorder(b)
+    return b._zBlizzBorder or b.DebuffBorder or b.TempEnchantBorder or b.Border or b.border
+end
+local function KitFitBorder(b, s)
+    local bd = KitBlizzBorder(b)
+    if not (bd and bd.GetSize and bd.SetSize) then return end
+    local nat = rawget(bd, "_zKitNat")
+    if not nat then
+        local w, h = bd:GetSize()
+        if type(w) ~= "number" or w <= 0 then return end
+        nat = { w, h }
+        rawset(bd, "_zKitNat", nat)
+    end
+    local k = (s or 30) / 30
+    bd:SetSize(nat[1] * k, nat[2] * k)
 end
 
 -- Bumped whenever a setting changes; a button restyles itself when its
@@ -229,18 +411,29 @@ local styleVer = 1
 
 -- The extra height under the icon each timer position needs, so rows
 -- close up or open out with it (edge: half the text hangs below).
-local TIMER_EXTRA = { edge = 6, below = 12, inside = 0, center = 0 }
+local TIMER_EXTRA = { edge = 6, below = 12, inside = 0, center = 0, top = 6 }
 local function CellSize(cfg)
     cfg = cfg or Look()
-    local s = math.max(16, math.min(64, tonumber(cfg.iconSize) or 30))
-    local extra = (cfg.showTimer ~= false) and (TIMER_EXTRA[cfg.timerPos] or 6) or 0
+    local s = math.max(16, math.min(64, KitSize(cfg)))
+    local tpos = TimerPos(cfg)
+    local extra = (cfg.showTimer ~= false) and (TIMER_EXTRA[tpos] or 6) or 0
+    -- the room grows with the time's own size: under the icon the whole
+    -- text, on an edge the half that hangs over it (and a pixel to spare),
+    -- so a bigger time never runs into the next row
+    local tf = TimerFontOf(cfg)
+    local fsz = cfg.showTimer ~= false and type(tf) == "table" and tonumber(tf.size)
+    if fsz then
+        local need = (tpos == "below" and fsz + 3)
+            or ((tpos == "edge" or tpos == "top") and math.ceil(fsz / 2) + 1) or 0
+        if need > extra then extra = need end
+    end
     return s, s + extra
 end
 
 -- Spacing and growth: the setting, or Blizzard's when it says so.
 local function GridOf(cfg, info)
     cfg = cfg or Look()
-    local pad = tonumber(cfg.spacing) or -1
+    local pad = KitSpacing(cfg)
     if pad < 0 then pad = (info and info.iconPadding) or 0 end
     local xMul, yMul
     if cfg.growX == "right" then xMul = 1
@@ -278,6 +471,8 @@ end
 
 local function EdgeBorder(btn, target)
     if btn._zui_border then return btn._zui_border end
+    -- under a game look's kit Blizzard's own border art is the border
+    if Kit() then return nil end
     -- target: what the edge TRACES. Classic aura buttons ARE their
     -- icon rect, so the button is fine; 1.15.9 pooled buttons are
     -- BIGGER than their icon (inset art, duration region inside the
@@ -292,12 +487,14 @@ local function EdgeBorder(btn, target)
         if side == "TOP" or side == "BOTTOM" then
             tex:SetPoint(side .. "LEFT", target, side .. "LEFT")
             tex:SetPoint(side .. "RIGHT", target, side .. "RIGHT")
-            tex:SetHeight(1)
         else
             tex:SetPoint("TOP" .. side, target, "TOP" .. side)
             tex:SetPoint("BOTTOM" .. side, target, "BOTTOM" .. side)
-            tex:SetWidth(1)
         end
+        -- one physical pixel under the ZacUI look (Core_Pixel), 1 else
+        if ns.Pixel then ns.Pixel.Edge(tex, side, btn)
+        elseif side == "TOP" or side == "BOTTOM" then tex:SetHeight(1)
+        else tex:SetWidth(1) end
         tex._zSide = side
         t[#t + 1] = tex
     end
@@ -307,13 +504,47 @@ end
 
 -- The border's resting colour: the setting, else the palette. A debuff's
 -- dispel tint is laid over this by TintFrom (and kept in _zTint).
+-- THE KIT'S SAMPLE BORDER: the settings page's samples are not Blizzard
+-- buttons, so under the kit they draw the Classic template's art - the
+-- debuff overlay 33 x 32 round a 30 icon (Interface\Buttons\
+-- UI-Debuff-Overlays, its border cell 0.296875-0.5703125 x 0-0.515625,
+-- tinted the dispel type's colour, red untyped) and the weapon-enchant
+-- ring 32 round 30 (UI-TempEnchant-Border). Real buttons keep Blizzard's.
+local KIT_DEBUFF = { file = "Interface\\Buttons\\UI-Debuff-Overlays", w = 33, h = 32,
+    tc = { 0.296875, 0.5703125, 0, 0.515625 }, none = { 0.80, 0, 0 } }
+local KIT_ENCHANT = { file = "Interface\\Buttons\\UI-TempEnchant-Border", w = 32, h = 32 }
+local function PaintKitSample(b)
+    local t = b._zKitBorder
+    if not t then return end
+    local spec = (b._zKind == "enchant") and KIT_ENCHANT or ((b._zKind == "debuff") and KIT_DEBUFF) or nil
+    if not spec then t:Hide() return end
+    local icon = b._zIconRef or b.Icon or b.icon
+    local k = ((icon and icon.GetWidth and icon:GetWidth()) or 30) / 30
+    if k <= 0 then k = 1 end
+    t:SetTexture(spec.file)
+    if spec.tc then t:SetTexCoord(spec.tc[1], spec.tc[2], spec.tc[3], spec.tc[4]) else t:SetTexCoord(0, 1, 0, 1) end
+    t:ClearAllPoints()
+    t:SetPoint("CENTER", icon or b, "CENTER", 0, 0)
+    t:SetSize(spec.w * k, spec.h * k)
+    if spec == KIT_DEBUFF then
+        local c = b._zTint or spec.none
+        t:SetVertexColor(c[1], c[2], c[3], 1)
+    else
+        t:SetVertexColor(1, 1, 1, 1)
+    end
+    t:Show()
+end
+
 local function PaintBorder(b, cfg)
+    if b._zKitBorder then return PaintKitSample(b) end
     local strips = b._zui_border
     if not strips then return end
     cfg = cfg or Look()
     local r, g, bl, a
     if b._zTint and cfg.debuffColors ~= false then
         r, g, bl, a = b._zTint[1], b._zTint[2], b._zTint[3], 1
+        -- the HD dispel palette under the ZacUI look
+        if IsHD() then r, g, bl = HDTint(r, g, bl) end
     elseif b._zKind == "enchant" and type(cfg.enchantColor) == "table" then
         r, g, bl, a = ColorOr(cfg.enchantColor)
     else
@@ -327,7 +558,9 @@ local function PaintBorder(b, cfg)
             tex:Hide()
         else
             tex:Show()
-            if tex._zSide == "TOP" or tex._zSide == "BOTTOM" then tex:SetHeight(size)
+            if ns.Pixel and ns.Pixel.SetEdgeSize(tex, size) then
+                -- (one of ns.Pixel's: sized in physical pixels)
+            elseif tex._zSide == "TOP" or tex._zSide == "BOTTOM" then tex:SetHeight(size)
             else tex:SetWidth(size) end
         end
     end
@@ -353,6 +586,28 @@ local function TintFrom(b, blizz)
 end
 
 local function FormatTime(t)
+    -- the kit: the game's own abbreviation (SecondsToTimeAbbrev, "28 m")
+    if Kit() then
+        if SecondsToTimeAbbrev then
+            local ok, fmt, v = pcall(SecondsToTimeAbbrev, t)
+            if ok and type(fmt) == "string" then
+                local ok2, out = pcall(string.format, fmt, v)
+                if ok2 and type(out) == "string" then return out end
+            end
+        end
+        if t >= 86400 then return math.ceil(t / 86400) .. " d" end
+        if t >= 3600 then return math.ceil(t / 3600) .. " h" end
+        if t >= 60 then return math.ceil(t / 60) .. " m" end
+        return math.floor(t) .. " s"
+    end
+    -- the ZacUI look (match pass): the reference UI's bands - seconds up to
+    -- 89, minutes from 90 s, hours from 90 min, days from 36 h
+    if IsHD() then
+        if t >= 129601 then return math.ceil(t / 86400) .. "d" end
+        if t >= 5401 then return math.ceil(t / 3600) .. "h" end
+        if t >= 90 then return math.ceil(t / 60) .. "m" end
+        return tostring(math.floor(t))
+    end
     if t >= 3600 then return math.ceil(t / 3600) .. "h" end
     if t >= 60 then return math.ceil(t / 60) .. "m" end
     return tostring(math.floor(t))
@@ -363,6 +618,7 @@ local TIMER_POINT = {
     below  = { "TOP", "BOTTOM" },
     inside = { "BOTTOM", "BOTTOM" },
     center = { "CENTER", "CENTER" },
+    top    = { "CENTER", "TOP" },
 }
 
 -- WHERE THE TIME AND THE STACK NUMBER SIT. The presets above (timerPos /
@@ -379,6 +635,11 @@ end
 function ns.AuraTextDefaults(cfg, key, into)
     local t = into or {}
     if key == "timer" then
+        if KitTimerSpot(cfg) then
+            -- the kit: Blizzard's own spot, under the icon
+            t.point, t.relPoint, t.x, t.y = "TOP", "BOTTOM", 0, 0
+            return t
+        end
         local spot = TIMER_POINT[cfg.timerPos] or TIMER_POINT.edge
         t.point, t.relPoint, t.x, t.y = spot[1], spot[2], tonumber(cfg.timerX) or 0, tonumber(cfg.timerY) or 1
     else
@@ -407,8 +668,22 @@ local function StyleButton(b, cfg)
     b._zStyleVer = styleVer
     local icon = b._zIconRef or b.Icon or b.icon
     if icon and icon.SetTexCoord then
-        local z = math.max(0, math.min(30, tonumber(cfg.zoom) or 8)) / 100
-        icon:SetTexCoord(z, 1 - z, z, 1 - z)
+        local zoom = tonumber(cfg.zoom) or 8
+        -- (2026-11-08) the HD 0.07 crop is retired: every icon takes
+        -- ZacUI's one crop, which hides the game's icon border
+        local hdCrop = false
+        -- the shipped 8 follows the look's icon crop (Core_Look's helper);
+        -- under the ZacUI look's ring the HD crop (see HD POLISH above)
+        if hdCrop then
+            if ns.Look and ns.Look.ForgetIcon then ns.Look.ForgetIcon(icon) end
+            icon:SetTexCoord(HD_CROP, 1 - HD_CROP, HD_CROP, 1 - HD_CROP)
+        elseif zoom == 8 and ns.Look and ns.Look.CropIcon then
+            ns.Look.CropIcon(icon, nil, nil, { part = "auras", border = false })
+        else
+            if ns.Look and ns.Look.ForgetIcon then ns.Look.ForgetIcon(icon) end
+            local z = math.max(0, math.min(30, zoom)) / 100
+            icon:SetTexCoord(z, 1 - z, z, 1 - z)
+        end
     end
     PaintBorder(b, cfg)
 
@@ -418,21 +693,31 @@ local function StyleButton(b, cfg)
         def.to = icon or b
         fs._zAnchorDef = def
         ns.ApplyAnchor(fs, AnchorOf(cfg, "timer"), def, TextTo(b))
-        if Empty(cfg.timerFont) then
+        local tfont = TimerFontOf(cfg)
+        if Empty(tfont) then
             if b._zTimerCustom then
                 b._zTimerCustom = nil
                 if ns.HouseFont then ns.HouseFont(fs, TIMER_SIZE) end
             end
         elseif ns.ApplyFontSpec then
             b._zTimerCustom = true
-            ns.ApplyFontSpec(fs, cfg.timerFont, TimerFontDefaults())
+            ns.ApplyFontSpec(fs, tfont, TimerFontDefaults())
         end
         if b._zTimerHolder then b._zTimerHolder:SetShown(cfg.showTimer ~= false) end
         b._zTimerKey = nil       -- repaint the colour on the next paint
     end
 
     local count = b.Count
-    if count and count.ClearAllPoints then
+    if count and count.ClearAllPoints and KitCountStock(cfg) then
+        -- the kit: Blizzard's stack number, where and as Blizzard draws it
+        -- (a sample has no Blizzard spot: the Classic template's, bottom
+        -- right of the icon, 2 in)
+        if b._zSample then
+            count:ClearAllPoints()
+            count:SetPoint("BOTTOMRIGHT", icon or b, "BOTTOMRIGHT", -2, 2)
+        end
+        if count.SetAlpha then count:SetAlpha(1) end
+    elseif count and count.ClearAllPoints then
         local def = ns.AuraTextDefaults(cfg, "count", count._zAnchorDef)
         def.to = icon or b
         count._zAnchorDef = def
@@ -473,16 +758,93 @@ function ns.AuraStateDefaults()
         urgent = { textColor = C(cfg.urgentColor, "red") } }
 end
 
+-- THE SWEEP (HD, ZacUI look): a Cooldown over the icon, inside the ring,
+-- reversed so the part already gone darkens (a fresh buff is bright, one
+-- running out goes dark), no edge, no flash, no numbers of its own.
+-- Started once per aura (when the expiry it implies moves), never per tick.
+local SWIPE_SHORT = 300
+local function Secret(v) return issecretvalue ~= nil and issecretvalue(v) end
+local function AuraTimes(b)
+    -- a preview sample's made-up length
+    if b._zFakeDur then return b._zFakeDur, GetTime() + (tonumber(b.timeLeft) or 0) end
+    -- 1.15.9's pooled button: Blizzard's own info table (read, never written)
+    local info = b.buttonInfo
+    if type(info) == "table" then return info.duration, info.expirationTime end
+    -- the named buttons: the slot's aura, asked once per new aura
+    local idx, filter = b._zAuraIndex, b._zAuraFilter
+    if not (idx and filter) then return nil end
+    local GetData = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+    if GetData then
+        local ok, a = pcall(GetData, "player", idx, filter)
+        if ok and type(a) == "table" then return a.duration, a.expirationTime end
+    elseif UnitAura then
+        local _, _, _, _, dur, exp = UnitAura("player", idx, filter)
+        return dur, exp
+    end
+end
+local function PaintSwipe(b, cfg, t)
+    local cd = b._zSwipe
+    if not cd then return end
+    local mode = cfg.swipe or "short"
+    if mode == "off" or t == nil or Secret(t) or not IsHD() then
+        if b._zSwOn then b._zSwOn = nil cd:Hide() end
+        b._zSwExp = nil
+        return
+    end
+    local exp = GetTime() + t
+    -- the same aura ticking down: nothing to do
+    if b._zSwExp and math.abs(exp - b._zSwExp) < 0.5 then return end
+    b._zSwExp = exp
+    local dur, e = AuraTimes(b)
+    if type(dur) == "number" and type(e) == "number" and not Secret(dur) and not Secret(e)
+        and dur > 0 and (mode == "all" or dur <= SWIPE_SHORT) then
+        cd:SetCooldown(e - dur, dur)
+        cd:Show()
+        b._zSwOn = true
+    elseif b._zSwOn then
+        b._zSwOn = nil
+        cd:Hide()
+    end
+end
+local function AddSwipe(b)
+    if b._zSwipe or not IsHD() then return end
+    local icon = b._zIconRef or b.Icon or b.icon
+    if not icon then return end
+    local ok, cd = pcall(CreateFrame, "Cooldown", nil, b, "CooldownFrameTemplate")
+    if not (ok and cd) then return end
+    -- inside the ring, so a debuff's coloured ring is never darkened
+    local one = (ns.Pixel and ns.Pixel.One(b)) or 1
+    cd:SetPoint("TOPLEFT", icon, "TOPLEFT", one, -one)
+    cd:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", -one, one)
+    cd:SetFrameLevel(b:GetFrameLevel() + 1)
+    if cd.SetReverse then cd:SetReverse(true) end
+    if cd.SetDrawEdge then cd:SetDrawEdge(false) end
+    if cd.SetDrawBling then cd:SetDrawBling(false) end
+    if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.6) end
+    if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
+    -- cooldown-text addons (OmniCC and the like): our own time is on it
+    cd.noCooldownCount = true
+    cd:Hide()
+    b._zSwipe = cd
+end
+
 local function PaintTimer(b, cfg)
     local fs, d = b._zTimer, b.Duration
     if not (fs and d) then return end
     cfg = cfg or Look()
     local text, key = "", "normal"
     local t
+    local kit = Kit()
     if d:IsShown() then
         t = b.timeLeft
         if type(t) == "number" and t > 0 then
-            text = FormatTime(t)
+            -- the kit: Blizzard's own words for the time (its duration
+            -- text, which it keeps writing under ours); a sample's own
+            if kit and not b._zSample then
+                text = d:GetText() or ""
+            else
+                text = FormatTime(t)
+            end
             if t < (tonumber(cfg.urgentAt) or 10) then key = "red"
             elseif t < (tonumber(cfg.warnAt) or 60) then key = "orange" end
         else
@@ -490,7 +852,11 @@ local function PaintTimer(b, cfg)
             t = nil
         end
     end
-    if text ~= b._zTimerText then
+    if Secret(text) then
+        -- (a hidden value: handed on as it is, never compared)
+        b._zTimerText = nil
+        fs:SetText(text)
+    elseif text ~= b._zTimerText then
         b._zTimerText = text
         fs:SetText(text)
     end
@@ -499,6 +865,13 @@ local function PaintTimer(b, cfg)
         local which = (key == "red" and cfg.urgentColor) or (key == "orange" and cfg.warnColor)
             or (key == "normal" and cfg.timerColor) or nil
         local r, g, bl = ColorOr(which, "text", key)
+        if kit and not which then
+            -- Blizzard's colours: gold, white under a minute
+            -- (BUFF_DURATION_WARNING_TIME in the stock buff frame)
+            local c = (key == "normal") and (NORMAL_FONT_COLOR or { r = 1, g = 0.82, b = 0 })
+                or (HIGHLIGHT_FONT_COLOR or { r = 1, g = 1, b = 1 })
+            r, g, bl = c.r, c.g, c.b
+        end
         fs:SetTextColor(r, g, bl, 1)
         -- the time-left states' own looks (auraStyle.states.<normal|
         -- warning|urgent>: text colour, icon tint) over the colours above;
@@ -542,6 +915,7 @@ local function PaintTimer(b, cfg)
             ns.Motion.Stop(holder)
         end
     end
+    PaintSwipe(b, cfg, t)
 end
 
 -- Our time text on a button, over Blizzard's (which is faded out: it is
@@ -557,7 +931,9 @@ local function AddTimer(b)
     fs:SetPoint("CENTER", b._zIconRef or b.Icon, "BOTTOM", 0, 1)
     b._zTimer, b._zTimerHolder = fs, holder
     b.Duration:SetAlpha(0)
-    if b.Count and b.Count.ClearAllPoints then
+    -- the HD sweep, under the time (the holder is two levels above it)
+    AddSwipe(b)
+    if b.Count and b.Count.ClearAllPoints and not KitCountStock(Look()) then
         b.Count:ClearAllPoints()
         b.Count:SetPoint("TOPRIGHT", b._zIconRef or b.Icon, "TOPRIGHT", -1, -2)
     end
@@ -580,7 +956,16 @@ local function SizeButton(a, w, h, s)
     if icon and icon.SetSize and (s ~= 30 or a._zIconSized) then
         a._zIconSized = s ~= 30 or nil
         icon:SetSize(s, s)
+        -- the kit: Blizzard's own border grows with the icon
+        if Kit() then KitFitBorder(a, s) end
     end
+end
+
+-- under the kit with Blizzard's size, gap and growth: Blizzard's own rows
+local function KitStockGrid(cfg)
+    if not Kit() then return false end
+    return KitSize(cfg) == 30 and KitSpacing(cfg) < 0
+        and (cfg.growX or "auto") == "auto" and (cfg.growY or "auto") == "auto"
 end
 
 local function Restride(container)
@@ -593,6 +978,9 @@ local function Restride(container)
 
     local n = ZacUIDB and ZacUIDB.buffsPerRow
     local frame = container:GetParent()
+    -- the ZacUI look with no row count of its own (match pass): the
+    -- reference UI's 11 buffs and 8 debuffs a row
+    if (not n or n < 1) and IsHD() then n = (frame and frame == _G.DebuffFrame) and 8 or 11 end
     local cfg = Look()
 
     -- What Blizzard actually anchors. It drops the disabled buttons when
@@ -607,7 +995,7 @@ local function Restride(container)
     local toAnchor = (frame and frame.doNotAnchorDisabledFrames) and enabled or auras
 
     local horizontal = info.isHorizontal
-    local compact = edgeTimers and horizontal
+    local compact = edgeTimers and horizontal and not KitStockGrid(cfg)
 
     if (not n or n < 1) and not compact then
         if info.layout then
@@ -713,7 +1101,16 @@ local function NewSample(parent, kind)
     b.Count = count
     local dur = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     b.Duration = dur
-    EdgeBorder(b, icon)
+    b._zSample = true
+    if Kit() then
+        -- the kit: the Classic template's border art (PaintKitSample)
+        local kb = b:CreateTexture(nil, "OVERLAY")
+        kb._zui_own = true
+        kb:Hide()
+        b._zKitBorder = kb
+    else
+        EdgeBorder(b, icon)
+    end
     AddTimer(b)
     -- the pick hook: a click on a sample's text opens its placement
     if ns.TagElement then
@@ -731,6 +1128,9 @@ local function FillSample(b, aura)
     if b.Count.SetText then b.Count:SetText((aura.count and aura.count > 1) and tostring(aura.count) or "") end
     b.timeLeft = aura.left
     if aura.left then b.Duration:Show() b.Duration:SetText("x") else b.Duration:Hide() end
+    -- the sweep's made-up length: short auras sweep, long ones do not
+    b._zFakeDur = aura.dur or ((aura.left and aura.left <= SWIPE_SHORT) and aura.left * 2) or 3600
+    b._zSwExp = nil
     b._zTint = aura.tint
 end
 
@@ -811,6 +1211,8 @@ Modules.auras = function()
                 end
             end
             if not b then return end
+            -- (which aura the slot shows: the sweep asks it once per aura)
+            b._zAuraIndex, b._zAuraFilter = index, filter
             if not b._zStyled then
                 b._zStyled = true
                 local icon = b._zIconRef
@@ -825,10 +1227,12 @@ Modules.auras = function()
                 if b.SetSize and (s ~= 30 or b._zIconSized) then
                     b._zIconSized = s ~= 30 or nil
                     b:SetSize(s, s)
+                    if Kit() then KitFitBorder(b, s) end
                 end
             end
             local blizz = b._zBlizzBorder
-            if filter == "HARMFUL" and blizz then
+            -- (the kit: Blizzard's own dispel-coloured art is the border)
+            if filter == "HARMFUL" and blizz and not Kit() then
                 blizz:SetAlpha(0)
                 TintFrom(b, blizz)
             end
@@ -848,7 +1252,9 @@ Modules.auras = function()
             b._zKind = "enchant"
             EdgeBorder(b)
             local blizz = _G["TempEnchant" .. i .. "Border"]
-            if blizz and blizz.SetAlpha then blizz:SetAlpha(0) end
+            b._zBlizzBorder = blizz
+            -- (the kit: Blizzard's purple ring stays)
+            if blizz and blizz.SetAlpha and not Kit() then blizz:SetAlpha(0) end
             local icon = _G["TempEnchant" .. i .. "Icon"]
             b._zIconRef = icon
             if icon and SharpenIcon then SharpenIcon(icon) end
@@ -925,8 +1331,8 @@ Modules.auras = function()
         TintFrom(b, blizz)
         -- 1.15.9 pooled buttons carry their own bright border art. Keyed
         -- SetAlpha(0) ONLY - never SetTexture(nil), never a blanket strip
-        -- (the pooled blanking law).
-        if blizz and blizz.SetAlpha then blizz:SetAlpha(0) end
+        -- (the pooled blanking law). The kit keeps Blizzard's art.
+        if blizz and blizz.SetAlpha and not Kit() then blizz:SetAlpha(0) end
         SetupTimer(b)
         if b._zStyleVer ~= styleVer then StyleButton(b) end
     end

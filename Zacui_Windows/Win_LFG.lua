@@ -40,6 +40,9 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's group finder is the game's own window, skinned):
+-- this window stands down here, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_lfg") then return end
 
 -- shared state from earlier ZacUI files
 local FLAT = ns.FLAT
@@ -58,6 +61,17 @@ local COMMENT_H = 54
 -- The classic 384x512 shell: its art (and Blizzard's own hit rect,
 -- right 30 / bottom 74) ends well inside the frame rectangle.
 local DEFAULT_INSET = { l = 11, r = 32, t = 12, b = 74 }
+-- WoW Forever's group finder (the same addon, its "modern style": a plain
+-- 458x535 window, the three tabs down its right edge, a Who list page of
+-- its own - LFGWhoListFrame). The window is the whole frame, so no art
+-- margin; the side tabs are silenced like the bottom ones (ZacUI's own
+-- tabs switch pages, and gain a Who tab); the Who page is covered by
+-- ZacUI's Who window (Win_Social), which hangs on it.
+local DEFAULT_INSET_MODERN = { l = 0, r = 0, t = 0, b = 0 }
+local function ModernLFG()
+    local f = _G.LFGParentFrame
+    return f ~= nil and type(rawget(f, "WhoListingTab")) == "table"
+end
 
 local win, tabs, pageListing, pageBrowse, listBar, browseBar
 local actList, resList
@@ -952,12 +966,22 @@ end
 Queue = Kit.Coalesce(Refresh, function() return win end)
 
 local function ShowPage(key)
-    page = (key == "browse") and "browse" or "listing"
+    page = (key == "browse") and "browse" or (key == "who" and ModernLFG()) and "who" or "listing"
     pageListing:SetShown(page == "listing")
     pageBrowse:SetShown(page == "browse")
     listBar:SetShown(page == "listing")
     browseBar:SetShown(page == "browse")
     if tabs then tabs:Paint(page) end
+    -- Forever: Blizzard's own page follows (its Who list is a page of the
+    -- window, covered by ZacUI's Who window; the listing's comment box
+    -- lives on its listing page)
+    if ModernLFG() and LFGParentFrame.selectedTab then
+        local want = (page == "who") and 3 or (page == "browse") and 2 or 1
+        if LFGParentFrame.selectedTab ~= want then
+            local click = _G["LFGParentFrameTab" .. want .. "_OnClick"]
+            if click then click() end
+        end
+    end
     if page == "listing" and RequestRaidInfo then RequestRaidInfo() end
     -- A hidden edit box can keep the keyboard; the borrowed comment must
     -- let go when its page does.
@@ -1372,7 +1396,9 @@ local function BuildListingPage()
     npfCheck = UI.Checkbox(p, "New player friendly", false, function(on)
         L.npf = on and true or false
         -- Blizzard remembers the choice for the next listing in this cvar.
-        if SetCVar then SetCVar("lfgNewPlayerFriendly", on and "1" or "0") end
+        -- SETUP2: through ns.CVar (recorded; put back when the window is off)
+        if ns.CVar then ns.CVar.Set("lfgNewPlayerFriendly", on and "1" or "0", "lfgwin")
+        elseif SetCVar then SetCVar("lfgNewPlayerFriendly", on and "1" or "0") end
         PlaySoundKit(on and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
         L.dirty = true
         Refresh()
@@ -1627,7 +1653,7 @@ end
 
 local function Inset()
     local o = ZacUIDB and ZacUIDB.insets and ZacUIDB.insets.LFGParentFrame
-    return o or DEFAULT_INSET
+    return o or (ModernLFG() and DEFAULT_INSET_MODERN) or DEFAULT_INSET
 end
 
 -- Everything of Blizzard's that hangs outside the cover: the bottom
@@ -1641,6 +1667,18 @@ local function Leftovers()
         if child ~= win and child.IsObjectType and child:IsObjectType("Button") then Add(child) end
     end
     Add(_G.LFGParentFramePortrait)
+    -- Forever: the tabs down the right edge, and whatever of its three
+    -- pages draws above the cover (the Who page's title bar and frame
+    -- art, its search box and button in the HIGH strata)
+    for _, key in ipairs({ "ListingTab", "BrowsingTab", "WhoListingTab" }) do
+        local t = rawget(f, key)
+        if type(t) == "table" then Add(t) end
+    end
+    if ModernLFG() and win then
+        for _, pg in ipairs({ _G.LFGListingFrame, _G.LFGBrowseFrame, _G.LFGWhoListFrame }) do
+            if pg then Kit.AboveCover(pg, win, t) end
+        end
+    end
     Add(f._zui_panel)
     Add(f._zui_artbg)
     Add(f._zui_band)
@@ -1659,10 +1697,12 @@ local function Build()
     win.Reanchor()
     win:SetIcon("Interface\\LFGFrame\\UI-LFG-PORTRAIT")
 
-    tabs = Kit.Tabs(win, {
+    local tabList = {
         { key = "listing", label = Str("LFG_LIST_TAB_1", "List Group") },
         { key = "browse",  label = Str("LFG_LIST_TAB_2", "Browse Groups") },
-    }, function(key) ShowPage(key) end)
+    }
+    if ModernLFG() then tabList[#tabList + 1] = { key = "who", label = Str("LFG_LIST_TAB_3", WHO or "Who") } end
+    tabs = Kit.Tabs(win, tabList, function(key) ShowPage(key) end)
     tabs:SetPoint("TOPLEFT", win, "TOPLEFT", Kit.PAD, win.top)
     tabs:SetPoint("TOPRIGHT", win, "TOPRIGHT", -Kit.PAD, win.top)
 
@@ -1673,6 +1713,7 @@ local function Build()
     browseBar:SetAllPoints()
 
     local top = win.top - Kit.TAB_H - Kit.GAP
+    win.pageTop = top                    -- (the Who window hangs under the tabs here)
     local function Page()
         local p = CreateFrame("Frame", nil, win)
         p:SetPoint("TOPLEFT", win, "TOPLEFT", Kit.PAD, top)
@@ -1799,6 +1840,11 @@ local function Setup()
     LFGBrowseFrame:HookScript("OnShow", function()
         if win and win:IsShown() and page ~= "browse" then ShowPage("browse") end
     end)
+    if ModernLFG() and _G.LFGWhoListFrame then
+        _G.LFGWhoListFrame:HookScript("OnShow", function()
+            if win and win:IsShown() and page ~= "who" then ShowPage("who") end
+        end)
+    end
     -- Blizzard's ActivityView re-lays out the comment every time it
     -- shows; while it is ours, put it straight back.
     local view = LFGListingFrame.ActivityView

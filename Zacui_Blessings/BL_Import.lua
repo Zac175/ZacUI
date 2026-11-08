@@ -61,15 +61,17 @@ function BL.ImportPallyPower()
 end
 
 local function DisablePallyPower()
+    -- the reload FIRST, then the switch (WoW Forever honours a reload only when
+    -- it is asked for at the start of the click; UIF_Dialogs' ns.AskReload)
+    if ns.RequestReload then ns.RequestReload() else ReloadUI() end
     local f = (C_AddOns and C_AddOns.DisableAddOn) or DisableAddOn
     if f then pcall(f, "PallyPower") end
-    ReloadUI()
 end
 BL.DisablePallyPower = DisablePallyPower
 
 function BL.OfferHandoff()
     if not (UI and UI.Confirm) then return end
-    UI.Confirm({
+    return UI.Confirm({
         title = "Blessings",
         text = "ZacUI does paladin blessings itself now, and still talks to everyone in the group who runs "
             .. "PallyPower. Turn PallyPower off and reload? Until then ZacUI's blessings stay off, so the two "
@@ -88,8 +90,14 @@ boot:SetScript("OnEvent", function(self)
     if not ch.importedPP then
         local n = BL.ImportPallyPower()
         if BL.isPaladin then Print("blessings: brought your PallyPower assignments over (" .. n .. " classes).") end
-        C_Timer.After(4, BL.OfferHandoff)
+        -- in its turn among the login popups (Core_Popups), never in combat
+        if ns.Popups then
+            ns.Popups.Want("pallypower", function() return BL.OfferHandoff() end, { order = 45, delay = 4 })
+        else
+            C_Timer.After(4, BL.OfferHandoff)
+        end
     else
-        Print("blessings: PallyPower is still on, so ZacUI's blessings stand down. ZacUI > Combat > Blessings can switch it off.")
+        local line = "blessings: PallyPower is still on, so ZacUI's blessings stand down. ZacUI > Combat > Blessings can switch it off."
+        if ns.Popups then ns.Popups.Say(line) else Print(line) end
     end
 end)

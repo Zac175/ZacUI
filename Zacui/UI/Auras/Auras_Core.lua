@@ -102,10 +102,12 @@ function Auras.SetEnabled(on)
         return
     end
     local other = Installed(UPSTREAM) and SetAddOnEnabled(UPSTREAM, not on)
-    if on then
-        Print("Aura engine on" .. (other and " and WeakAuras off" or "") .. ". /reload to apply.")
+    local what = on and ("The aura engine is on" .. (other and " and WeakAuras off" or ""))
+        or ("The aura engine is off" .. (other and " and WeakAuras back on" or ""))
+    if ns.AskReload then
+        ns.AskReload(what .. ". It takes hold after a reload.")
     else
-        Print("Aura engine off" .. (other and " and WeakAuras back on" or "") .. ". /reload to apply.")
+        Print(what .. ". /reload to apply.")
     end
 end
 
@@ -117,6 +119,8 @@ function Auras.Toggle() Auras.SetEnabled(not DB().enabled) end
 local function Reconcile()
     local s = Auras.Status()
     if not s.built then return end
+    -- login lines wait for the login popups (Core_Popups), not under them
+    local Print = (ns.Popups and ns.Popups.Say) or Print
     if s.engineUp and s.upstreamUp then
         Print("|cffff6666Both aura engines are loaded.|r ZacUI's and WeakAuras share one global; "
             .. "set the switch on the Auras page (or disable one in the addon list), then /reload.")

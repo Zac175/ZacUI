@@ -95,7 +95,7 @@ function Engine:NewLine(parent)
     l.fs:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
     l.fs:SetJustifyH("LEFT")
     l.ic = l:CreateTexture(nil, "OVERLAY")
-    l.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(l.ic)
     -- a sample line answers "customize this element" (the settings page)
     if self.preview and ns.TagElement then ns.TagElement(l, "sct.line") end
     self.made[#self.made + 1] = l

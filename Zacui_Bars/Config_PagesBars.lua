@@ -47,7 +47,9 @@ if ns.AddMenuKeywords then
         .. "level state states per row wrap spacing gap "
         .. "cooldown cooldowns numbers countdown timer sweep swipe range out of range usable "
         .. "unusable mana rage colour color tint glow proc spell alert overlay highlight hover "
-        .. "pressed checked animation fade in fade out delay speed transition preview font")
+        .. "pressed checked animation fade in fade out delay speed transition preview font "
+        .. "keybind keybinds bind binding hotkey hotkeys key mode quick keybind shorten short compact "
+        .. "range dot empty slot backing mouseover hidden keys")
 end
 
 -- A row of buttons, laid left to right, wrapping onto a new line rather
@@ -108,7 +110,9 @@ local function Color(L, label, tbl, key, fallback, opts)
     opts = opts or {}
     local w = UI.ColorPicker(L.current, { label = label, alpha = opts.alpha ~= false,
         tooltip = opts.tooltip,
-        get = function() return tbl[key] or fallback end,
+        -- (opts.shown: what the setting draws now, when the look reads a
+        -- saved value as another - the ZacUI look's match-pass numbers)
+        get = function() return (opts.shown and opts.shown()) or tbl[key] or fallback end,
         set = function(r, g, b, a)
             if opts.legacy then tbl[key] = { r, g, b, a }
             else tbl[key] = { r = r, g = g, b = b, a = a } end
@@ -121,12 +125,27 @@ end
 
 local function Pct(v) return v .. "%" end
 local function Px(v) return v .. " px" end
+local KeysCard            -- (below, with the every-bar cards)
 -- the state the Look tab's state editor was on, across rebuilds
 local STATE_PICK = {}
 
 -- which kinds of bar carry which settings
 local BUTTONS = { action = true, pet = true, stance = true }
 local MAX_ROWS = { action = 12, pet = 10, stance = 10, bagbar = 6 }
+
+-- Apply to all bars (finish pass): the sections and their keys (AB_Core
+-- DefaultBar / AddLook); colours that are nil mean "the theme's" and are
+-- taken by a button bar even when it has none yet
+local BAR_SECTIONS = {
+    { label = "Look", hint = "size, border, colours, cooldowns", keys = { "buttonSize", "iconZoom", "borderSize",
+        "borderColor", "backdrop", "backdropColor", "hoverColor", "pushedColor", "checkedColor", "cdSwipe",
+        "cdText", "cdColor", "equippedColor" } },
+    { label = "Text", hint = "fonts, key, macro and count text", keys = { "fonts", "hideHotkey", "hideMacro", "hideCount" } },
+    { label = "Fading", hint = "fade out, fade in and out", keys = { "fade", "fadeAlpha", "fadeDelay", "fadeIn", "fadeOut" } },
+    { label = "Layout", hint = "buttons, rows, growth, scale", keys = { "buttons", "rows", "padding", "offset", "growH",
+        "growV", "scale", "alpha" } },
+}
+local BAR_NILABLE = { borderColor = true, checkedColor = true, cdColor = true }
 
 -- ============================================================
 -- THE BAR CHOOSER (top of every bar tab)
@@ -150,7 +169,35 @@ local function BarChooser(L, A, p, id)
         end,
         selectedValue = function() return id end,
         onSelect = function(v) A.SetEditing(v) RefreshConfig() end })
-    L:Row(dd, M.DROPDOWN_H + 6)
+    -- APPLY TO ALL (finish pass): this bar's look, text, fading or layout
+    -- onto the others, a section at a time (UI.ApplyToAll). Where a bar
+    -- sits, whether it is on, when it shows and how it pages never travel.
+    local apply = UI.ApplyToAll and UI.ApplyToAll(L.current, {
+        text = "Apply to all bars...", width = 130, title = "Apply to all bars",
+        tooltip = "Copies this bar's look, text, fading or layout onto the other bars, after you confirm.",
+        what = function() return A.BarLabel(id) end,
+        source = function() return (A.CfgFor(id, p)) end,
+        targets = function()
+            local out = {}
+            for _, c in ipairs(A.BAR_CHOICES) do
+                if c.id ~= id then
+                    local t = A.CfgFor(c.id, p)
+                    local kind = A.KindOf(c.id)
+                    out[#out + 1] = { label = c.label, tbl = t, accepts = function(k)
+                        return t ~= nil and (t[k] ~= nil or (BUTTONS[kind] and BAR_NILABLE[k]) or false)
+                    end }
+                end
+            end
+            return out
+        end,
+        onto = function() return "the other bars" end,
+        sections = BAR_SECTIONS, allLabel = "All four", allWord = "look, text, fading and layout",
+        onDone = function() Apply() RefreshConfig() end })
+    if apply then
+        L:Flow({ dd, apply }, 10, 6)
+    else
+        L:Row(dd, M.DROPDOWN_H + 6)
+    end
     L:Desc("Every tab below edits this bar. Cards marked \"every bar\" are shared by all of them. "
         .. "The preview's own chooser switches it too.")
     L:EndCard()
@@ -182,8 +229,10 @@ local function VisibilityCard(L, cfg)
     L:Card("When it shows")
     local rg, rs = ns.CustomAccess(cfg, "showRule", nil, Apply)
     L:Add(UI.VisibilityPicker(L.current, { width = UI.CardInnerWidth(L), get = rg, set = rs,
-        fields = { show = true }, shows = { "always", "combat", "nocombat", "group", "raid", "target", "never" } }), 6)
-    L:Desc("The ticks under Hide when still win. A custom condition replaces both.")
+        fields = { show = true }, shows = { "always", "combat", "nocombat", "group", "raid", "target", "mouseover", "never" } }), 6)
+    L:Desc("The ticks under Hide when still win. A custom condition replaces both. On mouseover: "
+        .. "the bar stays invisible (or at its faded opacity, if Fade is on) until you point at it; "
+        .. "its buttons and keys keep working.")
     L:EndCard()
 end
 
@@ -216,10 +265,30 @@ local function PagingCard(L, A, cfg, n)
     Slider(L, "Button offset", function() return cfg.offset or 0 end, function(v) cfg.offset = v end, 0, 11, 1,
         nil, "Rotates which slot the first button shows.")
     local drv = UI.Font(L.current, F.SMALL, { cat = "text", key = "gray",
-        text = "Driver: " .. A.PageDriver(cfg), width = L:Room() })
+        text = "Driver: " .. A.PageDriver(cfg, n), width = L:Room() })
     drv:SetNonSpaceWrap(true)     -- (one long word: wrap it anywhere)
     drv:SetPoint("TOPLEFT", L.current, "TOPLEFT", M.CONTROL_X, L.current._y)
     L.current._y = L.current._y - math.max(12, drv:GetStringHeight() or 12) - 6
+    L:EndCard()
+end
+
+-- KEYS (every bar): ZacUI's keybind mode, how the key corner writes a
+-- key, the range dot. Nothing saved = the corner as it always was.
+KeysCard = function(L, A, p)
+    local c = p.core
+    L:Card("Keys (every bar)")
+    ButtonRow(L, { { A.keyMode and "Finish keybind mode" or "Keybind mode", function()
+        if A.ToggleKeyMode then A.ToggleKeyMode() end
+        RefreshConfig()
+    end, width = 170, tooltip = "Hover any button on a ZacUI bar and press a key, a mouse button or the "
+        .. "wheel. Esc clears the button. Right-click or /zui kb finishes. Not in combat." } })
+    local styles = {}
+    for _, st in ipairs(A.KEY_STYLES or {}) do styles[#styles + 1] = { text = st.label, value = st.id } end
+    Dropdown(L, "Key text", styles, function() return c.keyStyle or "short" end,
+        function(v) c.keyStyle = (v ~= "short") and v or nil end, 260)
+    Check(L, "Range dot on buttons with no key", function() return c.rangeDot ~= false end,
+        function(v) if v then c.rangeDot = nil else c.rangeDot = false end end,
+        "The game's dot in the key corner that turns red out of range.")
     L:EndCard()
 end
 
@@ -237,6 +306,7 @@ local function EveryBarGeneral(L, A, p)
     Check(L, "Focus-cast modifier", function() return c.focuscast end, function(v) c.focuscast = v end)
     Check(L, "Right-click casts on yourself", function() return c.rightclickself end, function(v) c.rightclickself = v end)
     L:EndCard()
+    KeysCard(L, A, p)
 end
 
 local function GeneralTab(L, A, p, id, kind, cfg, n)
@@ -261,7 +331,7 @@ local function GeneralTab(L, A, p, id, kind, cfg, n)
         function(v) cfg.fadeAlpha = v / 100 end, 0, 100, 5, Pct,
         "0% hides the bar completely until you point at where it is. How it fades - speed, "
         .. "and a wait before fading out - is on the Animation tab.")
-    UI.SetEnabled(s, cfg.fade)
+    UI.SetEnabled(s, cfg.fade, 'Needs "Fade out until the mouse is over it" turned on.')
     L:EndCard()
 
     VisibilityCard(L, cfg)
@@ -304,6 +374,28 @@ local function LookTab(L, A, p, id, kind, cfg)
         function(v) cfg.alpha = v / 100 end, 0, 100, 5, Pct)
     L:EndCard()
 
+    -- A GAME LOOK'S ART (2026-11-08): under Classic WoW UI, Blizzard style
+    -- or WoW Forever the buttons wear the game's own art (AB_Core's kits);
+    -- the bar's end caps and Forever's frame are settings of the bar
+    local kit = A.Kit and A.Kit() or "zacui"
+    if kind == "action" and kit ~= "zacui" then
+        local n = tonumber(id:match("^bar(%d+)$") or "") or 0
+        local lk = ns.Look and ns.Look.Get and ns.Look.Get(kit)
+        L:Card("Game art")
+        L:Desc("The " .. ((lk and lk.name) or "game") .. " look draws the game's own button art, so the "
+            .. "border settings below do nothing here. A highlight colour you pick by hand still shows over it.")
+        Check(L, "End caps at the bar's ends", function() return A.KitCapsOn(cfg, n) end,
+            function(v) cfg.endCaps = v and true or false end,
+            (kit == "classic") and "The gryphons from the original main bar, one at each end."
+                or "The client's own end caps (gryphons or wyverns by faction), one at each end.")
+        if kit == "forever" then
+            Check(L, "WoW Forever's frame behind the buttons", function() return A.KitFrameOn(cfg, n) end,
+                function(v) cfg.kitFrame = v and true or false end,
+                "The bronze frame round the bar and the dividers between its buttons.")
+        end
+        L:EndCard()
+    end
+
     if BUTTONS[kind] then
         L:Card("Button skin")
         Slider(L, "Icon zoom", function() return cfg.iconZoom or 8 end, function(v) cfg.iconZoom = v end, 0, 20, 1, Pct,
@@ -314,27 +406,64 @@ local function LookTab(L, A, p, id, kind, cfg)
         Color(L, "Border colour", cfg, "borderColor", accentBorder)
         ThemeButton(L, "Use the theme's border", "Back to the border colour on Appearance > Colours.",
             function() cfg.borderColor = nil end)
-        if kind == "action" then
-            Color(L, "Border while the slot holds gear you wear", cfg, "equippedColor", { 0.35, 0.65, 1, 1 })
-        end
         Check(L, "Backing behind each button", function() return cfg.backdrop end, function(v) cfg.backdrop = v end,
             "A flat square under the icon - it shows through see-through icons and fills empty slots.", true)
         local bd = Color(L, "Backing colour", cfg, "backdropColor", { 0, 0, 0, 0.6 })
-        UI.SetEnabled(bd, cfg.backdrop)
-        -- shadow and glow round each button (cfg.chrome, the standard's
-        -- shape; nothing saved = none)
-        local cg, cs = ns.CustomAccess(cfg, "chrome", nil, Apply)
-        local cp = UI.ChromePicker(L.current, { width = UI.CardInnerWidth(L), get = cg, set = cs,
-            fields = { shadowSize = true, shadowColor = true, glowSize = true, glowColor = true } })
-        L:Add(cp, 6)
-        if ns.CustomPick then ns.CustomPick.RegisterGroup("ab.button", cp) end
+        UI.SetEnabled(bd, cfg.backdrop, 'Needs "Backing behind each button" turned on.')
+        -- LESS COMMON (finish pass, L:Fold): the gear border, the empty-slot
+        -- backing and the shadow / glow, folded away unless one is in use
+        local function Less(L)
+            if kind == "action" then
+                Color(L, "Border while the slot holds gear you wear", cfg, "equippedColor", { 0.35, 0.65, 1, 1 })
+                if A.HDOn and A.HDOn() then
+                    L:Desc("Left as it came, ZacUI's look draws it in the item's quality colour.")
+                end
+            end
+            if kind == "action" then
+                local c = p.core
+                -- (saved off stays off: on the ZacUI look nothing saved is on)
+                Check(L, "Backing on empty slots (every bar)", function() return A.EmptyBackingOn(c) end,
+                    function(v) c.emptyBacking = v and true or false end,
+                    "A dark square inside an empty slot while it shows - dragging a spell, Show empty slots, "
+                    .. "keybind mode - so it reads as a slot.", true)
+                local eb = Color(L, "Empty slot colour", c, "emptyBackingColor", A.EMPTY_BACKING,
+                    { shown = function() return A.EmptyBackingColour(c) end })
+                UI.SetEnabled(eb, A.EmptyBackingOn(c), 'Needs "Backing on empty slots" turned on.')
+            end
+            -- shadow and glow round each button (cfg.chrome, the standard's
+            -- shape; nothing saved = none)
+            local cg, cs = ns.CustomAccess(cfg, "chrome", nil, Apply)
+            local cp = UI.ChromePicker(L.current, { width = UI.CardInnerWidth(L), get = cg, set = cs,
+                fields = { shadowSize = true, shadowColor = true, glowSize = true, glowColor = true } })
+            L:Add(cp, 6)
+            if ns.CustomPick then ns.CustomPick.RegisterGroup("ab.button", cp) end
+        end
+        if L.Fold then
+            L:Fold("ab.skin", "gear border, empty slots, shadow and glow", Less, { changed = function()
+                local e = cfg.equippedColor
+                local gear = kind == "action" and type(e) == "table"
+                    and not (e.r == 0.35 and e.g == 0.65 and e.b == 1 and (e.a or 1) == 1)
+                local eb = kind == "action" and p.core and p.core.emptyBacking
+                return gear or (eb ~= nil and eb ~= (A.HDOn and A.HDOn() or false))
+                    or (type(cfg.chrome) == "table" and next(cfg.chrome) ~= nil) or false
+            end })
+        else
+            Less(L)
+        end
         L:EndCard()
 
         L:Card("Highlights")
-        Color(L, "When pointed at", cfg, "hoverColor", { 1, 1, 1, 0.12 })
-        Color(L, "When pressed", cfg, "pushedColor", { 1, 1, 1, 0.18 })
+        -- (under the ZacUI look the shipped colours draw its edge glow:
+        -- warm for hover and press, white while active - match pass)
+        local function Shown(k) return A.HighlightColour and function() return A.HighlightColour(cfg, k) end end
+        Color(L, "When pointed at", cfg, "hoverColor", { 1, 1, 1, 0.12 }, { shown = Shown("hoverColor") })
+        Color(L, "When pressed", cfg, "pushedColor", { 1, 1, 1, 0.18 }, { shown = Shown("pushedColor") })
         local a = ns.Col and ns.Col("accent") or { r = 1, g = 0.82, b = 0 }
-        Color(L, "Active (a queued attack, a stance you are in)", cfg, "checkedColor", { a.r, a.g, a.b, 0.35 })
+        Color(L, "Active (a queued attack, a stance you are in)", cfg, "checkedColor", { a.r, a.g, a.b, 0.35 },
+            { shown = Shown("checkedColor") })
+        if A.HDOn and A.HDOn() then
+            L:Desc("ZacUI's look draws these as a glow round the button's edge, in the colour picked here.")
+        end
         ThemeButton(L, "Use the theme's accent", "Back to the accent colour on Appearance > Colours, at 35%.",
             function() cfg.checkedColor = nil end)
         L:EndCard()
@@ -362,10 +491,11 @@ local function LookTab(L, A, p, id, kind, cfg)
                                                  { text = "Tint the key text", value = "hotkey" },
                                                  { text = "No tint", value = "none" } },
             function() return c.outofrange end, function(v) c.outofrange = v end)
-        UI.SetEnabled(dd, on)
-        UI.SetEnabled(Color(L, "Out of range", c, "rangeColor", { 0.8, 0.1, 0.1 }, { alpha = false, legacy = true }), on)
-        UI.SetEnabled(Color(L, "Not enough mana, rage or energy", c, "manaColor", { 0.5, 0.5, 1 }, { alpha = false, legacy = true }), on)
-        UI.SetEnabled(Color(L, "Cannot be used now", c, "unusableColor", { 0.4, 0.4, 0.4 }, { alpha = false }), on)
+        local WHY_RANGE = 'Needs "Colour buttons by range and usability" turned on.'
+        UI.SetEnabled(dd, on, WHY_RANGE)
+        UI.SetEnabled(Color(L, "Out of range", c, "rangeColor", { 0.8, 0.1, 0.1 }, { alpha = false, legacy = true }), on, WHY_RANGE)
+        UI.SetEnabled(Color(L, "Not enough mana, rage or energy", c, "manaColor", { 0.5, 0.5, 1 }, { alpha = false, legacy = true }), on, WHY_RANGE)
+        UI.SetEnabled(Color(L, "Cannot be used now", c, "unusableColor", { 0.4, 0.4, 0.4 }, { alpha = false }), on, WHY_RANGE)
         -- per-state looks (core.states): over whichever colours are on
         local sg, ss = ns.CustomAccess(c, "states", nil, Apply)
         L:Add(UI.StateEditor(L.current, { width = UI.CardInnerWidth(L), get = sg, set = ss,
@@ -406,7 +536,9 @@ local function StockShadow(A, key)
     local b = bar and bar.buttons and bar.buttons[1]
     local fs = b and ((key == "hotkey" and b.zHotkey) or (key == "count" and b.zCount) or (key == "macro" and b.zName))
     local sh = fs and fs.zStockShadow
-    if sh and (sh[1] ~= 0 or sh[2] ~= 0) then return true, sh[1], sh[2] end
+    -- (the default the bars draw: none under the ZacUI look - AB_Core)
+    local has = A.TextShadowDefault and A.TextShadowDefault(sh) or (sh and (sh[1] ~= 0 or sh[2] ~= 0))
+    if has then return true, sh[1], sh[2] end
     return false, 1, -1
 end
 
@@ -432,15 +564,16 @@ local function TextTab(L, A, p, id, kind, cfg)
             Check(L, e.show, function() return not cfg[e.hide] end, function(v) cfg[e.hide] = not v end)
             local has, sx, sy = StockShadow(A, e.key)
             local fp = UI.FontPicker(L.current, { label = "Font",
-                get = function() return A.FontSpecOf(el) end,
+                get = function() return A.FontSpecOf(el, e.key) end,
                 set = function(spec) A.PutFontSpec(el, spec) Apply() end,
                 defaults = { size = e.size, outline = "outline", shadow = has, shadowX = sx, shadowY = sy },
                 minSize = 6, maxSize = 32, sample = e.sample })
             L:Add(fp, 6)
-            Color(L, "Colour", el, "color", { 1, 1, 1, 1 }, { legacy = true })
+            Color(L, "Colour", el, "color", { 1, 1, 1, 1 }, { legacy = true,
+                shown = A.TextColourShown and function() return A.TextColourShown(el, e.key) end })
             -- its spot: any corner of any piece of the button (the old
             -- corner and offsets are where it sits until it is moved)
-            TextSpot(L, A, cfg, e.key, function() return A.TextAnchorDefaults(el) end)
+            TextSpot(L, A, cfg, e.key, function() return A.TextAnchorDefaults(el, nil, e.key) end)
             L:EndCard()
         end
     else
@@ -457,15 +590,20 @@ local function TextTab(L, A, p, id, kind, cfg)
             cfg.fonts.cooldown = spec
             Apply()
         end,
-        defaults = { size = 16, outline = "outline", shadow = false },
+        defaults = A.CooldownFontDefaults and A.CooldownFontDefaults() or { size = 16, outline = "outline", shadow = false },
         minSize = 6, maxSize = 32, sample = "12  3.4", defaultLabel = "ZacUI's font" })
     L:Add(fp, 6)
     Color(L, "Colour", cfg, "cdColor", { 1, 1, 1, 1 })
-    ThemeButton(L, "Use the game's font", "Back to the numbers the game draws, in its own font and colour.",
+    -- (the ZacUI look draws its own numbers until changed: match pass)
+    local hdNums = A.HDOn and A.HDOn()
+    ThemeButton(L, hdNums and "Back to the look's numbers" or "Use the game's font",
+        hdNums and "Back to ZacUI's own numbers: its font at 12, white, in the middle."
+            or "Back to the numbers the game draws, in its own font and colour.",
         function() if cfg.fonts then cfg.fonts.cooldown = nil end cfg.cdColor = nil end)
     TextSpot(L, A, cfg, "cooldown", { point = "CENTER", relPoint = "CENTER", x = 0, y = 0 })
-    L:Desc("Until you change them the game draws these in its own font. Whether they show at all is "
-        .. "on the Look tab.")
+    L:Desc((hdNums and "Until you change them ZacUI draws these in its own font at 12, white. "
+        or "Until you change them the game draws these in its own font. ")
+        .. "Whether they show at all is on the Look tab.")
     L:EndCard()
 end
 
@@ -479,7 +617,10 @@ local function AnimTab(L, A, p, id, kind, cfg)
     end
     local fin = UI.AnimationPicker(L.current, { label = "When the mouse arrives",
         styles = { "none", "fade" },
-        get = function() return cfg.fadeIn or A.FADE_IN end,
+        get = function()
+            local inS = A.FadeSpecs(cfg)
+            return ns.CopySetting and ns.CopySetting(inS) or inS
+        end,
         set = function(spec) cfg.fadeIn = spec Apply() end })
     L:Add(fin, 6)
     L:Desc("None is an instant change. Delay waits before fading in.")
@@ -488,8 +629,10 @@ local function AnimTab(L, A, p, id, kind, cfg)
     local fout = UI.AnimationPicker(L.current, { label = "When the mouse leaves",
         styles = { "none", "fade" },
         get = function()
-            local t = ns.CopySetting and ns.CopySetting(cfg.fadeOut or A.FADE_OUT) or {}
-            t.delay = cfg.fadeDelay or 0.2
+            -- (what draws: the ZacUI look's 0.15 s fade for the shipped pair)
+            local _, outS, wait = A.FadeSpecs(cfg)
+            local t = ns.CopySetting and ns.CopySetting(outS) or {}
+            t.delay = (outS.style and outS.style ~= "none") and wait or (cfg.fadeDelay or 0.2)
             return t
         end,
         set = function(spec)
@@ -501,8 +644,8 @@ local function AnimTab(L, A, p, id, kind, cfg)
     L:Add(fout, 6)
     L:Desc("Delay is how long the bar waits after the mouse leaves before it fades. Replay in the "
         .. "preview plays both; Appearance > Motion turns every animation off or speeds them up.")
-    UI.SetEnabled(fin, cfg.fade)
-    UI.SetEnabled(fout, cfg.fade)
+    UI.SetEnabled(fin, cfg.fade, 'Needs "Fade out until the mouse is over it" turned on (Look tab).')
+    UI.SetEnabled(fout, cfg.fade, 'Needs "Fade out until the mouse is over it" turned on (Look tab).')
     L:EndCard()
 
     if kind == "action" then
@@ -517,7 +660,7 @@ local function AnimTab(L, A, p, id, kind, cfg)
             set = function(spec) c.glowAnim = spec Apply() end })
         L:Add(g, 6)
         L:Desc("Pulse and Flash repeat for as long as the spell is lit when Repeat is on.")
-        UI.SetEnabled(g, c.glow == "zacui")
+        UI.SetEnabled(g, c.glow == "zacui", "Needs spell alerts set to ZacUI's glow (Look tab).")
         L:EndCard()
     end
 end
@@ -597,7 +740,7 @@ end
 -- bar shows are left alone)
 local LOOK_KEYS = { "buttonSize", "iconZoom", "borderSize", "borderColor", "equippedColor", "backdrop",
                     "backdropColor", "hoverColor", "pushedColor", "checkedColor", "cdSwipe", "cdText",
-                    "cdColor", "fadeIn", "fadeOut", "fadeDelay", "fadeAlpha", "alpha" }
+                    "cdColor", "fadeIn", "fadeOut", "fadeDelay", "fadeAlpha", "alpha", "endCaps", "kitFrame" }
 
 local function ResetLook(A, id, kind, cfg)
     local fresh
@@ -668,6 +811,12 @@ local function AdvancedTab(L, A, p, id, kind, cfg)
         .. "ZacUI there. Keys set on Bartender4's buttons are moved over the first time each character "
         .. "logs in; this button runs that again.")
     ButtonRow(L, { { "Move Bartender4 keys again", function() A.MigrateBartenderKeys(true) end, width = 200 } })
+    local c = p.core
+    Check(L, "Say at login when a key is on a button you cannot see", function() return c.warnHiddenKeys ~= false end,
+        function(v) if v then c.warnHiddenKeys = nil else c.warnHiddenKeys = false end end,
+        "A key on a bar that is off or always hidden, or past the bar's last button, still fires the "
+        .. "hidden button. Chat names those keys once, and again only when they change. No key is moved.")
+    ButtonRow(L, { { "Check now", function() if A.WarnHiddenKeys then A.WarnHiddenKeys(true) end end, width = 120 } })
     L:EndCard()
 end
 
@@ -724,9 +873,10 @@ RegisterPage("Bars", function(L)
                 RefreshConfig()
             end, width = 170 },
             { "Turn Bartender4 off + reload", function()
+                -- the reload FIRST, then the switch (WoW Forever; ns.AskReload)
+                if ns.RequestReload then ns.RequestReload() else ReloadUI() end
                 local disable = (C_AddOns and C_AddOns.DisableAddOn) or DisableAddOn
                 if disable then pcall(disable, "Bartender4") end
-                ReloadUI()
             end, width = 200 },
         })
         local d = A.DB()

@@ -13,10 +13,11 @@
 -- so an account that ran any earlier ZacUI never gets a popup, and the
 -- decision is never made twice.
 --
--- WHEN. A few seconds after login, never in combat: a show that comes due
--- in combat waits for the fight to end, and a fight that starts while the
--- welcome is up closes it until the fight is over (not counted as an
--- answer). "Take the tour" and "Quick setup" end it for good; "Not now"
+-- WHEN. A few seconds after login, never in combat, and in its turn in the
+-- login popup queue (Core_Popups: the import offer and the look picker
+-- first, what's new after it): a show that comes due in combat waits for
+-- the fight to end, and a fight that starts while the welcome is up closes
+-- it until the fight is over (not counted as an answer). "Take the tour" and "Quick setup" end it for good; "Not now"
 -- (or the X, or Escape) asks again at the next login, at most MAX_SHOWS
 -- logins in all; ticking "Don't show this again" ends it at once.
 --
@@ -184,19 +185,44 @@ end
 
 function T.WelcomeFrame() return welcome end
 
+-- the queue's show (Core_Popups): the welcome when it is still owed
+local function QueueShow()
+    if not pending then return nil end
+    if welcome and welcome:IsShown() then return welcome end
+    if T.ShowWelcome() then return welcome end
+    return nil
+end
+
 local function TryShow()
     if not pending then return end
+    -- the login queue orders it (after the import offer and the look
+    -- picker, never in combat, never on top of another popup)
+    if ns.Popups then
+        ns.Popups.Want("welcome", QueueShow)
+        return
+    end
     if InCombat() then
         watch:RegisterEvent("PLAYER_REGEN_ENABLED")
         return
     end
+    -- a fresh install picks its look first (Config_Style's first-run
+    -- popup): the welcome waits for it to close (T.ResumeWelcome), never
+    -- stacks on it
+    if ns.Look and ns.Look.HoldWelcome and ns.Look.HoldWelcome() then return end
     T.ShowWelcome()
+end
+
+-- the look popup closed without a reload: the welcome now, once it is calm
+function T.ResumeWelcome()
+    if pending then C_Timer.After(T.CALM_DELAY or 1, TryShow) end
 end
 
 watch:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_REGEN_DISABLED" then
         -- a fight started under it: out of the way now, back after
         if welcome and welcome:IsShown() then
+            -- back in the queue first, at its place, for after the fight
+            if ns.Popups then ns.Popups.Again("welcome") end
             welcome._zCombatHide = true
             if ns.StopAnim then ns.StopAnim(welcome) end
             welcome:Hide()
@@ -227,8 +253,30 @@ function T.CheckOnLogin()
         ZacUIDB.tutorial = st
     end
     if st.seen then return false end
+    -- after "Reset ZacUI" the step-by-step setup opens by itself (it has
+    -- its own welcome step and Skip on every step, so the separate welcome
+    -- is not shown as well); a first install keeps the welcome
+    if ns.openSetupAfterReset and ns.TutorialSetup and ns.TutorialSetup.Open then
+        st.seen = true
+        if ns.Popups then
+            -- in the welcome's place in the login queue; while it is open
+            -- the queue waits (Core_Popups asks Setup.Busy)
+            ns.Popups.Want("setup", function() return T.OpenSetup() end, { delay = T.WELCOME_DELAY })
+            return true
+        end
+        local function Go()
+            if InCombat() then C_Timer.After(2, Go) return end
+            T.OpenSetup()
+        end
+        C_Timer.After(T.WELCOME_DELAY, Go)
+        return true
+    end
     pending = true
-    C_Timer.After(T.WELCOME_DELAY, TryShow)
+    if ns.Popups then
+        ns.Popups.Want("welcome", QueueShow, { delay = T.WELCOME_DELAY })
+    else
+        C_Timer.After(T.WELCOME_DELAY, TryShow)
+    end
     return true
 end
 

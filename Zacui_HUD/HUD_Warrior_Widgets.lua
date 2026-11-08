@@ -7,6 +7,7 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -227,6 +228,15 @@ end
 -- Icon texture zoom (WA "zoom"): crop zoom/2 per side; keepAspect crops
 -- the larger axis to the frame's aspect (WA keepAspectRatio).
 local function ApplyZoom(tex, w, h, zoom, keepAspect)
+    -- ZacUI's look crop (ns.Look.CropIcon) when it crops at least as far
+    -- as the HUD's own; else the HUD's own, as always (let go of first)
+    local L = ns.Look
+    local c = L and L.CropIcon and L.IconCrop and L.IconCrop("hud")
+    if type(c) == "number" and c > 0 and c + 0.0001 >= (zoom or 0) / 2 then
+        L.CropIcon(tex, w, h, { border = false, part = "hud", minCrop = (zoom or 0) / 2 })
+        return
+    end
+    if L and L.ForgetIcon then L.ForgetIcon(tex) end
     local inset = (zoom or 0) / 2
     local l, r, t, b = inset, 1 - inset, inset, 1 - inset
     if keepAspect and w and h and w > 0 and h > 0 and w ~= h then
@@ -566,8 +576,18 @@ function IconProto:Flash(force)
     end
 end
 
-function IconProto:SetSwipe(start, duration)
+function IconProto:SetSwipe(start, duration, durObj)
     if not self.cd then return end
+    -- WoW Forever: a cooldown the game hides draws from its duration object
+    -- (the game runs the swipe); a plain reading afterwards draws again
+    if durObj and self.cd.SetCooldownFromDurationObject then
+        if self.cdObj ~= durObj and pcall(self.cd.SetCooldownFromDurationObject, self.cd, durObj) then
+            self.cdObj = durObj
+            self.cdStart, self.cdDuration = nil, nil
+        end
+        if self.cdObj == durObj then return end
+    end
+    if self.cdObj then self.cdObj, self.cdStart, self.cdDuration = nil, -1, -1 end
     start, duration = start or 0, duration or 0
     if math.abs((self.cdStart or 0) - start) > 0.05
         or math.abs((self.cdDuration or 0) - duration) > 0.05 then
@@ -743,6 +763,14 @@ function W.CreateBar(parent, opts)
         end
         local function Edge(self2, v)
             local on = Smooth()
+            -- a hidden value (WoW Forever) on the bar: no maths on it, so
+            -- the sheen and the edge sit out
+            if issecretvalue ~= nil and v ~= nil and issecretvalue(v) then
+                f._v = 0
+                if f.fillSheen then f.fillSheen:Hide() end
+                if f.edge then f.edge:Hide() end
+                return
+            end
             f._v = v or 0
             if f.fillSheen then f.fillSheen:SetShown(on and (f._sheenA or 0.22) > 0 and (v or 0) > 0.002) end
             if f.edge then f.edge:SetShown(on and (f._edgeA or 0.7) > 0 and (v or 0) > 0.01 and (v or 0) < 0.995) end

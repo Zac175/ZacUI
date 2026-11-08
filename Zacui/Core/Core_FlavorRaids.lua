@@ -11,7 +11,7 @@
 --                              which stay as they were: Molten Core and
 --                              the rest are still there on TBC)
 --   ns.RaidEndsByLockout()     true on a game whose raids are not listed
---                              (Forever): a raid is over when the lockout
+--                              (Forever, Retail): a raid is over when the lockout
 --                              says every boss is down
 --   ns.RaidCleared()           the lockout of the raid you are in: true
 --                              when every boss is down
@@ -53,11 +53,12 @@ local LAST = {
     },
     -- Forever: its raids (Barrow Deeps, its own Hyjal Summit, Onyxia's
     -- Lair) are not out yet and their last bosses are not known; it ends
-    -- a raid by the lockout instead (BY_LOCKOUT below)
+    -- a raid by the lockout instead (BY_LOCKOUT below). Retail (Midnight's
+    -- raids): no last-boss list yet either, the lockout rule too.
 }
 ns.RAID_LAST_BOSSES = LAST
 
-local BY_LOCKOUT = { forever = true }
+local BY_LOCKOUT = { forever = true, retail = true }
 
 function ns.RaidLastBoss(id, name)
     local t = LAST[ns.Flavor and ns.Flavor() or "era"]

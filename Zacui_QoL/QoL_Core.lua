@@ -75,9 +75,13 @@ QoL.DB = DB
 -- ============================================================
 local function ApplyScreenCvars()
     local d = DB()
-    pcall(SetCVar, "ffxGlow", d.noScreenGlow and "0" or "1")
-    pcall(SetCVar, "ffxDeath", d.noScreenEffects and "0" or "1")
-    pcall(SetCVar, "ffxNether", d.noScreenEffects and "0" or "1")
+    -- SETUP2: through ns.CVar (recorded; put back when Quality of life is off)
+    local function Set(name, value)
+        if ns.CVar then ns.CVar.Set(name, value, "qol") else pcall(SetCVar, name, value) end
+    end
+    Set("ffxGlow", d.noScreenGlow and "0" or "1")
+    Set("ffxDeath", d.noScreenEffects and "0" or "1")
+    Set("ffxNether", d.noScreenEffects and "0" or "1")
 end
 QoL.ApplyScreenCvars = ApplyScreenCvars
 
@@ -172,9 +176,11 @@ Modules.qol = function()
     -- the same feature running twice invites double sells and double
     -- invites; while Leatrix Plus is loaded, stand down.
     if ns.AddonLoaded("Leatrix_Plus") then
-        Print("qol: Leatrix Plus is running, so ZacUI's quality-of-life "
+        local line = ("qol: Leatrix Plus is running, so ZacUI's quality-of-life "
             .. "module is standing down. Disable or delete Leatrix Plus "
             .. "to switch over - your setup is already ported.")
+        -- after the login popups (Core_Popups), not under them
+        if ns.Popups then ns.Popups.Say(line) else Print(line) end
         return
     end
     QoL.enabled = true

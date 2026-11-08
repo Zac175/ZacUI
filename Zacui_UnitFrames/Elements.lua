@@ -65,6 +65,9 @@ ns.MotionShow, ns.MotionHide = motionShow, motionHide
 -- ----------------------------------------------------------------------------
 local FONT_DEFAULT_SIZE = { name = 12, health = 11, castbar = 11, auraCount = 10, healTotal = 11,
     tauntCount = 16 }   -- the AoE-taunt countdown (ShoutAlert.lua)
+-- the match pass (Config.lua, ZacUI's look): the reference UI's sizes where
+-- a text has none saved (health 12, the stack number 14)
+local FONT_MATCH_SIZE = { health = 12, auraCount = 14 }
 local OUTLINE_FLAGS = { none = "", outline = "OUTLINE", thick = "THICKOUTLINE", monochrome = "MONOCHROME" }
 local function outlineFlags(v)
     if v == nil then return "OUTLINE" end
@@ -86,7 +89,7 @@ function ns.FontSpec(kind)
     local size = spec and tonumber(spec.size)
     if kind == "name" then size = db and db.name and db.name.size or size
     elseif kind == "healTotal" then size = db and db.heal and db.heal.total and db.heal.total.size or size end
-    return spec, size or FONT_DEFAULT_SIZE[kind] or 11
+    return spec, size or (ns._matchApplied and FONT_MATCH_SIZE[kind]) or FONT_DEFAULT_SIZE[kind] or 11
 end
 
 -- the file for a text's face: ZacUI's one font (else the frames' font). A
@@ -107,7 +110,12 @@ end
 function ns.ApplyFont(fs, kind, sizeOverride)
     local spec, size = ns.FontSpec(kind)
     size = math.max(4, sizeOverride or size)
-    local flags = outlineFlags(spec and spec.outline)
+    -- (match pass, ZacUI's look: a text with no outline saved wears none and
+    -- a black shadow 1 px down-right instead, the reference's body text)
+    -- (2026-11-08, Zac: "what happened to the black border on text" - the
+    -- shadow-only text is gone: every text keeps its outline, as before)
+    local plain = false
+    local flags = plain and "" or outlineFlags(spec and spec.outline)
     local path = ns.FontPath(spec and spec.face)
     if not TrySetFont(fs, path, size, flags)
        and not TrySetFont(fs, ns.Media:Font(ns.db and ns.db.media and ns.db.media.font), size, flags) then
@@ -119,7 +127,7 @@ function ns.ApplyFont(fs, kind, sizeOverride)
         Z.TrackHouseFont(fs, function(s) ns.ApplyFont(s, kind, sizeOverride) end)
     end
     if fs.SetShadowOffset then
-        if spec and spec.shadow then
+        if (spec and spec.shadow) or (plain and not (spec and spec.shadow == false)) then
             if fs.SetShadowColor then fs:SetShadowColor(0, 0, 0, 1) end
             fs:SetShadowOffset(tonumber(spec.shadowX) or 1, tonumber(spec.shadowY) or -1)
         else
@@ -163,6 +171,20 @@ local NAME_ANCHOR = {
     BOTTOMRIGHT = { p = "BOTTOMRIGHT", rp = "BOTTOMRIGHT", j = "RIGHT",  x = -4, y = 2,  vert = "BOTTOM" },
     BELOW       = { p = "TOP",         rp = "BOTTOM",      j = "CENTER", x = 0,  y = -3, vert = "OUT" },
 }
+-- the match pass (ZacUI's look): the reference's insets - 5 px in from
+-- the left / right ends, 2 px in from a corner or the top / bottom edge
+local NAME_ANCHOR_MATCH = {}
+for k, v in pairs(NAME_ANCHOR) do
+    local c = {}
+    for f, x in pairs(v) do c[f] = x end
+    NAME_ANCHOR_MATCH[k] = c
+end
+NAME_ANCHOR_MATCH.LEFT.x, NAME_ANCHOR_MATCH.RIGHT.x = 5, -5
+for _, k in ipairs({ "TOPLEFT", "TOP", "TOPRIGHT" }) do NAME_ANCHOR_MATCH[k].y = -2 end
+for _, k in ipairs({ "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }) do NAME_ANCHOR_MATCH[k].y = 2 end
+for _, k in ipairs({ "TOPLEFT", "BOTTOMLEFT" }) do NAME_ANCHOR_MATCH[k].x = 2 end
+for _, k in ipairs({ "TOPRIGHT", "BOTTOMRIGHT" }) do NAME_ANCHOR_MATCH[k].x = -2 end
+local function NA() return ns._matchApplied and NAME_ANCHOR_MATCH or NAME_ANCHOR end
 
 -- Aura-grid placement: where a buff/debuff block attaches to the frame and which
 -- way the icons grow (gx = +1 right / -1 left, gy = +1 up / -1 down). bx/by are
@@ -264,7 +286,7 @@ local function fillAnchorDefaults(frame, cfg, D)
     local ov = frame and frame.Overlay
     local cb = frame and frame.Castbar
     -- health text
-    local ht = NAME_ANCHOR[cfg.hpAnchor] or NAME_ANCHOR.RIGHT
+    local ht = NA()[cfg.hpAnchor] or NA().RIGHT
     setDef(D, "healthText", ht.p, hb, ht.rp, ht.x + (cfg.hpX or 0), ht.y + (cfg.hpY or 0), ht.j)
     -- incoming-heal number (pinned to the health text, or a spot on the frame)
     local tc = db.heal and db.heal.total
@@ -274,13 +296,16 @@ local function fillAnchorDefaults(frame, cfg, D)
         setDef(D, "healTotal", left and "RIGHT" or "LEFT", hb and hb.text, left and "LEFT" or "RIGHT",
             (left and -5 or 5) + ((tc and tc.x) or 0), (tc and tc.y) or 0, left and "RIGHT" or "LEFT")
     else
-        local ta = NAME_ANCHOR[tax] or NAME_ANCHOR.TOPRIGHT
+        local ta = NA()[tax] or NA().TOPRIGHT
         setDef(D, "healTotal", ta.p, ov, ta.rp, ta.x + ((tc and tc.x) or 0), ta.y + ((tc and tc.y) or 0), ta.j)
     end
     -- power bar: the bottom strip
-    setDef(D, "power", "BOTTOMLEFT", frame, "BOTTOMLEFT", 1, 1, nil, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
+    -- (inside the edge: one physical pixel under ZacUI's look, HD polish)
+    local Zp = _G.ZacUI
+    local px = Zp and Zp.Pixel and frame and Zp.Pixel.One(frame) or 1
+    setDef(D, "power", "BOTTOMLEFT", frame, "BOTTOMLEFT", px, px, nil, "BOTTOMRIGHT", frame, "BOTTOMRIGHT", -px, px)
     -- name strip + name
-    local a = NAME_ANCHOR[cfg.nameAnchor] or NAME_ANCHOR.LEFT
+    local a = NA()[cfg.nameAnchor] or NA().LEFT
     local vy = a.y
     if a.vert == "BOTTOM" then vy = a.y + powerH end
     if a.vert == "BOTTOM" then
@@ -296,13 +321,25 @@ local function fillAnchorDefaults(frame, cfg, D)
         setDef(D, "name", a.p, ov, a.rp, a.x + (cfg.nameX or 0), vy + (cfg.nameY or 0), a.j)
     end
     -- castbar and its pieces
-    local cbA = NAME_ANCHOR[cfg.cbAnchor] or NAME_ANCHOR.BELOW
-    setDef(D, "castbar", cbA.p, frame, cbA.rp, cfg.cbX or 0, cfg.cbY or 0)
+    local cbA = NA()[cfg.cbAnchor] or NA().BELOW
     local cbH = (cfg.cbHeight and cfg.cbHeight > 0) and cfg.cbHeight or db.castbar.height
-    local iconPad = (db.castbar.showIcon and (cbH + 2)) or 4
-    setDef(D, "castIcon", "TOPLEFT", cb, "TOPLEFT", 1, -1, nil, "BOTTOMLEFT", cb, "BOTTOMLEFT", 1, 1)
-    setDef(D, "castText", "LEFT", cb, "LEFT", iconPad, 0, nil, "RIGHT", cb, "RIGHT", -34, 0)
-    setDef(D, "castTime", "RIGHT", cb, "RIGHT", -4, 0)
+    if ns._matchApplied and db.castbar.showIcon then
+        -- match pass: the icon is a square of its own at the bar's left end
+        -- and the fill starts after it, the two together as wide as the
+        -- castbar's width (StyleElements narrows the bar by the icon)
+        local p = cbA.p
+        local shift = p:find("LEFT", 1, true) and cbH or (p:find("RIGHT", 1, true) and 0 or cbH / 2)
+        setDef(D, "castbar", p, frame, cbA.rp, (cfg.cbX or 0) + shift, cfg.cbY or 0)
+        setDef(D, "castIcon", "TOPRIGHT", cb, "TOPLEFT", 0, 0, nil, "BOTTOMRIGHT", cb, "BOTTOMLEFT", 0, 0)
+        setDef(D, "castText", "LEFT", cb, "LEFT", 5, 0, nil, "RIGHT", cb, "RIGHT", -34, 0)
+        setDef(D, "castTime", "RIGHT", cb, "RIGHT", -3, 0)
+    else
+        setDef(D, "castbar", cbA.p, frame, cbA.rp, cfg.cbX or 0, cfg.cbY or 0)
+        local iconPad = (db.castbar.showIcon and (cbH + 2)) or 4
+        setDef(D, "castIcon", "TOPLEFT", cb, "TOPLEFT", 1, -1, nil, "BOTTOMLEFT", cb, "BOTTOMLEFT", 1, 1)
+        setDef(D, "castText", "LEFT", cb, "LEFT", iconPad, 0, nil, "RIGHT", cb, "RIGHT", -34, 0)
+        setDef(D, "castTime", "RIGHT", cb, "RIGHT", -4, 0)
+    end
     -- status icons + PvP text
     for _, k in ipairs({ "combat", "leader", "role", "raid", "rez" }) do
         local A = IND_ANCHOR[cfg[k .. "Anchor"]] or IND_ANCHOR.CENTER
@@ -341,6 +378,8 @@ end
 -- the stack number's place on an aura icon (db.auras.anchors.count)
 local AURA_COUNT_DEF = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = 1, y = -1 }
 ns.AURA_COUNT_DEF = AURA_COUNT_DEF
+-- (HD polish, ZacUI's look: one pixel inside the ring instead of over it)
+local AURA_COUNT_DEF_HD = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -1, y = 1 }
 
 -- Place aura icon `b` at 0-based slot `idx` within its group: lays out in a grid
 -- of `perRow` columns, stepping (size+2) px along the anchor's gx/gy directions,
@@ -365,12 +404,20 @@ local function addBorder(frame)
         left   = { "TOPLEFT", "BOTTOMLEFT", 1, nil },
         right  = { "TOPRIGHT", "BOTTOMRIGHT", 1, nil },
     }
+    local Z = _G.ZacUI
+    local P = Z and Z.Pixel
     for name, s in pairs(sides) do
         local t = frame:CreateTexture(nil, "BORDER")
         t:SetColorTexture(0, 0, 0, 1)
         t:SetPoint(s[1]); t:SetPoint(s[2])
-        if s[3] then t:SetWidth(s[3]) end
-        if s[4] then t:SetHeight(s[4]) end
+        -- HD polish: one physical pixel under ZacUI's look (Core_Pixel);
+        -- exactly 1 everywhere else
+        if P then
+            P.Edge(t, s[3] and (name == "left" and "LEFT" or "RIGHT") or (name == "top" and "TOP" or "BOTTOM"), frame)
+        else
+            if s[3] then t:SetWidth(s[3]) end
+            if s[4] then t:SetHeight(s[4]) end
+        end
         b[name] = t
     end
     return b
@@ -483,7 +530,8 @@ local function buildCastbar(frame)
     -- created later (SetStatusBarTexture in styling), so at the same sublevel it
     -- would draw over the icon as the bar fills past it.
     cb.icon = cb:CreateTexture(nil, "ARTWORK", nil, 1)
-    cb.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    -- (match pass: the icon sits beside the fill in a 1 px frame of its own)
+    ZacUI.Look.CropIcon(cb.icon, nil, nil, ns._matchApplied and { border = true } or nil)
 
     cb.spell = ns.UI:FS(cb, 11)
     cb.spell:SetJustifyH("LEFT")
@@ -755,12 +803,28 @@ function ns.StyleElements(frame)
     -- Health (fills the frame minus the power strip)
     local hb = frame.Health
     hb:ClearAllPoints()
-    hb:SetPoint("TOPLEFT", 1, -1)
-    hb:SetPoint("TOPRIGHT", -1, -1)
-    hb:SetPoint("BOTTOM", frame, "BOTTOM", 0, powerH + 1)
+    -- (HD polish: inside an edge one physical pixel wide under ZacUI's
+    -- look, Core_Pixel; one unit everywhere else)
+    local Z = _G.ZacUI
+    local px = Z and Z.Pixel and Z.Pixel.One(frame) or 1
+    hb:SetPoint("TOPLEFT", px, -px)
+    hb:SetPoint("TOPRIGHT", -px, -px)
+    hb:SetPoint("BOTTOM", frame, "BOTTOM", 0, powerH + px)
     hb:SetStatusBarTexture(barT)
     hb.bg:SetTexture(barT)
     hb.bg:SetVertexColor(u(db.colors.healthBg))
+    if ns._matchApplied then
+        -- match pass (ZacUI's look): the fill at 90% (db.health.fillAlpha)
+        -- and the background behind the missing part only, riding the
+        -- fill's moving edge (anchors: nothing to redo per health tick)
+        local fill = hb:GetStatusBarTexture()
+        if type(fill) == "table" and fill.SetAlpha then
+            fill:SetAlpha(tonumber(db.health and db.health.fillAlpha) or 0.9)
+            hb.bg:ClearAllPoints()
+            hb.bg:SetPoint("TOPLEFT", fill, "TOPRIGHT", 0, 0)
+            hb.bg:SetPoint("BOTTOMRIGHT", hb, "BOTTOMRIGHT", 0, 0)
+        end
+    end
     ns.ApplyFont(hb.text, "health")
     hb.text:SetTextColor(uc(db.colors.healthText, 0.85, 0.85, 0.85, 1))
     place(frame, hb.text, "healthText", D.healthText)
@@ -809,7 +873,7 @@ function ns.StyleElements(frame)
 
     -- Name strip + text (on the overlay, above the bars)
     local strip, nm = frame.NameStrip, frame.Name
-    local a = NAME_ANCHOR[cfg.nameAnchor] or NAME_ANCHOR.LEFT
+    local a = NA()[cfg.nameAnchor] or NA().LEFT
     local vy = a.y
     if a.vert == "BOTTOM" then vy = a.y + powerH end
 
@@ -819,7 +883,9 @@ function ns.StyleElements(frame)
     strip:SetShown(stripOn)
     if not place(frame, strip, "nameStrip", D.nameStrip) then strip:SetWidth(math.max(1, (cfg.width or 100) - 2)) end
 
-    ns.ApplyFont(nm, "name")
+    -- (cfg.nameSize: this frame's own name size, the match pass's 10 on
+    -- party and raid; nil = the one name size)
+    ns.ApplyFont(nm, "name", tonumber(cfg.nameSize))
     nm:SetWordWrap(false)
     -- The name uses the full interior width; the lead/assist/tank icons sit in
     -- the top-left corner and simply overlay it (small icons over the first
@@ -833,7 +899,7 @@ function ns.StyleElements(frame)
     else
         local avail = (cfg.width or 100) - 8
         if nameOn and cfg.healthText and cfg.healthText ~= "none" and a.vert ~= "OUT" then
-            local hpv = (NAME_ANCHOR[cfg.hpAnchor] or NAME_ANCHOR.RIGHT).vert
+            local hpv = (NA()[cfg.hpAnchor] or NA().RIGHT).vert
             if hpv == a.vert then avail = avail - 32 end  -- HP on the same row -> leave room for it
         end
         if avail < nameFloor then avail = nameFloor end
@@ -846,12 +912,14 @@ function ns.StyleElements(frame)
     -- cbHeight 0 = use the global castbar height. Hidden unless enabled + casting.
     local cb = frame.Castbar
     local cbc = db.castbar
-    local cbA = NAME_ANCHOR[cfg.cbAnchor] or NAME_ANCHOR.BELOW
+    local cbA = NA()[cfg.cbAnchor] or NA().BELOW
     local cbW = (cfg.cbWidth and cfg.cbWidth > 0) and cfg.cbWidth or (cfg.width or 100)
     local cbH = (cfg.cbHeight and cfg.cbHeight > 0) and cfg.cbHeight or db.castbar.height
     ns.CastbarStopMotion(cb)   -- never re-anchor a bar mid-animation
     place(frame, cb, "castbar", D.castbar)
-    cb:SetSize(cbW, cbH)
+    local matchIcon = ns._matchApplied and db.castbar.showIcon
+    -- (match pass: the icon's square comes off the bar's width)
+    cb:SetSize(matchIcon and math.max(1, cbW - cbH) or cbW, cbH)
     cb:SetStatusBarTexture(cbc.texture and ns.Media:Statusbar(cbc.texture) or barT)
     cb.bg:SetColorTexture(uc(cbc.bgColor, 0, 0, 0, 0.7))
     if cb.border then
@@ -859,15 +927,18 @@ function ns.StyleElements(frame)
         for _, t in pairs(cb.border) do t:SetColorTexture(br, bgc, bb, ba) end
     end
     if cb.icon then
-        if not place(frame, cb.icon, "castIcon", D.castIcon) then cb.icon:SetHeight(math.max(1, cbH - 2)) end
-        cb.icon:SetWidth(math.max(1, cbH - 2))
+        local isz = matchIcon and cbH or math.max(1, cbH - 2)
+        if not place(frame, cb.icon, "castIcon", D.castIcon) then cb.icon:SetHeight(isz) end
+        cb.icon:SetWidth(isz)
         cb.icon:SetShown(db.castbar.showIcon)
     end
     local iconPad = (db.castbar.showIcon and (cbH + 2)) or 4
     if not place(frame, cb.spell, "castText", D.castText) then cb.spell:SetWidth(math.max(1, cbW - iconPad - 34)) end
     ns.ApplyFont(cb.spell, "castbar")
     place(frame, cb.timer, "castTime", D.castTime)
-    ns.ApplyFont(cb.timer, "castbar")
+    -- (match pass: the time a size under the spell name, 10, unless one is saved)
+    local cbSpec = ns._matchApplied and ns.FontSpec("castbar")
+    ns.ApplyFont(cb.timer, "castbar", (ns._matchApplied and not (cbSpec and cbSpec.size)) and 10 or nil)
     local tr, tg, tb, ta = uc(cbc.textColor, 0.85, 0.85, 0.85, 1)
     cb.spell:SetTextColor(tr, tg, tb, ta)
     cb.timer:SetTextColor(tr, tg, tb, ta)
@@ -1744,7 +1815,7 @@ function ns.MockHealChips(frame, hp)
     -- are scaled against the player's own max health - a real number on the right
     -- order of magnitude, so what you position is the width you will actually get.
     local sampleMax = (UnitHealthMax("player") or 0)
-    if sampleMax <= 0 then sampleMax = 4200 end
+    if (issecretvalue ~= nil and issecretvalue(sampleMax)) or sampleMax <= 0 then sampleMax = 4200 end
     showHealTotal(frame, (1 - hp) * sampleMax, hp * sampleMax, sampleMax)
 
     local seg = db.segment
@@ -1891,6 +1962,23 @@ function ns.HealStatus()
 end
 
 local POWER_FALLBACK = { r = 0.4, g = 0.4, b = 0.8 }   -- reused, never per-call allocated
+-- The power colour: the client's PowerBarColor, or under the match pass
+-- (ZacUI's look) the reference's palette for the four Classic powers.
+local MATCH_POWER = {
+    MANA = { r = 0.000, g = 0.550, b = 1.000 }, RAGE = { r = 0.900, g = 0.150, b = 0.150 },
+    FOCUS = { r = 0.867, g = 0.573, b = 0.216 }, ENERGY = { r = 1.000, g = 0.960, b = 0.410 },
+    RUNIC_POWER = { r = 0.769, g = 0.122, b = 0.231 },
+}
+local MATCH_POWER_IDX = { [0] = "MANA", [1] = "RAGE", [2] = "FOCUS", [3] = "ENERGY", [6] = "RUNIC_POWER" }
+function ns.PowerColor(ptoken, ptype)
+    if ns._matchApplied then
+        local m = (ptoken and MATCH_POWER[ptoken]) or (ptype and MATCH_POWER[MATCH_POWER_IDX[ptype] or ""])
+        if m then return m end
+    end
+    local PBC = PowerBarColor
+    return PBC and ((ptoken and PBC[ptoken]) or (ptype and PBC[ptype])) or POWER_FALLBACK
+end
+
 function ns.UpdatePower(frame)
     if not frame.Power or (frame.cfg and not frame.cfg.power) then return end
     local unit = frame.unit
@@ -1905,8 +1993,7 @@ function ns.UpdatePower(frame)
             pb._zsv, pb._zsg, frame._maxpp = nil, nil, nil
             Z.ShowBar(pb, cur, max)
         end
-        local PBC = PowerBarColor
-        local c = PBC and ((ptoken and PBC[ptoken]) or (ptype and PBC[ptype])) or POWER_FALLBACK
+        local c = ns.PowerColor(ptoken, ptype)
         if c.r ~= frame._pcr or c.g ~= frame._pcg or c.b ~= frame._pcb then
             pb:SetStatusBarColor(c.r, c.g, c.b)
             frame._pcr, frame._pcg, frame._pcb = c.r, c.g, c.b
@@ -1932,8 +2019,7 @@ function ns.PaintPower(frame, cur, max, guid, ptoken, ptype)
 
     -- The bar colour is constant for a given power type (rage stays rage), so only
     -- push it to the texture when it actually changes - not on every rage tick.
-    local PBC = PowerBarColor
-    local c = PBC and ((ptoken and PBC[ptoken]) or (ptype and PBC[ptype])) or POWER_FALLBACK
+    local c = ns.PowerColor(ptoken, ptype)
     if c.r ~= frame._pcr or c.g ~= frame._pcg or c.b ~= frame._pcb then
         pb:SetStatusBarColor(c.r, c.g, c.b)
         frame._pcr, frame._pcg, frame._pcb = c.r, c.g, c.b
@@ -1943,7 +2029,9 @@ end
 function ns.UpdateName(frame)
     if not frame.Name or (frame.cfg and not frame.cfg.name) then return end
     local unit = frame.unit
-    local n = unit and UnitName(unit) or ""
+    -- (WoW Forever: the surname as Core_Names says; elsewhere UnitName)
+    local Z = _G.ZacUI
+    local n = unit and ((Z and Z.UnitDisplayName) and Z.UnitDisplayName(unit) or UnitName(unit)) or ""
     ns.PaintName(frame, n, ns.NameColor(unit, frame))
 end
 
@@ -1957,6 +2045,19 @@ function ns.PaintName(frame, text, r, g, b)
         nameVals.name = text or ""
         text = Z.FormatText(fmt, nil, nameVals, NAME_KINDS, "name")
         nameVals.name = nil
+    end
+    -- match pass (ZacUI's look): a party / raid name is cut to its first 15
+    -- letters (cfg.nameMax; 0 = no cut) before the width trims it
+    local cfg = frame.cfg
+    local cap = cfg and (cfg.nameMax or (ns._matchApplied and ns.db and (cfg == ns.db.party or cfg == ns.db.raid) and 15))
+    if cap and cap > 0 and type(text) == "string" and not (issecretvalue ~= nil and issecretvalue(text))
+       and #text > cap then
+        local n, cut = 0, #text
+        for pos in text:gmatch("()[%z\1-\127\194-\244][\128-\191]*") do
+            n = n + 1
+            if n > cap then cut = pos - 1 break end
+        end
+        text = text:sub(1, cut)
     end
     frame.Name:SetText(text or "")
     frame.Name:SetTextColor(r, g, b)
@@ -1975,9 +2076,29 @@ function ns.StyleAuraIcon(b)
     b.count:SetTextColor(uc(ac.countColor, 0.85, 0.85, 0.85, 1))
     local Z = _G.ZacUI
     if Z and Z.ApplyAnchor then
-        Z.ApplyAnchor(b.count, type(ac.anchors) == "table" and ac.anchors.count or nil, AURA_COUNT_DEF)
+        Z.ApplyAnchor(b.count, type(ac.anchors) == "table" and ac.anchors.count or nil,
+            (b.swipe and AURA_COUNT_DEF_HD) or AURA_COUNT_DEF)
     end
 end
+
+-- HD POLISH (2026-11-07, ZacUI's look only; zui_tests/HD_POLISH_STANDARD_1107.md):
+-- the 1px ring sits OVER the icon's edge (it was on the BORDER layer, under
+-- the icon, so it never showed), the crop is the lighter 0.07 that ring
+-- allows (unless an icon zoom is set by hand), a debuff's ring takes the HD
+-- dispel colour, and auras of 5 minutes or less get a reversed dark sweep.
+local HD_CROP, HD_SWIPE_MAX = 0.07, 300
+local HD_DISPEL = {
+    Magic   = { 0.35, 0.48, 1.00 },
+    Curse   = { 0.64, 0.00, 0.64 },
+    Disease = { 0.67, 0.38, 0.10 },
+    Poison  = { 0.00, 0.71, 0.29 },
+}
+local HD_UNTYPED = { 0.80, 0.10, 0.10 }
+local function hdLook()
+    local Z = _G.ZacUI
+    return Z and Z.Look and Z.Look.Active and Z.Look.Active() == "zacui" or false
+end
+ns.AuraHD = hdLook
 
 local function getAuraIcon(frame, i)
     local b = frame.auraIcons[i]
@@ -1986,14 +2107,71 @@ local function getAuraIcon(frame, i)
         b:SetFrameLevel(frame:GetFrameLevel() + 7)
         b.icon = b:CreateTexture(nil, "ARTWORK")
         b.icon:SetAllPoints()
-        b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        local hd = hdLook()
+        -- (2026-11-08) one crop for every icon: ZacUI's own, which hides
+        -- the game's icon border (the lighter 0.07 let it show)
+        ZacUI.Look.CropIcon(b.icon)
         b.border = addBorder(b)
-        b.count = ns.UI:FS(b, 10)
+        if hd then
+            for _, t in pairs(b.border) do t:SetDrawLayer("OVERLAY", 6) end
+            local ok, cd = pcall(CreateFrame, "Cooldown", nil, b, "CooldownFrameTemplate")
+            if ok and cd then
+                local Z = _G.ZacUI
+                local one = (Z and Z.Pixel and Z.Pixel.One(b)) or 1
+                cd:SetPoint("TOPLEFT", b, "TOPLEFT", one, -one)
+                cd:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -one, one)
+                if cd.SetReverse then cd:SetReverse(true) end
+                if cd.SetDrawEdge then cd:SetDrawEdge(false) end
+                if cd.SetDrawBling then cd:SetDrawBling(false) end
+                if cd.SetSwipeColor then cd:SetSwipeColor(0, 0, 0, 0.6) end
+                if cd.SetHideCountdownNumbers then cd:SetHideCountdownNumbers(true) end
+                cd.noCooldownCount = true
+                cd:Hide()
+                b.swipe = cd
+                -- the stack number above the sweep
+                b.textHost = CreateFrame("Frame", nil, b)
+                b.textHost:SetAllPoints(b)
+                b.textHost:SetFrameLevel(b:GetFrameLevel() + 2)
+            end
+        end
+        b.count = ns.UI:FS(b.textHost or b, 10)
         b.count:SetPoint("BOTTOMRIGHT", 1, -1)
         ns.StyleAuraIcon(b)
         frame.auraIcons[i] = b
     end
     return b
+end
+
+-- One icon's HD dress for the aura it now shows: the ring's colour (a
+-- debuff's dispel type; `debuff` false = a buff) and the sweep. Under any
+-- other look it returns at once.
+local function hdAura(b, debuff, dispelType, duration, expires)
+    if not b.swipe then return end
+    local ac = ns.db.auras
+    local c
+    if debuff then
+        c = (type(dispelType) == "string" and not (issecretvalue and issecretvalue(dispelType)) and HD_DISPEL[dispelType]) or HD_UNTYPED
+    end
+    if c then
+        for _, t in pairs(b.border) do t:SetColorTexture(c[1], c[2], c[3], 1) end
+        b._hdTint = true
+    elseif b._hdTint then
+        b._hdTint = nil
+        local r, g, bl, a = uc(ac.borderColor, 0, 0, 0, 1)
+        for _, t in pairs(b.border) do t:SetColorTexture(r, g, bl, a) end
+    end
+    if type(duration) == "number" and type(expires) == "number"
+        and not (issecretvalue and (issecretvalue(duration) or issecretvalue(expires)))
+        and duration > 0 and duration <= HD_SWIPE_MAX then
+        if b._hdExp ~= expires then
+            b._hdExp = expires
+            b.swipe:SetCooldown(expires - duration, duration)
+        end
+        b.swipe:Show()
+    else
+        b._hdExp = nil
+        b.swipe:Hide()
+    end
 end
 
 -- Whitelist match: an entry matches by spell ID (exact) or by localized name
@@ -2030,7 +2208,7 @@ end
 -- never-hidden "from you" flag.
 local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
 local isSecret = issecretvalue
-local hiddenClient = _G.ZACUI_IS_FOREVER and true or false
+local hiddenClient = _G.ZACUI_MODERN and true or false
 local scanAura
 if GetAuraDataByIndex then
     scanAura = function(unit, index, filter)
@@ -2048,12 +2226,12 @@ if GetAuraDataByIndex then
             if hiddenClient then return false, a end
             return nil
         end
-        return a.name, a.icon, a.applications, a.sourceUnit, a.spellId, a.dispelName
+        return a.name, a.icon, a.applications, a.sourceUnit, a.spellId, a.dispelName, a.duration, a.expirationTime
     end
 elseif UnitAura then
     scanAura = function(unit, index, filter)
-        local name, icon, count, dispelType, _, _, source, _, _, spellID = UnitAura(unit, index, filter)
-        return name, icon, count, source, spellID, dispelType
+        local name, icon, count, dispelType, duration, expires, source, _, _, spellID = UnitAura(unit, index, filter)
+        return name, icon, count, source, spellID, dispelType, duration, expires
     end
 end
 
@@ -2220,11 +2398,44 @@ local function setDispelHighlight(frame, dispelType)
     if dispelType then
         local c = DISPEL_COLORS[dispelType]
         if c then frame:SetBackdropBorderColor(c[1], c[2], c[3], 1) end
+    elseif frame.isGroupUnit and ns._matchApplied then
+        ns.GroupBorder(frame)
     else
         local bc = frame.cfg and frame.cfg.borderColor
-        if bc then frame:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4] or 1)
+        if frame._zuiEdge then frame:SetBackdropBorderColor(ns.UI:FrameBorderColor(frame, bc))
+        elseif bc then frame:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4] or 1)
         else frame:SetBackdropBorderColor(0, 0, 0, 1) end
     end
+end
+
+-- Match pass (ZacUI's look): a party / raid frame's border goes white while
+-- it is moused over or is your target, as the reference's group frames do;
+-- a dispel tint and move mode win. Runs on hover, on a target change (one
+-- event frame, made only under the match pass) and on a unit reassignment.
+function ns.GroupBorder(frame)
+    if not (ns._matchApplied and frame and frame.isGroupUnit and frame.SetBackdropBorderColor) then return end
+    if frame.dispelType or (frame.moverTex and frame.moverTex:IsShown()) then return end
+    local lit = frame.hovered
+    if not lit and frame.unit and UnitExists(frame.unit) then lit = UnitIsUnit(frame.unit, "target") end
+    if lit then
+        frame:SetBackdropBorderColor(1, 1, 1, 1)
+    else
+        local bc = frame.cfg and frame.cfg.borderColor
+        if frame._zuiEdge then frame:SetBackdropBorderColor(ns.UI:FrameBorderColor(frame, bc))
+        elseif bc then frame:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4] or 1)
+        else frame:SetBackdropBorderColor(0, 0, 0, 1) end
+    end
+end
+local groupTargetWatch
+function ns.GroupBorderWatch()
+    if groupTargetWatch or not ns._matchApplied then return end
+    groupTargetWatch = CreateFrame("Frame")
+    groupTargetWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
+    groupTargetWatch:SetScript("OnEvent", function()
+        for f in pairs(ns.unitButtons) do
+            if f.isGroupUnit and f:IsShown() then ns.GroupBorder(f) end
+        end
+    end)
 end
 
 -- Which auras an icon row keeps: the same tests for live frames and the
@@ -2372,7 +2583,7 @@ function ns.UpdateAuras(frame, updateInfo)
         local iconsDone = not wantDebuffs
         local oy = (fcfg.debuffY or 0) - (da.below and cbGap or 0)
         for index = 1, 40 do
-            local name, icon, count, source, spellID, dispelType = scanAura(unit, index, "HARMFUL")
+            local name, icon, count, source, spellID, dispelType, duration, expires = scanAura(unit, index, "HARMFUL")
             if name == nil then break end
             if name == false then
                 -- (WoW Forever: a debuff the game hides; icon = its table)
@@ -2380,6 +2591,7 @@ function ns.UpdateAuras(frame, updateInfo)
                     pool = pool + 1
                     local b = getAuraIcon(frame, pool)
                     showHiddenAura(b, unit, icon)
+                    if b.swipe then hdAura(b, true, nil, nil, nil) end
                     placeAura(frame, b, da, n, perRow, step, fcfg.debuffX or 0, oy)
                     n = n + 1
                     if n >= cfg.max then iconsDone = true end
@@ -2392,6 +2604,7 @@ function ns.UpdateAuras(frame, updateInfo)
                 local b = getAuraIcon(frame, pool)
                 b.icon:SetTexture(icon)
                 b.count:SetText((count and count > 1) and count or "")
+                if b.swipe then hdAura(b, true, dispelType, duration, expires) end
                 placeAura(frame, b, da, n, perRow, step, fcfg.debuffX or 0, oy)
                 n = n + 1
                 if n >= cfg.max then iconsDone = true end
@@ -2407,7 +2620,7 @@ function ns.UpdateAuras(frame, updateInfo)
         local n  = 0
         local oy = (fcfg.buffY or 0) - (ba.below and cbGap or 0)
         for index = 1, 40 do
-            local name, icon, count, _, spellID = scanAura(unit, index, "HELPFUL")
+            local name, icon, count, _, spellID, _, duration, expires = scanAura(unit, index, "HELPFUL")
             if name == nil then break end
             if name == false then
                 -- (WoW Forever: a buff the game hides; icon = its table)
@@ -2415,6 +2628,7 @@ function ns.UpdateAuras(frame, updateInfo)
                     pool = pool + 1
                     local b = getAuraIcon(frame, pool)
                     showHiddenAura(b, unit, icon)
+                    if b.swipe then hdAura(b, false, nil, nil, nil) end
                     placeAura(frame, b, ba, n, perRow, step, fcfg.buffX or 0, oy)
                     n = n + 1
                     if n >= cfg.max then break end
@@ -2424,6 +2638,7 @@ function ns.UpdateAuras(frame, updateInfo)
                 local b = getAuraIcon(frame, pool)
                 b.icon:SetTexture(icon)
                 b.count:SetText((count and count > 1) and count or "")
+                if b.swipe then hdAura(b, false, nil, duration, expires) end
                 placeAura(frame, b, ba, n, perRow, step, fcfg.buffX or 0, oy)
                 n = n + 1
                 if n >= cfg.max then break end
@@ -2459,7 +2674,7 @@ function ns.PaintAuras(frame, debuffs, buffs, friendly)
     local pool = 0
     if fcfg.showBuffs or fcfg.showDebuffs then
         local step, perRow, da, ba, cbGap = auraGrid(fcfg)
-        local function row(list, a, want, ox, oy, test)
+        local function row(list, a, want, ox, oy, test, block)
             if not want then return end
             local n = 0
             for _, e in ipairs(list) do
@@ -2467,17 +2682,24 @@ function ns.PaintAuras(frame, debuffs, buffs, friendly)
                 if test(e) then
                     pool = pool + 1
                     local b = getAuraIcon(frame, pool)
+                    -- (which block it is in: the preview drags the block)
+                    b._zBlock = block
                     b.icon:SetTexture(e.icon)
                     b.count:SetText((e.count and e.count > 1) and e.count or "")
+                    -- the HD ring colour (and a made-up sweep for short ones)
+                    if b.swipe then
+                        local d = tonumber(e.duration) or 20
+                        hdAura(b, block == "debuffs", e.dispelType, d, GetTime() + d * 0.6)
+                    end
                     placeAura(frame, b, a, n, perRow, step, ox, oy)
                     n = n + 1
                 end
             end
         end
         row(debuffs, da, fcfg.showDebuffs, fcfg.debuffX or 0, (fcfg.debuffY or 0) - (da.below and cbGap or 0),
-            function(e) return debuffShown(cfg, e.name, e.spellID, e.source, e.dispelType, dispels) end)
+            function(e) return debuffShown(cfg, e.name, e.spellID, e.source, e.dispelType, dispels) end, "debuffs")
         row(buffs, ba, fcfg.showBuffs, fcfg.buffX or 0, (fcfg.buffY or 0) - (ba.below and cbGap or 0),
-            function(e) return buffShown(cfg, e.name, e.spellID) end)
+            function(e) return buffShown(cfg, e.name, e.spellID) end, "buffs")
     end
     for j = pool + 1, #frame.auraIcons do frame.auraIcons[j]:Hide() end
 end
@@ -2595,6 +2817,8 @@ function ns.CastbarUpdate(frame, fromEvent)
         if fromEvent then ns.CastbarEnd(cb) else ns.CastbarStopMotion(cb) cb:Hide() end
         return
     end
+    -- (a hidden "can't be interrupted" flag is a secret boolean: never tested)
+    if issecretvalue ~= nil and issecretvalue(notInterruptible) then notInterruptible = false end
     ns.CastbarStart(frame, text or name, texture, startMS / 1000, endMS / 1000, channel, notInterruptible)
 end
 
@@ -2631,7 +2855,7 @@ local function setupCastbarDrag(frame)
         self:StopMovingOrSizing()
         local cfg = frame.cfg
         if cfg then
-            local cbA = NAME_ANCHOR[cfg.cbAnchor] or NAME_ANCHOR.BELOW
+            local cbA = NA()[cfg.cbAnchor] or NA().BELOW
             local cx, cy = pointXY(self, cbA.p)
             local fx, fy = pointXY(frame, cbA.rp)
             if cx and fx then
@@ -2746,6 +2970,8 @@ function ns.UpdateRaidMarker(frame)
     if not ind then return end
     local cfg, unit = frame.cfg, frame.unit
     local idx = cfg and unit and cfg.raidIcon and UnitExists(unit) and GetRaidTargetIndex(unit)
+    -- (WoW Forever can hand the marker back hidden: no marker then)
+    if issecretvalue ~= nil and issecretvalue(idx) then idx = nil end
     if idx then
         if ind.raid._idx ~= idx then ind.raid._idx = idx setRaidMarker(ind.raid, idx) end
         ind.raid:Show()
@@ -2775,10 +3001,12 @@ function ns.UpdateIndicators(frame)
         if GetPartyAssignment("MAINTANK", unit) then role = "MAINTANK"
         elseif GetPartyAssignment("MAINASSIST", unit) then role = "MAINASSIST" end
     end
+    local marker = cfg.raidIcon and GetRaidTargetIndex(unit)
+    if issecretvalue ~= nil and issecretvalue(marker) then marker = nil end   -- (WoW Forever)
     ns.PaintIndicators(frame, leader,
         cfg.combatIcon and UnitAffectingCombat(unit),
         role,
-        cfg.raidIcon and GetRaidTargetIndex(unit),
+        marker,
         cfg.rezIcon and UnitHasIncomingResurrection and UnitHasIncomingResurrection(unit))
     ns.UpdatePvP(frame)
 end
@@ -2889,4 +3117,5 @@ function ns.UpdateAll(frame)
     -- whenever a frame changes which unit it shows - raid header children get
     -- reassigned constantly as the roster shifts.
     ns.UpdateHealerDot(frame)
+    if frame.isGroupUnit and ns._matchApplied then ns.GroupBorder(frame) end
 end

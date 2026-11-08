@@ -11,6 +11,7 @@
 --------------------------------------------------------------------------------
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 local S = ns.MapStitch
 
 local C = { on = false }

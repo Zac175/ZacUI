@@ -23,7 +23,7 @@ S.addon = ADDON_NAME
 -- Forever's rules (no combat log): on that client, and under the game-
 -- version override's Forever (Core_Flavor), which only switches the
 -- combat log off - the hits you take still come from UNIT_COMBAT
-S.FOREVER = (_G.ZACUI_IS_FOREVER or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
+S.FOREVER = (_G.ZACUI_MODERN or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
 
 -- ============================================================
 -- DEFAULTS
@@ -372,10 +372,13 @@ local function CVarGet(name)
 end
 
 local function CVarSet(name, value)
-    if not SetCVar then return end
+    if not SetCVar and not (ns and ns.CVar) then return end
     for _, cv in ipairs({ name .. "_v2", name }) do
         local ok, v = pcall(GetCVar, cv)
-        if ok and v ~= nil then pcall(SetCVar, cv, value) end
+        if ok and v ~= nil then
+            -- SETUP2: through ns.CVar (recorded; put back when the part is off)
+            if ns and ns.CVar then ns.CVar.Set(cv, value, "Zacui_SBT") else pcall(SetCVar, cv, value) end
+        end
     end
 end
 
@@ -402,6 +405,12 @@ end
 function S.SetOn(on)
     S.Cfg().enabled = on and true or false
     if S.Rebuild then S.Rebuild() end
+    -- SETUP2: the part off hands back the game's damage text settings it wrote
+    if not on and ns and ns.CVar then pcall(ns.CVar.RestoreOwner, "Zacui_SBT") end
+end
+-- SETUP2: the CVar record asks whether this part is off (its own switch, not only the AddOns list)
+if ns and ns.CVar and ns.CVar.OwnerCheck then
+    ns.CVar.OwnerCheck("Zacui_SBT", function() return not S.IsOn() end)
 end
 
 local function SortedKeys(t)

@@ -60,4 +60,7 @@
     <Binding name="CLICK ZacUIActionButton119:LeftButton"/>
     <Binding name="CLICK ZacUIActionButton120:LeftButton"/>
     <Binding name="ZACUI_RAIDMSGS" header="ZACUICHAT">ZacUI_ToggleRaidMsgs()</Binding>
+    <Binding name="ZACUI_PRIVACY">ZacUI_TogglePrivacy()</Binding>
+    <Binding name="ZACUI_METER_TOGGLE" header="ZACUIMETER">if ZacUI_MeterToggle then ZacUI_MeterToggle() end</Binding>
+    <Binding name="ZACUI_METER_RESET">if ZacUI_MeterReset then ZacUI_MeterReset() end</Binding>
 </Bindings>

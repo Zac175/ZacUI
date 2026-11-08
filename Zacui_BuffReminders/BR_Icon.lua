@@ -67,6 +67,48 @@ end
 Icon.SpecOf = SpecOf
 
 -- ============================================================
+-- THE MATCH PASS (2026-11-07, zui_tests/MATCH_BARS_1107.md; ZacUI look
+-- only): the reference UI's reminder icons - full opacity, the icon in
+-- full colour while it warns (the icon showing IS the warning; the ring
+-- keeps its warning colour), every text a crisp outline with no shadow,
+-- the buff's short name 12 px under the icon, 14 px between icons. The
+-- settings are saved as they are read, so a value still at the shipped
+-- number (opacity 0.7, the shadowed fonts) draws these; anything set by
+-- hand is the player's; the other looks draw what they drew.
+-- ============================================================
+local function HDOn()
+    local L = ns.Look
+    return (L and L.Is and L.Is("buffrem", "zacui")) and true or false
+end
+Icon.HDOn = HDOn
+Icon.HD_LAYOUT_DEF = { grow = "RIGHT", spacingX = 14, spacingY = 14 }
+Icon.SHORT = { battleshout = "Shout", trueshot = "Trueshot", intellect = "Intellect", fortitude = "Fortitude",
+    spirit = "Spirit", shadowprot = "Shadow", motw = "Wild", thorns = "Thorns", soulstone = "Soulstone" }
+-- what an icon setting draws at
+function Icon.Opacity(ic)
+    local o = tonumber(ic and ic.opacity) or 0.7
+    if o == 0.7 and HDOn() then return 1 end
+    return o
+end
+local function ShippedFont(spec, size)
+    return type(spec) == "table" and spec.face == nil and spec.size == size
+        and (spec.outline == "OUTLINE" or spec.outline == "outline") and spec.shadow == true
+end
+local HD_COUNT = { size = 16, outline = "OUTLINE", shadow = false }
+local HD_NAMES = { size = 12, outline = "OUTLINE", shadow = false }
+function Icon.FontSpec(ic, key)
+    local spec = ic and ic[key]
+    if HDOn() then
+        if key == "countFont" and (spec == nil or ShippedFont(spec, 16)) then return HD_COUNT end
+        if key == "namesFont" and (spec == nil or ShippedFont(spec, 12)) then return HD_NAMES end
+    end
+    return spec
+end
+function Icon.LayoutDefaults()
+    return HDOn() and Icon.HD_LAYOUT_DEF or Icon.LAYOUT_DEF
+end
+
+-- ============================================================
 -- BUILD / STYLE / FILL
 -- ============================================================
 function Icon.New(parent, def, preview)
@@ -77,24 +119,29 @@ function Icon.New(parent, def, preview)
     f.bg:SetAllPoints()
     -- the 1 px border, one strip a side (coloured per state by Fill)
     f.border = {}
+    -- HD polish (2026-11-07, ZacUI's look): the ring OVER the icon (on the
+    -- BORDER layer the icon, drawn over the whole rect, hid it and its
+    -- state colour) and one physical pixel per unit of thickness
+    local hd = ns.Pixel and ns.Pixel.On()
     for _, side in ipairs({ "top", "bottom", "left", "right" }) do
-        local t = f:CreateTexture(nil, "BORDER")
+        local t = f:CreateTexture(nil, hd and "OVERLAY" or "BORDER", nil, hd and 6 or nil)
         t:SetTexture(FLAT)
         if side == "top" then t:SetPoint("TOPLEFT") t:SetPoint("TOPRIGHT") t:SetHeight(1)
         elseif side == "bottom" then t:SetPoint("BOTTOMLEFT") t:SetPoint("BOTTOMRIGHT") t:SetHeight(1)
         elseif side == "left" then t:SetPoint("TOPLEFT") t:SetPoint("BOTTOMLEFT") t:SetWidth(1)
         else t:SetPoint("TOPRIGHT") t:SetPoint("BOTTOMRIGHT") t:SetWidth(1) end
+        if hd then ns.Pixel.Edge(t, side:upper(), f) end
         f.border[side] = t
     end
     local tex = BR.Icon_(def)
     f.icon = f:CreateTexture(nil, "ARTWORK")
     f.icon:SetAllPoints()
     f.icon:SetTexture(tex)
-    f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(f.icon)
     f.desaturate = f:CreateTexture(nil, "ARTWORK", nil, 1)
     f.desaturate:SetAllPoints()
     f.desaturate:SetTexture(tex)
-    f.desaturate:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    ZacUI.Look.CropIcon(f.desaturate)
     f.desaturate:SetDesaturated(true)
     f.desaturate:Hide()
     f.countText = f:CreateFontString(nil, "OVERLAY")
@@ -121,7 +168,7 @@ end
 function Icon.Style(f, ic)
     ic = ic or BR.Icon()
     local size = tonumber(ic.iconSize) or 40
-    local opacity = tonumber(ic.opacity) or 0.7
+    local opacity = Icon.Opacity(ic)
     f:SetSize(size, size)
     local bgC = BR.Color("icon", "background")
     f.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, opacity * 0.7)
@@ -131,14 +178,33 @@ function Icon.Style(f, ic)
     for side, t in pairs(f.border) do
         if bs <= 0 then t:Hide() else
             t:Show()
-            if side == "top" or side == "bottom" then t:SetHeight(bs) else t:SetWidth(bs) end
+            if not (ns.Pixel and ns.Pixel.SetEdgeSize(t, bs)) then
+                if side == "top" or side == "bottom" then t:SetHeight(bs) else t:SetWidth(bs) end
+            end
         end
     end
-    ns.ApplyFontSpec(f.countText, ic.countFont, BR.DEFAULTS.icon.countFont)
-    -- the count has always worn a heavier 2 px shadow
-    local cs = type(ic.countFont) == "table" and ic.countFont.shadow
+    local hd = HDOn()
+    local cspec = Icon.FontSpec(ic, "countFont")
+    ns.ApplyFontSpec(f.countText, cspec, BR.DEFAULTS.icon.countFont)
+    -- the count has always worn a heavier 2 px shadow (not the ZacUI look's)
+    local cs = type(cspec) == "table" and cspec.shadow
     if cs == nil or cs then f.countText:SetShadowOffset(2, -2) end
-    ns.ApplyFontSpec(f.namesText, ic.namesFont, BR.DEFAULTS.icon.namesFont)
+    ns.ApplyFontSpec(f.namesText, Icon.FontSpec(ic, "namesFont"), BR.DEFAULTS.icon.namesFont)
+    if hd then
+        -- the short name under the icon (made only under the ZacUI look)
+        if not f.label then
+            f.label = f:CreateFontString(nil, "OVERLAY")
+            f.label:SetPoint("TOP", f, "BOTTOM", 0, -5)
+            f.label:SetJustifyH("CENTER")
+        end
+        ns.ApplyFontSpec(f.label, nil, HD_NAMES)
+        local def = f.def
+        f.label:SetText((def and (Icon.SHORT[def.key] or (def.label and def.label:match("(%S+)$")))) or "")
+        f.label:SetTextColor(1, 1, 1, 1)
+        f.label:Show()
+    elseif f.label then
+        f.label:Hide()
+    end
     ns.ApplyAnchor(f.countText, SpecOf(ic, "count"), Icon.COUNT_DEF, f._to)
     local iconSpec = SpecOf(ic, "icon")
     local _, two = ns.ApplyAnchor(f.icon, iconSpec, Icon.ICON_DEF, f._to)
@@ -155,8 +221,11 @@ end
 -- one state: warn (bool), the count text, the names (or nil)
 function Icon.Fill(f, warn, text, names)
     local tc = BR.Color("icon", warn and "missingText" or "allBuffedText")
-    f.icon:SetShown(not warn)
-    f.desaturate:SetShown(warn and true or false)
+    -- (the ZacUI look: in colour while it warns - match pass)
+    local grey = warn and not HDOn()
+    f._zWarn = warn and true or false
+    f.icon:SetShown(not grey)
+    f.desaturate:SetShown(grey and true or false)
     f.countText:SetText(text or "")
     f.countText:SetTextColor(tc.r, tc.g, tc.b, tc.a or 1)
     local bc = BR.Color("icon", warn and "missingBorder" or "normalBorder")
@@ -322,7 +391,7 @@ Icon.LAYOUT_DEF = { grow = "RIGHT", spacingX = 4, spacingY = 4 }
 local order = {}
 function Icon.Arrange(host, list)
     local ic = BR.Icon()
-    local w, h = ns.LayoutItems(list, #list, host, ic.layout, Icon.LAYOUT_DEF)
+    local w, h = ns.LayoutItems(list, #list, host, ic.layout, Icon.LayoutDefaults())
     local size = tonumber(ic.iconSize) or 40
     host:SetSize(math.max(size, w or size), math.max(size, h or size))
 end
@@ -365,7 +434,17 @@ function Proxy:SetHeight(h) self.f:SetHeight(h) end
 function Proxy:ClearAllPoints() self.f:ClearAllPoints() end
 function Proxy:SetPoint(...) self.f:SetPoint(...) end
 local proxies = setmetatable({}, { __mode = "k" })
+-- the shown icons in the order dragged in the preview (icon.order: buff
+-- keys; nil = the list as it is, not copied)
+local function FrameKey(f) return f and f.def and f.def.key end
+function Icon.Ordered(frames)
+    local o = BR.Icon().order
+    if type(o) ~= "table" or not ns.OrderedList then return frames end
+    return ns.OrderedList(frames, o, FrameKey)
+end
+
 function Icon.Place(host, frames)
+    frames = Icon.Ordered(frames)
     local list = {}
     for i, f in ipairs(frames) do
         local p = proxies[f]
@@ -448,6 +527,9 @@ UpdateInner = function()
             if icons[def.key] then decided[#decided + 1] = { f = icons[def.key], on = false } end
         end
     end
+    -- in the saved order (icon.order) before "most shown" keeps the first
+    local ord = Icon.Ordered(order)
+    if ord ~= order then for i = 1, #ord do order[i] = ord[i] end end
     -- "most shown" (icon.layout.max): the ones past it go
     local mx = type(BR.Icon().layout) == "table" and tonumber(BR.Icon().layout.max)
     if mx and mx >= 1 and #order > mx then

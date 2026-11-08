@@ -274,7 +274,8 @@ local function SpecHost(parent, opts, want)
         local t = UI.Font(host, F.LABEL, { text = opts.label })
         t:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
         host.title = t
-        top = 18
+        -- (as tall as the title: the settings window's type is larger)
+        top = math.max(18, math.ceil(t:GetStringHeight() or 14) + 4)
     end
     local body = CreateFrame("Frame", nil, host)
     body:SetPoint("TOPLEFT", host, "TOPLEFT", 0, -top)
@@ -664,7 +665,8 @@ function UI.StateEditor(parent, opts)
         local t = UI.Font(host, F.LABEL, { text = opts.label })
         t:SetPoint("TOPLEFT", host, "TOPLEFT", 0, 0)
         host.title = t
-        top = 18
+        -- (as tall as the title: the settings window's type is larger)
+        top = math.max(18, math.ceil(t:GetStringHeight() or 14) + 4)
     end
     local function All() local t = opts.get and opts.get() return type(t) == "table" and t or nil end
     local function DefOf(field)
@@ -1018,4 +1020,85 @@ function UI.FrameElementGroup(card, o, W)
         Add(g.chrome)
     end
     return Done()
+end
+
+-- ============================================================
+-- APPLY TO ALL (finish pass)
+-- ============================================================
+-- One bar's / one frame's / one plate side's settings onto the others,
+-- a section at a time: a button whose menu lists the sections, then a
+-- confirm, then ONE write (each key deep-copied), then opts.onDone (the
+-- page re-applies and rebuilds). What a thing is and where it sits never
+-- travels: the caller's sections name only look keys. A target takes a
+-- key only when it has that setting (accepts, or a value there already).
+--   UI.ApplyToAll(parent, {
+--       text = "Apply to all bars...", width = 130,
+--       what = function() return "Bar 1" end,          -- the source's name
+--       source = function() return tbl end,
+--       targets = function() return { { label, tbl, accepts = fn(key) | nil }, ... } end,
+--       sections = { { label = "Look", hint = "size, border...", keys = { ... } }, ... },
+--       allLabel = "All four",                          -- nil: no "everything" row
+--       onto = function(n) return "the other " .. n .. " bars" end,
+--       onDone = function() end })
+-- Returns the button (UI.Button).
+function UI.ApplyToAll(parent, o)
+    o = o or {}
+    local Copy = ns.CopySetting or function(v) return v end
+    local function Run(keys, label)
+        local src = o.source and o.source()
+        if type(src) ~= "table" then return 0 end
+        local n = 0
+        for _, t in ipairs(o.targets and o.targets() or {}) do
+            local dst = t.tbl
+            if type(dst) == "table" and dst ~= src then
+                local took = false
+                for _, k in ipairs(keys) do
+                    local ok = (t.accepts and t.accepts(k)) or (not t.accepts and dst[k] ~= nil)
+                    if ok then
+                        dst[k] = Copy(src[k])
+                        took = true
+                    end
+                end
+                if took then n = n + 1 end
+            end
+        end
+        if ns.SettingsChanged then pcall(ns.SettingsChanged, "applyToAll") end
+        if o.onDone then o.onDone(n, label) end
+        return n
+    end
+    local function Ask(keys, label)
+        local targets = o.targets and o.targets() or {}
+        local names = {}
+        for _, t in ipairs(targets) do names[#names + 1] = t.label end
+        local who = o.what and o.what() or "This one"
+        local onto = o.onto and o.onto(#targets) or (#names <= 4 and table.concat(names, ", ") or (#names .. " others"))
+        UI.Confirm({
+            title = o.title or "Apply to all",
+            text = who .. "'s " .. label:lower() .. " goes onto " .. onto .. ". Their own "
+                .. label:lower() .. " is replaced; where they sit and when they show stay theirs.",
+            acceptText = "Apply",
+            onAccept = function() Run(keys, label) end,
+        })
+    end
+    local b
+    b = UI.Button(parent, o.text or "Apply to all...", { width = o.width or 130,
+        tooltip = o.tooltip or "Copies a part of these settings onto the others, after you confirm.",
+        onClick = function()
+            local who = o.what and o.what() or "This one"
+            local items = { { text = "Copy " .. who .. "'s ...", isTitle = true } }
+            local all = {}
+            for _, s in ipairs(o.sections or {}) do
+                for _, k in ipairs(s.keys) do all[#all + 1] = k end
+                local sec = s
+                items[#items + 1] = { text = sec.label .. (sec.hint and (" (" .. sec.hint .. ")") or ""),
+                    func = function() Ask(sec.keys, sec.label) end }
+            end
+            if o.allLabel then
+                items[#items + 1] = { text = o.allLabel, func = function() Ask(all, o.allWord or "settings") end }
+            end
+            b._zItems = items
+            if UI.ContextMenu then UI.ContextMenu(items, { anchor = b }) end
+        end })
+    b._zRun = Run
+    return b
 end

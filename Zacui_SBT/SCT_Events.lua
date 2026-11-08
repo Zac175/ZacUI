@@ -591,6 +591,7 @@ local lastCP = 0
 local function CheckCombo()
     if not (GetComboPoints and UnitExists("target")) then lastCP = 0 return end
     local ok, cp = pcall(GetComboPoints, "player", "target")
+    if ok and ns.IsSecret(cp) then ok = false end   -- (hidden on WoW Forever)
     cp = ok and tonumber(cp) or 0
     if cp >= 5 and lastCP < 5 then Show("n_cp_full", { amount = cp }) end
     lastCP = cp

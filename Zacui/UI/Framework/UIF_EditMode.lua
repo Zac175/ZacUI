@@ -1,40 +1,56 @@
 -- UIF_EditMode - one button that puts EVERY ZacUI placeholder on screen
 -- at once over a dimmed, gridded world, with a floating control box to
--- park elements, reset them and lock when done. The Movers page still
--- works one element at a time; this is the "arrange the whole HUD"
--- pass, the way Driev's Essentials' Edit Mode button did it.
--- Part of ZacUI; load order is set by the TOC.
+-- find, park, snap, attach, match and reset elements, undo a move, and
+-- leave either keeping the changes or putting everything back.
+-- Part of ZacUI; load order is set by the TOC (after UIF_EditSession).
 --
 -- WHAT IT MOVES. Everything with a ZacUI-owned position:
---   * the mover registry: loot rolls, buffs, minimap (each skipped, with
---     the usual one-line notice, when Edit Mode or the client owns it)
---     and every class HUD anchor and the drink ticker
+--   * the mover registry: loot rolls, buffs, minimap (each greyed, with
+--     the reason, when Blizzard's Edit Mode or the client owns it) and
+--     every class HUD anchor and the drink ticker
 --   * the tooltip anchor (Blz_Tooltip's, shown silently)
 --   * whatever the parts contribute through ns.EditModeProviders: the
---     action bars, and the unit frames (player, target, party, raid -
---     their own move mode, with the party and raid previews)
+--     action bars, the scrolling text areas and the unit frames (player,
+--     target, party, raid - their own move mode, with the previews)
+--   * the open meter windows, unlocked for the duration and put back to
+--     whatever lock state they had (and told through ns.WatchEditMode)
 --   Readycheck's frames are NOT part of this: it has an Edit Mode of its
 --   own, and the two on screen at once was one pile of boxes too many.
---   * the open meter windows, unlocked for the duration and put back to
---     whatever lock state they had
+--
+-- A MOVABLE is a table: key, label, show(), hide(), and optionally
+--   reset(silent)        back to its default spot
+--   frames() / content() the boxes to outline / the real frames (faded
+--                        while it is hidden here; what a link follows)
+--   blocked()            Blizzard's Edit Mode or the client owns it
+--   offscreen()          pushed off the screen (the list says so)
+--   snapshot() / restore(v)   its spot of record, for undo and Cancel
+--   size = { set(w, h) }      Match width / height can set its size
+--   page                 the settings page that styles it
+--   state()              -> tag, reason when it is off here (greyed)
+--   follower             a ZacUI mover: it can be attached to another
+--
+-- LEAVING. Save & Exit keeps everything (it is written as it happens);
+-- Cancel puts back every frame moved in this pass (UIF_EditSession);
+-- the X and Escape are Save & Exit, so a stray key never throws work
+-- away. Ctrl+Z undoes the last move. A pull ends the pass (keeping it):
+-- frames that hold secure buttons cannot move in a fight, and Edit Mode
+-- will not open in one.
+--
+-- SNAPPING. While a box is dragged its edges and centre snap to the
+-- nearest other element's edges and centres and to the screen's middle
+-- and edges (within a few units), live: the guide line that matched turns
+-- green and the element it snapped to lights. Shift keeps one direction,
+-- Alt places freely, the box's own toggle turns snapping off.
 --
 -- HIDING. Untick an element (or Hide all) and it is out of the way for
--- the pass: its box goes and, where the movable names them through an
--- optional `content` function, the real frames are faded to nothing, so
--- what is left is easy to reach. Locking fades them all back in. The
--- ticks are remembered (editMode.parked) for the next pass.
--- Blizzard's own Edit Mode systems are NOT fought here, for the reasons
--- in UIF_Movers: on 11509 they win every layout pass.
+-- the pass: its box goes and, where the movable names them through
+-- `content`, the real frames are faded to nothing. The ticks are
+-- remembered (editMode.parked). The filter box hides, for the moment,
+-- every element whose name does not hold what was typed.
 --
--- THE OVERLAY is BACKGROUND strata: it dims the world and draws the
--- grid UNDER every UI frame, so the things you are placing stay at full
--- brightness instead of being dimmed with everything else. Mouse stays
--- off on it, so the camera still turns.
---
--- THE CONTROL BOX is a ZacUI window: draggable by its title, closes on
--- Escape, remembers where you left it. Closing it by any route (Lock,
--- the X, Escape) is the exit - one path, so nothing can be left on
--- screen half-dressed.
+-- THE OVERLAY is BACKGROUND strata: it dims the world and draws the grid
+-- UNDER every UI frame, one physical pixel wide. Mouse stays off on it,
+-- so the camera still turns.
 
 local ADDON_NAME, ns = ...
 
@@ -48,17 +64,21 @@ local Print = ns.Print
 local ResetMover = ns.ResetMover
 local ShowMover = ns.ShowMover
 local UI = ns.UI
+local Kit = ns.MoverKit
+local ES = ns.EditSession
 
 local M, F = UI.M, UI.F
+local ICONS = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\"
 
 -- ============================================================
--- SETTINGS
+-- SETTINGS (written only once Edit Mode has been opened)
 -- ============================================================
 local function DB()
     ZacUIDB.editMode = ZacUIDB.editMode or {}
     local d = ZacUIDB.editMode
     if d.dim == nil then d.dim = 55 end       -- overlay darkness, percent
     if d.grid == nil then d.grid = true end
+    if d.snap == nil then d.snap = true end
     d.parked = d.parked or {}                 -- [key] = true: hidden in edit mode
     return d
 end
@@ -69,23 +89,66 @@ end
 -- drop out rather than error.
 -- ============================================================
 ns.EditModeProviders = ns.EditModeProviders or {}
+
+-- a registry mover that is off here: why, in a few words and a sentence
+local function RegistryState(m)
+    local f = m.getFrame()
+    if f and MoverBlocked(m.key, f) then
+        return "Blizzard's Edit Mode",
+            "On this game version Blizzard's own Edit Mode places this. Move it there: Esc > Edit Mode."
+    end
+    if m.off then
+        local ok, why = pcall(m.off)
+        if ok and why then return "off", tostring(why) end
+    end
+    if not f then
+        return "off", "It is switched off, so there is nothing on screen to place. Turn it on in its settings, then it can be moved here."
+    end
+    return nil
+end
+
+local function MeterWin(w)
+    local Meter = ns.Meter
+    for _, win in ipairs(Meter and Meter.windowFrames or {}) do
+        if win.settings == w then return win end
+    end
+    return nil
+end
+
+local function PlaceMeter(w)
+    local win = MeterWin(w)
+    local f = win and win.frame
+    if not f then return end
+    f:ClearAllPoints()
+    f:SetPoint(w.point or "CENTER", UIParent, w.point or "CENTER", w.x or 0, w.y or 0)
+    if w.w and w.h then f:SetSize(w.w, w.h) end
+    local Meter = ns.Meter
+    if Meter.LayoutRows then pcall(Meter.LayoutRows, win) end
+    if Meter.RefreshWindow then pcall(Meter.RefreshWindow, win, true) end
+end
+
 local function Movables()
     local list = {}
     for _, m in ipairs(MOVERS) do
         local key = m.key
         list[#list + 1] = {
-            key = key, label = m.label,
+            key = key, label = m.label, follower = true,
             blocked = function() return MoverBlocked(key, m.getFrame()) end,
             show = function() ShowMover(key) end,
             hide = function() HideMover(key) end,
             reset = function(silent) ResetMover(key, silent) end,
             offscreen = function() return ns.MoverOffScreen and ns.MoverOffScreen(key) end,
-            frames = function() local p = _G["ZacUIMover_" .. key] return p and { p } or nil end,
+            frames = function() local p = ns.MoverProxy and ns.MoverProxy(key) return p and { p } or nil end,
             content = function()
                 local f = m.getFrame()
                 if not f or MoverBlocked(key, f) then return nil end
                 return { f }
             end,
+            snapshot = function() return ns.MoverSnapshot(key) end,
+            restore = function(v) ns.MoverRestore(key, v) end,
+            size = m.size,
+            page = m.page,
+            state = function() return RegistryState(m) end,
         }
     end
     if ns.SetTipMover then
@@ -97,6 +160,12 @@ local function Movables()
             reset = function(silent)
                 if ns.ResetTipPos then ns.ResetTipPos() else ZacUIDB.tooltipPos = nil end
                 if not silent then Print("Tooltip position reset to Blizzard default.") end
+            end,
+            snapshot = function() return ES.Copy(ZacUIDB.tooltipPos) or false end,
+            restore = function(v)
+                ZacUIDB.tooltipPos = v or nil
+                local p = _G.ZacUITooltipMover
+                if p and p._zPlace then p._zPlace() end
             end,
         }
     end
@@ -130,10 +199,54 @@ local function Movables()
                 end,
                 frames = function() local p = _G["ZacUIMeterWindow" .. i] return p and { p } or nil end,
                 content = function() local p = _G["ZacUIMeterWindow" .. i] return p and { p } or nil end,
+                snapshot = function() return { point = w.point, x = w.x, y = w.y, w = w.w, h = w.h } end,
+                restore = function(v)
+                    if type(v) ~= "table" then return end
+                    w.point, w.x, w.y, w.w, w.h = v.point, v.x, v.y, v.w, v.h
+                    PlaceMeter(w)
+                end,
+                size = { set = function(nw, nh)
+                    local win = MeterWin(w)
+                    local f = win and win.frame
+                    local k = 1
+                    if f and f.GetEffectiveScale then
+                        k = (f:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
+                        if k <= 0 then k = 1 end
+                    end
+                    if nw then w.w = math.max(100, nw / k) end
+                    if nh then w.h = math.max(50, nh / k) end
+                    PlaceMeter(w)
+                end },
+                page = "meter",
             }
         end
     end
+    -- a movable whose page this game version does not run says so
+    for _, m in ipairs(list) do
+        if not m.state then
+            local page = ES.PageFor(m)
+            local offId = page and ns.FeatureOffForPage and ns.FeatureOffForPage(page)
+            if offId then
+                local note = ns.FeatureOffNote and ns.FeatureOffNote(offId) or "Not on this game version."
+                m.state = function() return "not on this version", note end
+            end
+        end
+    end
+    table.sort(list, function(a, b) return tostring(a.label):lower() < tostring(b.label):lower() end)
     return list
+end
+
+local function StateOf(m)
+    if m.blocked and m.blocked() then
+        local tag, why = m.state and m.state()
+        return tag or "Blizzard's Edit Mode", why
+            or "On this game version Blizzard's own Edit Mode places this. Move it there: Esc > Edit Mode."
+    end
+    if m.state then
+        local ok, tag, why = pcall(m.state)
+        if ok and tag then return tag, why end
+    end
+    return nil
 end
 
 -- ============================================================
@@ -142,10 +255,20 @@ end
 local overlay
 local GRID = 50
 
+-- UI units in one physical pixel, so the lines are one pixel on any scale
+local function Px()
+    if not GetPhysicalScreenSize then return 1 end
+    local _, ph = GetPhysicalScreenSize()
+    local uh = UIParent:GetHeight()
+    if ph and ph > 0 and uh and uh > 0 then return uh / ph end
+    return 1
+end
+
 local function BuildGrid()
     local w, h = UIParent:GetWidth(), UIParent:GetHeight()
-    if overlay._gridW == w and overlay._gridH == h then return end
-    overlay._gridW, overlay._gridH = w, h
+    local px = Px()
+    if overlay._gridW == w and overlay._gridH == h and overlay._gridPx == px then return end
+    overlay._gridW, overlay._gridH, overlay._gridPx = w, h, px
     overlay.lines = overlay.lines or {}
     local n = 0
     local function line()
@@ -160,16 +283,30 @@ local function BuildGrid()
         t:ClearAllPoints()
         return t
     end
-    for i = 0, math.ceil(w / GRID) do
-        local t = line()
-        t:SetPoint("TOPLEFT", overlay, "TOPLEFT", i * GRID, 0)
-        t:SetSize(1, h)
+    -- from the middle out, so the centre lines sit exactly on the centre
+    local cx, cy = w / 2, h / 2
+    local cols = math.ceil(cx / GRID)
+    local rows = math.ceil(cy / GRID)
+    overlay._centreV, overlay._centreH = nil, nil
+    for i = -cols, cols do
+        local x = cx + i * GRID
+        if x >= 0 and x <= w then
+            local t = line()
+            t:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", x - px / 2, 0)
+            t:SetSize(px, h)
+            t._zCentre = (i == 0)
+        end
     end
-    for i = 0, math.ceil(h / GRID) do
-        local t = line()
-        t:SetPoint("TOPLEFT", overlay, "TOPLEFT", 0, -(i * GRID))
-        t:SetSize(w, 1)
+    for i = -rows, rows do
+        local y = cy + i * GRID
+        if y >= 0 and y <= h then
+            local t = line()
+            t:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", 0, y - px / 2)
+            t:SetSize(w, px)
+            t._zCentre = (i == 0)
+        end
     end
+    overlay._nLines = n
     for i = n + 1, #overlay.lines do overlay.lines[i]:Hide() end
 end
 
@@ -179,12 +316,9 @@ local function PaintOverlay()
     overlay.bg:SetVertexColor(0, 0, 0, (d.dim or 55) / 100)
     -- the centre lines a touch brighter, so the middle of the screen is
     -- findable at a glance
-    local cx = math.floor(overlay._gridW / 2 / GRID)
-    local cy = math.floor(overlay._gridH / 2 / GRID)
-    local cols = math.ceil(overlay._gridW / GRID) + 1
-    for i, t in ipairs(overlay.lines) do
-        local centre = (i - 1 == cx) or (i - 1 - cols == cy)
-        t:SetVertexColor(1, 1, 1, centre and 0.18 or 0.07)
+    for i = 1, overlay._nLines or 0 do
+        local t = overlay.lines[i]
+        t:SetVertexColor(1, 1, 1, t._zCentre and 0.18 or 0.07)
         t:SetShown(d.grid and true or false)
     end
 end
@@ -211,13 +345,28 @@ end
 -- ============================================================
 local active = false
 local current = {}          -- the movables of this pass
+local byKey = {}            -- [key] = movable
 local reopenConfig = false
+local openPage              -- a page to open on the way out (its settings)
 local bar
+local filterText = ""
+local filtered = {}         -- [key] = true: hidden by the filter just now
+local focusKeys, focusUntil = {}, nil  -- what a page sent us to, and its flash
 
 local function IsParked(key) return DB().parked[key] == true end
+local function IsGrey(m) return StateOf(m) ~= nil end
+
+local function Matches(m)
+    if filterText == "" then return true end
+    local label = tostring(m.label or ""):lower()
+    for word in filterText:gmatch("%S+") do
+        if not label:find(word, 1, true) then return false end
+    end
+    return true
+end
 
 local function ShowMovable(m)
-    if m.blocked and m.blocked() then return end
+    if IsGrey(m) or filtered[m.key] then return end
     m.show()
 end
 
@@ -288,43 +437,33 @@ local function SetParked(m, park)
     end
 end
 
-local Exit  -- forward: the bar's OnHide calls it
-local FillBar  -- forward: Show all / Hide all refill the list
+local Exit       -- forward: the bar's OnHide calls it
+local FillBar    -- forward: Show all / Hide all refill the list
+local RefreshBar -- forward: the count, the undo button, the moved dots
 
 -- ============================================================
--- OUTLINES AND GUIDES
+-- OUTLINES, GUIDES AND SNAPPING
 -- ============================================================
--- Two things to line elements up with, both drawn here so every element
--- gets them the same way whatever system owns it:
---
 --   OUTLINES  a one-pixel box round everything that can be moved, with a
 --             tick at the middle of each side. A party or raid block gets
---             ONE box round the whole block.
+--             ONE box round the whole block. The box being dragged or
+--             pointed at is white; the one a drag snapped to, green.
 --   GUIDES    point at an element (or drag it) and six lines run the width
 --             and height of the screen from its left edge, centre and
 --             right edge, and its top, centre and bottom. A line turns
 --             green the moment it lies on the same edge or centre of any
---             other element, or on the centre of the screen. A small
---             readout gives the element's offset from screen centre and
---             its size.
---
--- A movable says what to outline with an optional `frames` function: a
--- list of frames, or { union = { frames } } for one box round several.
+--             other element, or on the centre of the screen.
 -- Nothing is anchored to anybody's frame - the boxes are placed from each
 -- frame's rect, read every frame while Edit Mode is open (it cannot be
--- open in combat). The guides do not snap; they tell you when you are on.
-local guides, lines, readout
+-- open in combat).
+local guides, lines, readout, chip
 local outlines, targets = {}, {}
 local activeId
 local GOOD = { 0.3, 1, 0.4 }
-
--- UI units in one physical pixel, so the lines are one pixel on any scale
-local function Px()
-    local _, ph = GetPhysicalScreenSize()
-    local uh = UIParent:GetHeight()
-    if ph and ph > 0 and uh and uh > 0 then return uh / ph end
-    return 1
-end
+local SNAP = 8               -- UI units: how close counts as "on"
+local snapState = {}         -- [handle] = the target it snapped to (or nil)
+local picking                -- { kind = "attach" | "w" | "h", m = movable }
+local underTarget            -- the target under the cursor this frame
 
 -- left, right, top, bottom of a frame in UIParent units; nil when it is
 -- not on screen
@@ -354,21 +493,86 @@ end
 local function CollectTargets()
     wipe(targets)
     for _, m in ipairs(current) do
-        if m.frames and not IsParked(m.key) and not (m.blocked and m.blocked()) then
+        if m.frames and not IsParked(m.key) and not filtered[m.key] and not IsGrey(m) then
             local ok, list = pcall(m.frames)
             if ok and type(list) == "table" then
                 for _, item in ipairs(list) do
                     if type(item) == "table" and rawget(item, "union") then
                         -- a union is known by its first frame, so it is
                         -- the same target from one collection to the next
-                        targets[#targets + 1] = { union = item.union, id = item.union[1] }
+                        targets[#targets + 1] = { union = item.union, id = item.union[1], key = m.key }
                     elseif item then
-                        targets[#targets + 1] = { frame = item, id = item }
+                        targets[#targets + 1] = { frame = item, id = item, key = m.key }
                     end
                 end
             end
         end
     end
+end
+
+-- the movable a drag handle belongs to
+local function MovableOf(h)
+    for _, t in ipairs(targets) do
+        if t.frame == h then return byKey[t.key] end
+    end
+    for _, m in ipairs(current) do
+        local ok, list = pcall(m.frames or function() end)
+        if ok and type(list) == "table" then
+            for _, f in ipairs(list) do if f == h then return m end end
+        end
+    end
+    return nil
+end
+
+-- Kit.edit.snap: the dragged box's left / bottom (UIParent units), moved
+-- onto the nearest edge or centre within SNAP on each axis
+local function Snap(h, l, b, w, ht)
+    snapState[h] = nil
+    rawset(h, "_zSnapped", nil)
+    if not DB().snap or (IsAltKeyDown and IsAltKeyDown()) then return l, b end
+    local own = MovableOf(h)
+    local skip = {}
+    if own then
+        skip[own.key] = true
+        for _, k in ipairs(ES.FollowersOf(own.key)) do skip[k] = true end
+    end
+    local sw, sh = UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
+    local mx = { l, l + w / 2, l + w }
+    local my = { b, b + ht / 2, b + ht }
+    local bestX, bestY = SNAP + 0.001, SNAP + 0.001
+    local dxBest, dyBest, tx, ty = 0, 0, nil, nil
+    local function TryX(v, t)
+        for i = 1, 3 do
+            local d = v - mx[i]
+            if math.abs(d) < bestX then bestX, dxBest, tx = math.abs(d), d, t end
+        end
+    end
+    local function TryY(v, t)
+        for i = 1, 3 do
+            local d = v - my[i]
+            if math.abs(d) < bestY then bestY, dyBest, ty = math.abs(d), d, t end
+        end
+    end
+    -- the screen: edges and middle
+    TryX(0, false) TryX(sw / 2, false) TryX(sw, false)
+    TryY(0, false) TryY(sh / 2, false) TryY(sh, false)
+    for _, t in ipairs(targets) do
+        if t.frame ~= h and not skip[t.key] then
+            local tl, tr, tt, tb = RectOfTarget(t)
+            if tl then
+                TryX(tl, t) TryX((tl + tr) / 2, t) TryX(tr, t)
+                TryY(tb, t) TryY((tt + tb) / 2, t) TryY(tt, t)
+            end
+        end
+    end
+    if bestX <= SNAP then l = l + dxBest end
+    if bestY <= SNAP then b = b + dyBest end
+    local hit = (bestX <= SNAP and tx) or (bestY <= SNAP and ty) or nil
+    if bestX <= SNAP or bestY <= SNAP then
+        rawset(h, "_zSnapped", true)
+        snapState[h] = hit or "screen"
+    end
+    return l, b
 end
 
 local function Outline(i)
@@ -386,12 +590,13 @@ local function Outline(i)
         t:SetTexture(FLAT)
         o.ticks[n] = t
     end
-    function o:Dress(px, r, g, b, a)
+    function o:Dress(px, r, g, b, a, thick)
+        local w = px * (thick or 1)
         local top, bottom, left, right = self.edges[1], self.edges[2], self.edges[3], self.edges[4]
-        top:ClearAllPoints() top:SetPoint("TOPLEFT") top:SetPoint("TOPRIGHT") top:SetHeight(px)
-        bottom:ClearAllPoints() bottom:SetPoint("BOTTOMLEFT") bottom:SetPoint("BOTTOMRIGHT") bottom:SetHeight(px)
-        left:ClearAllPoints() left:SetPoint("TOPLEFT") left:SetPoint("BOTTOMLEFT") left:SetWidth(px)
-        right:ClearAllPoints() right:SetPoint("TOPRIGHT") right:SetPoint("BOTTOMRIGHT") right:SetWidth(px)
+        top:ClearAllPoints() top:SetPoint("TOPLEFT") top:SetPoint("TOPRIGHT") top:SetHeight(w)
+        bottom:ClearAllPoints() bottom:SetPoint("BOTTOMLEFT") bottom:SetPoint("BOTTOMRIGHT") bottom:SetHeight(w)
+        left:ClearAllPoints() left:SetPoint("TOPLEFT") left:SetPoint("BOTTOMLEFT") left:SetWidth(w)
+        right:ClearAllPoints() right:SetPoint("TOPRIGHT") right:SetPoint("BOTTOMRIGHT") right:SetWidth(w)
         -- the middle of each side, as a short stroke across the edge
         local len = px * 7
         local tt, tb, tl, tr = self.ticks[1], self.ticks[2], self.ticks[3], self.ticks[4]
@@ -408,14 +613,34 @@ local function Outline(i)
     return o
 end
 
+local function LeftDown() return IsMouseButtonDown ~= nil and IsMouseButtonDown("LeftButton") and true or false end
+
 local function Near(a, b, tol) return a and b and math.abs(a - b) <= tol end
 
+-- the handle a drag is happening on (the kit's own drag), if any
+local function Dragged()
+    for h in pairs(snapState) do
+        if rawget(h, "_zDragging") then return h end
+    end
+    return nil
+end
+
+local checkAcc = 0
 local function GuideTick(_, dt)
     if next(faded) then KeepFaded() end
     guides._acc = (guides._acc or 1) + dt
     if guides._acc >= 0.5 then
         guides._acc = 0
         CollectTargets()
+    end
+    -- frames attached to a moving frame follow it, live
+    ES.FollowAll()
+    -- frames that drag themselves (unit frames, meter windows) and the
+    -- list's own buttons are noticed here, between moves
+    checkAcc = checkAcc + dt
+    if checkAcc >= 0.25 and not LeftDown() then
+        checkAcc = 0
+        ES.Check()
     end
     local px = Px()
     -- "on" means on the same pixel: half a pixel either way, so green is
@@ -425,10 +650,13 @@ local function GuideTick(_, dt)
     local mx, my = GetCursorPosition()
     mx, my = mx / us, my / us
     local a = Col("accent")
+    local now = GetTime and GetTime() or 0
 
     -- place every box; find what the cursor is on (the smallest, so an
     -- element inside a bigger one can still be picked)
     local under, underArea, held
+    local selected = Kit.selected
+    local selT
     for i, t in ipairs(targets) do
         local l, r, top, b = RectOfTarget(t)
         t.l, t.r, t.t, t.b = l, r, top, b
@@ -439,6 +667,7 @@ local function GuideTick(_, dt)
             o:SetSize(r - l, top - b)
             o:Show()
             if t.id == activeId then held = t end
+            if selected and t.frame == selected then selT = t end
             if mx >= l and mx <= r and my >= b and my <= top then
                 local area = (r - l) * (top - b)
                 if not underArea or area < underArea then under, underArea = t, area end
@@ -448,17 +677,44 @@ local function GuideTick(_, dt)
         end
     end
     for i = #targets + 1, #outlines do outlines[i]:Hide() end
+    underTarget = under
 
     -- while the button is down the element being dragged keeps the guides,
     -- even if the cursor crosses something else on the way
-    local active = (held and IsMouseButtonDown("LeftButton")) and held or under
+    local active = (held and LeftDown()) and held or under
+    if picking then active = nil end
     activeId = active and active.id or nil
 
+    local dragging = Dragged()
+    local snappedTo = dragging and snapState[dragging]
+    local pulse = (focusUntil and now < focusUntil) and (0.5 + 0.5 * math.abs(math.sin(now * 6))) or nil
     for i, t in ipairs(targets) do
         if t.l then
-            if t == active then outlines[i]:Dress(px, 1, 1, 1, 1)
-            else outlines[i]:Dress(px, a.r, a.g, a.b, 0.9) end
+            local o = outlines[i]
+            if picking and t == under and t.key ~= picking.m.key then
+                o:Dress(px, GOOD[1], GOOD[2], GOOD[3], 1, 2)
+            elseif type(snappedTo) == "table" and t == snappedTo then
+                o:Dress(px, GOOD[1], GOOD[2], GOOD[3], 1, 2)
+            elseif pulse and focusKeys[t.key] then
+                o:Dress(px, 1, 1, 1, pulse, 2)
+            elseif t == active or t == selT then
+                o:Dress(px, 1, 1, 1, 1)
+            else
+                o:Dress(px, a.r, a.g, a.b, 0.9)
+            end
         end
+    end
+
+    -- the snap chip: what the dragged box landed on
+    if dragging and snappedTo then
+        local name = (snappedTo == "screen") and "the screen" or (byKey[snappedTo.key] and byKey[snappedTo.key].label) or ""
+        chip.text:SetText("Snapped to " .. name)
+        chip:SetWidth(chip.text:GetStringWidth() + 12)
+        chip:ClearAllPoints()
+        chip:SetPoint("LEFT", dragging, "RIGHT", 8, 0)
+        chip:Show()
+    else
+        chip:Hide()
     end
 
     if not active then
@@ -507,7 +763,7 @@ local function GuideTick(_, dt)
 
     -- a ZacUI handle shows its own readout (its spot in its own numbers,
     -- the same ones its settings show); this one is for everything else
-    if active.frame and ns.MoverKit and ns.MoverKit.IsDressed(active.frame) then
+    if active.frame and Kit.IsDressed(active.frame) then
         readout:Hide()
         return
     end
@@ -542,6 +798,12 @@ local function ShowGuides()
         end
         readout = UI.Font(guides, F.SMALL, { text = "", cat = "text", key = "normal" })
         readout:Hide()
+        chip = CreateFrame("Frame", nil, guides)
+        chip:SetHeight(16)
+        UI.Fill(chip, "tooltip", "bg")
+        chip.text = UI.Font(chip, F.SMALL, { text = "", cat = "text", key = "green" })
+        chip.text:SetPoint("LEFT", 6, 0)
+        chip:Hide()
         guides:SetScript("OnUpdate", GuideTick)
     end
     guides._acc = 1          -- collect on the first tick
@@ -552,16 +814,176 @@ end
 local function HideGuides()
     if guides then guides:Hide() end
     wipe(targets)
+    wipe(snapState)
     activeId = nil
+    underTarget = nil
+end
+
+-- ============================================================
+-- PICKING ANOTHER FRAME (Attach to... / Match width... / Match height...)
+-- A click anywhere is caught; the element under the cursor (lit green)
+-- is the one picked. Right-click or Escape gives up.
+-- ============================================================
+local catcher, banner
+
+local function StopPick()
+    picking = nil
+    if catcher then catcher:Hide() end
+    if banner then banner:Hide() end
+end
+
+local PICK_TEXT = {
+    attach = "Click the frame %s should follow.",
+    w = "Click the frame whose width %s should take.",
+    h = "Click the frame whose height %s should take.",
+}
+
+local function FinishPick()
+    local p = picking
+    local t = underTarget
+    StopPick()
+    if not (p and t) then return end
+    local other = byKey[t.key]
+    if not other or other.key == p.m.key then return end
+    local ok, why
+    if p.kind == "attach" then
+        ok, why = ES.Attach(p.m.key, other)
+        if ok then Print(p.m.label .. " now follows " .. other.label .. ".") end
+    else
+        ok, why = ES.Match(p.m, other, p.kind)
+        if ok then ES.Check() end
+    end
+    if not ok and why then Print(p.m.label .. ": " .. why .. ".") end
+    ES.Check()
+    if RefreshBar then RefreshBar() end
+end
+
+local function StartPick(kind, m)
+    if not catcher then
+        catcher = CreateFrame("Frame", "ZacUIEditPick", UIParent)
+        catcher:SetAllPoints(UIParent)
+        catcher:SetFrameStrata("FULLSCREEN_DIALOG")
+        catcher:SetFrameLevel(50)
+        catcher:EnableMouse(true)
+        catcher:SetScript("OnMouseUp", function(_, button)
+            if button == "RightButton" then StopPick() else FinishPick() end
+        end)
+        banner = CreateFrame("Frame", nil, UIParent)
+        banner:SetFrameStrata("TOOLTIP")
+        banner:SetHeight(28)
+        UI.Fill(banner, "tooltip", "bg")
+        UI.Border(banner, "ui", "accent")
+        banner.text = UI.Font(banner, F.LABEL, { text = "", cat = "text", key = "normal" })
+        banner.text:SetPoint("CENTER", 0, 0)
+        banner:SetPoint("TOP", UIParent, "TOP", 0, -8)
+    end
+    picking = { kind = kind, m = m }
+    banner.text:SetText(PICK_TEXT[kind]:format(m.label) .. "  |cff999999Right-click or Escape: never mind.|r")
+    banner:SetWidth(banner.text:GetStringWidth() + 28)
+    catcher:Show()
+    banner:Show()
+end
+
+-- ============================================================
+-- SETTINGS LINK and THE MOVER'S MENU
+-- ============================================================
+local function OpenSettings(m)
+    local page = ES.PageFor(m)
+    if not page then return end
+    openPage = page
+    Exit("save")
+end
+
+local function Menu(m, anchor)
+    if not (m and UI.ContextMenu) then return false end
+    local page = ES.PageFor(m)
+    local link = ES.LinkOf(m.key)
+    local items = { { text = m.label, isTitle = true } }
+    items[#items + 1] = { text = "Open its settings", disabled = page == nil,
+        tooltip = page == nil and "It has no settings page of its own." or nil,
+        func = function() OpenSettings(m) end }
+    if link then
+        local to = byKey[link.to]
+        items[#items + 1] = { text = "Detach from " .. (to and to.label or link.to),
+            func = function() ES.Detach(m.key) ES.Check() RefreshBar() end }
+    elseif m.follower then
+        items[#items + 1] = { text = "Attach to...",
+            tooltip = "Click another frame: this one then follows it wherever it goes.",
+            func = function() StartPick("attach", m) end }
+    else
+        items[#items + 1] = { text = "Attach to...", disabled = true,
+            tooltip = "This one keeps its spot in its own settings, so it cannot follow another frame." }
+    end
+    local canSize = m.size and m.size.set
+    local sizeWhy = (not canSize) and "Its size comes from its own settings." or nil
+    items[#items + 1] = { text = "Match width...", disabled = not canSize, tooltip = sizeWhy,
+        func = function() StartPick("w", m) end }
+    items[#items + 1] = { text = "Match height...", disabled = not canSize, tooltip = sizeWhy,
+        func = function() StartPick("h", m) end }
+    local followers = ES.FollowersOf(m.key)
+    if #followers > 0 then
+        local names = {}
+        for _, k in ipairs(followers) do names[#names + 1] = byKey[k] and byKey[k].label or k end
+        items[#items + 1] = { text = (#followers == 1 and "1 frame follows it" or (#followers .. " frames follow it")),
+            disabled = true, tooltip = table.concat(names, ", ") }
+    end
+    items[#items + 1] = { separator = true }
+    items[#items + 1] = { text = "Reset to its default spot", disabled = m.reset == nil,
+        func = function() if m.reset then m.reset(true) ES.Check() end end }
+    items[#items + 1] = { text = "Hide while editing",
+        func = function() SetParked(m, true) FillBar() end }
+    UI.ContextMenu(items, anchor and { anchor = anchor } or nil)
+    return true
 end
 
 -- ============================================================
 -- CONTROL BOX
 -- ============================================================
+local W = 320
 local ROW = 24
 
+local function IconButton(parent, icon, tip, body, onClick)
+    local b = UI.Button(parent, "", { width = 18, height = 18, size = F.SMALL, onClick = onClick })
+    local t = b:CreateTexture(nil, "OVERLAY")
+    t._zui_own = true
+    t:SetSize(14, 14)
+    t:SetPoint("CENTER", 0, 0)
+    t:SetTexture(ICONS .. icon)
+    local function Tint(on)
+        local c = on and Col("accent") or ns.GetColor("text", "normal")
+        t:SetVertexColor(c.r, c.g, c.b, 1)
+    end
+    Tint(false)
+    b:HookScript("OnEnter", function() Tint(true) end)
+    b:HookScript("OnLeave", function() Tint(false) end)
+    UI.Tooltip(b, tip, body)
+    return b
+end
+
+local function ShowTip(owner, title, body)
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    local t, c = ns.GetColor("tooltip", "title"), ns.GetColor("tooltip", "body")
+    GameTooltip:AddLine(title, t.r, t.g, t.b)
+    if body then GameTooltip:AddLine(body, c.r, c.g, c.b, true) end
+    GameTooltip:Show()
+end
+
+local function ApplyFilter()
+    for _, m in ipairs(current) do
+        local want = Matches(m)
+        if not want and not filtered[m.key] then
+            filtered[m.key] = true
+            if not IsParked(m.key) then m.hide() end
+        elseif want and filtered[m.key] then
+            filtered[m.key] = nil
+            if not IsParked(m.key) then ShowMovable(m) end
+        end
+    end
+    if guides then guides._acc = 1 end
+end
+
 local function BuildBar()
-    bar = UI.Window("ZacUIEditModeBar", 300, 200, "Edit Mode")
+    bar = UI.Window("ZacUIEditModeBar", W, 200, "Edit Mode")
     bar:SetFrameStrata("TOOLTIP")
     bar:SetClampedToScreen(true)
     bar._zOnMoved = function()
@@ -569,125 +991,249 @@ local function BuildBar()
         local d = DB()
         d.barPoint, d.barX, d.barY = point, x, y
     end
+    local pad = M.CARD_PAD
+    local iw = W - 2 * pad
+
+    -- how many frames this pass has moved, beside the close
+    bar.count = UI.Font(bar.titleBar or bar, F.SMALL, { text = "", cat = "text", key = "gray" })
+    if bar.closeButton then
+        bar.count:SetPoint("RIGHT", bar.closeButton, "LEFT", -6, 0)
+    else
+        bar.count:SetPoint("TOPRIGHT", bar, "TOPRIGHT", -34, -10)
+    end
 
     local desc = UI.Font(bar, F.DESC, {
-        text = "Drag the outlined elements into place. Point at one for guide "
-            .. "lines - a line turns green when it lines up with another "
-            .. "element or the screen centre. Untick an element to hide it "
-            .. "while you place the rest; Lock brings it back.",
-        cat = "text", key = "gray", width = 300 - 2 * M.CARD_PAD })
-    desc:SetPoint("TOPLEFT", bar, "TOPLEFT", M.CARD_PAD, -(M.TITLEBAR + 8))
+        text = "Drag to place. Shift keeps one direction, Alt places freely. "
+            .. "Right-click a frame for more.",
+        cat = "text", key = "gray", width = iw })
+    desc:SetPoint("TOPLEFT", bar, "TOPLEFT", pad, -(M.TITLEBAR + 8))
     bar.desc = desc
 
+    -- the filter: hides every element whose name lacks what is typed
+    bar.filter = UI.EditBox(bar, { width = iw, hint = "Find a frame...", onChange = function(text)
+        filterText = (tostring(text or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""))
+        ApplyFilter()
+        FillBar()
+    end })
+    bar.filter:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
+
     local d = DB()
-    bar.dim = UI.Slider(bar, { width = 300 - 2 * M.CARD_PAD, min = 0, max = 90,
+    bar.snap = UI.Checkbox(bar, "Snap to frames", d.snap, function(v)
+        DB().snap = v and true or false
+    end)
+    bar.snap:SetPoint("TOPLEFT", bar.filter, "BOTTOMLEFT", 0, -8)
+    UI.Tooltip(bar.snap, "Snap to frames",
+        "A dragged frame's edges and centre snap to the nearest other frame's, and to the middle and edges "
+            .. "of the screen. Hold Alt while dragging to place one freely.")
+    bar.grid = UI.Checkbox(bar, "Grid", d.grid, function(v)
+        DB().grid = v and true or false
+        PaintOverlay()
+    end)
+    bar.grid:SetPoint("TOPLEFT", bar.filter, "BOTTOMLEFT", 150, -8)
+
+    bar.dim = UI.Slider(bar, { width = iw, min = 0, max = 90,
         step = 5, value = d.dim, label = "Dim the world",
         format = function(v) return v .. "%" end,
         onChange = function(v)
             DB().dim = v
             PaintOverlay()
         end })
-    bar.dim:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
-
-    bar.grid = UI.Checkbox(bar, "Grid", d.grid, function(v)
-        DB().grid = v and true or false
-        PaintOverlay()
-    end)
-    bar.grid:SetPoint("TOPLEFT", bar.dim, "BOTTOMLEFT", 0, -8)
-
-    -- every element out of the way at once, or all back
-    local half = math.floor((300 - 2 * M.CARD_PAD - 6) / 2)
-    bar.showAll = UI.Button(bar, "Show all", { width = half, height = 20, size = F.SMALL,
-        onClick = function()
-            for _, m in ipairs(current) do
-                if IsParked(m.key) and not (m.blocked and m.blocked()) then SetParked(m, false) end
-            end
-            FillBar()
-        end })
-    bar.showAll:SetPoint("TOPLEFT", bar.grid, "BOTTOMLEFT", 0, -6)
-    bar.hideAll = UI.Button(bar, "Hide all", { width = half, height = 20, size = F.SMALL,
-        onClick = function()
-            for _, m in ipairs(current) do
-                if not IsParked(m.key) and not (m.blocked and m.blocked()) then SetParked(m, true) end
-            end
-            FillBar()
-        end })
-    bar.hideAll:SetPoint("LEFT", bar.showAll, "RIGHT", 6, 0)
+    bar.dim:SetPoint("TOPLEFT", bar.snap, "BOTTOMLEFT", 0, -8)
 
     -- The element list scrolls. A class HUD alone is seven rows and the
-    -- bars, meter windows and tooltip add more; squeezing rows to fit
-    -- the screen made the long list unreadable, so the box has a
-    -- ceiling and the list scrolls inside it.
+    -- bars, meter windows and tooltip add more; the box has a ceiling and
+    -- the list scrolls inside it.
     bar.rows = {}
     bar.scroll, bar.list, bar.scrollBar = UI.ScrollArea(bar)
-    bar.scroll:SetPoint("TOPLEFT", bar.showAll, "BOTTOMLEFT", 0, -6)
+    bar.scroll:SetPoint("TOPLEFT", bar.dim, "BOTTOMLEFT", 0, -6)
     bar.scrollBar:SetPoint("TOPLEFT", bar.scroll, "TOPRIGHT", 4, 0)
     bar.scrollBar:SetPoint("BOTTOMLEFT", bar.scroll, "BOTTOMRIGHT", 4, 0)
-    bar.lock = UI.Button(bar, "Lock", { width = 120,
-        tooltip = "Hide the placeholders and keep everything where it is.",
-        onClick = function() Exit() end })
-    bar.resetAll = UI.Button(bar, "Reset all", { width = 90,
-        tooltip = "Every element back to its default spot.",
+
+    local half = math.floor((iw - 6) / 2)
+    local third = math.floor((iw - 12) / 3)
+    bar.cancel = UI.Button(bar, "Cancel", { width = half,
+        tooltip = "Put back every frame moved since Edit Mode opened, and leave.",
+        onClick = function() Exit("cancel") end })
+    bar.save = UI.Button(bar, "Save & Exit", { width = iw - half - 6,
+        tooltip = "Keep everything where it is now, and leave. (The X and Escape do the same.)",
+        onClick = function() Exit("save") end })
+    bar.save:SetActive(true)
+    bar.cancel:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", pad, pad)
+    bar.save:SetPoint("LEFT", bar.cancel, "RIGHT", 6, 0)
+
+    bar.undo = UI.Button(bar, "Undo  Ctrl+Z", { width = third, height = M.BUTTON_H, size = F.SMALL,
+        tooltip = "Put back the last move.",
+        onClick = function() ES.Undo() RefreshBar() end })
+    bar.showHide = UI.Button(bar, "Hide all", { width = third, height = M.BUTTON_H, size = F.SMALL,
+        onClick = function()
+            local anyShown = false
+            for _, m in ipairs(current) do
+                if not IsParked(m.key) and not IsGrey(m) then anyShown = true break end
+            end
+            for _, m in ipairs(current) do
+                if not IsGrey(m) then
+                    if anyShown and not IsParked(m.key) then SetParked(m, true)
+                    elseif not anyShown and IsParked(m.key) then SetParked(m, false) end
+                end
+            end
+            FillBar()
+        end })
+    UI.Tooltip(bar.showHide, "Hide all / Show all",
+        "Every element out of the way while you place the rest, or all of them back.")
+    bar.resetAll = UI.Button(bar, "Reset all", { width = iw - 2 * third - 12, height = M.BUTTON_H, size = F.SMALL,
+        tooltip = "Every element back to its default spot. Cancel or Ctrl+Z puts them back.",
         onClick = function()
             for _, m in ipairs(current) do
-                if m.reset and not (m.blocked and m.blocked()) then m.reset(true) end
+                if m.reset and not IsGrey(m) then m.reset(true) end
             end
-            Print("every element back to its default spot.")
+            ES.Check()
+            Print("every element back to its default spot (Ctrl+Z or Cancel puts them back).")
         end })
-    bar.lock:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", M.CARD_PAD, M.CARD_PAD)
-    bar.resetAll:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -M.CARD_PAD, M.CARD_PAD)
+    bar.undo:SetPoint("BOTTOMLEFT", bar.cancel, "TOPLEFT", 0, 6)
+    bar.showHide:SetPoint("LEFT", bar.undo, "RIGHT", 6, 0)
+    bar.resetAll:SetPoint("LEFT", bar.showHide, "RIGHT", 6, 0)
 
-    -- the X, Escape and Lock all land here; Exit is idempotent
-    bar:HookScript("OnHide", function() if active then Exit() end end)
+    bar.rule = bar:CreateTexture(nil, "ARTWORK")
+    bar.rule._zui_own = true
+    bar.rule:SetTexture(FLAT)
+    bar.rule:SetHeight(1)
+    bar.rule:SetPoint("BOTTOMLEFT", bar.undo, "TOPLEFT", -pad + 1, 8)
+    bar.rule:SetPoint("RIGHT", bar, "RIGHT", -1, 0)
+    local bc = ns.GetColor("ui", "border")
+    bar.rule:SetVertexColor(bc.r, bc.g, bc.b, 1)
+
+    -- the X, Escape and the buttons all land here; Exit is idempotent
+    bar:HookScript("OnHide", function() if active then Exit("save") end end)
+end
+
+local function NewRow(i)
+    local row = CreateFrame("Frame", nil, bar.list)
+    row:SetHeight(ROW)
+    row:EnableMouse(true)
+    row.hl = row:CreateTexture(nil, "BACKGROUND")
+    row.hl._zui_own = true
+    row.hl:SetPoint("TOPLEFT", -4, 0)
+    row.hl:SetPoint("BOTTOMRIGHT", 0, 0)
+    row.hl:SetTexture(FLAT)
+    row.hl:Hide()
+    row.reset = IconButton(row, "reset", "Reset", "Back to its default spot.", nil)
+    row.reset:SetPoint("RIGHT", 0, 0)
+    row.cog = IconButton(row, "settings", "Open its settings", "Leave Edit Mode (keeping your changes) on the page that styles it.", nil)
+    row.cog:SetPoint("RIGHT", row.reset, "LEFT", -4, 0)
+    row.dot = row:CreateTexture(nil, "ARTWORK")
+    row.dot._zui_own = true
+    row.dot:SetTexture(FLAT)
+    row.dot:SetSize(5, 5)
+    row.grey = UI.Font(row, F.LABEL, { text = "", cat = "text", key = "disabled" })
+    row.grey:SetPoint("LEFT", M.CHECK + 7, 0)
+    row.tag = UI.Font(row, F.SMALL, { text = "", cat = "text", key = "disabled" })
+    row.tag:SetPoint("LEFT", row.grey, "RIGHT", 6, 0)
+    row.box = row:CreateTexture(nil, "ARTWORK")
+    row.box._zui_own = true
+    row.box:SetTexture(FLAT)
+    row.box:SetSize(M.CHECK, M.CHECK)
+    row.box:SetPoint("LEFT", 0, 0)
+    local bg = ns.GetColor("checkbox", "bg")
+    row.box:SetVertexColor(bg.r, bg.g, bg.b, 0.6)
+    row:SetScript("OnEnter", function(self)
+        if self.why then ShowTip(self, self.movable and self.movable.label or "", self.why) end
+    end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" and self.movable and not self.why then Menu(self.movable) end
+    end)
+    bar.rows[i] = row
+    return row
+end
+
+local function PaintRow(row)
+    local m = row.movable
+    if not m then return end
+    local moved = ES.Moved(m.key)
+    row.dot:SetShown(moved and not row.why)
+    if moved then
+        local a = Col("accent")
+        row.dot:SetVertexColor(a.r, a.g, a.b, 1)
+    end
+    local focus = focusKeys[m.key] and true or false
+    row.hl:SetShown(focus)
+    if focus then
+        local c = ns.GetColor("button", "hover")
+        row.hl:SetVertexColor(c.r, c.g, c.b, 1)
+    end
+end
+
+local function BarHeight(listH)
+    local descH = math.max(12, (bar.desc and bar.desc:GetStringHeight()) or 24)
+    return M.TITLEBAR + 8 + descH + 8 + M.EDIT_H + 8 + M.CHECK + 8 + 30 + 6 + listH
+        + 8 + 9 + M.BUTTON_H + 6 + M.BUTTON_H + M.CARD_PAD
 end
 
 FillBar = function()
     local d = DB()
     local y = 0
-    local descH = math.max(30, (bar.desc and bar.desc:GetStringHeight()) or 30)
-    local fixed = M.TITLEBAR + 8 + descH + 8 + 30 + 8 + M.CHECK + 6 + 20 + 6 + 12 + M.BUTTON_H + M.CARD_PAD
-    local innerW = 300 - 2 * M.CARD_PAD
-    for i, m in ipairs(current) do
-        local row = bar.rows[i]
-        if not row then
-            row = CreateFrame("Frame", nil, bar.list)
-            row:SetHeight(ROW)
-            row.reset = UI.Button(row, "Reset", { width = 60, height = 18, size = F.SMALL })
-            row.reset:SetPoint("RIGHT")
-            bar.rows[i] = row
-        end
+    local iw = W - 2 * M.CARD_PAD
+    local shown = {}
+    for _, m in ipairs(current) do
+        if Matches(m) then shown[#shown + 1] = m end
+    end
+    for i, m in ipairs(shown) do
+        local row = bar.rows[i] or NewRow(i)
+        row.movable = m
         -- the checkbox binds its callback at build, and the movable it
         -- refers to changes per pass, so it is rebuilt each time
-        if row.check then row.check:Hide(); row.check:SetParent(nil) end
-        local blocked = m.blocked and m.blocked()
+        if row.check then row.check:Hide() row.check:SetParent(nil) row.check = nil end
+        local tag, why = StateOf(m)
+        row.why = tag and why or nil
         -- a frame pushed off the screen says so (its Reset brings it back)
-        local off = not blocked and m.offscreen and m.offscreen()
-        local label = m.label .. (blocked and " |cffff9933(Edit Mode)|r" or "")
-            .. (off and " |cffff9933(off screen)|r" or "")
-        row.check = UI.Checkbox(row, label, not blocked and not IsParked(m.key),
-            function(v) SetParked(m, not v) end)
-        row.check:SetPoint("LEFT")
-        if blocked then row.check:Disable() end
-        row.reset:SetScript("OnClick", m.reset)
-        row.reset:SetShown(m.reset ~= nil and not blocked)
+        local off = not tag and m.offscreen and m.offscreen()
+        if tag then
+            -- greyed: no tick, no buttons; hovering says why
+            row.grey:SetText(m.label)
+            row.tag:SetText(tag)
+            row.grey:Show() row.tag:Show() row.box:Show()
+            row.cog:Hide() row.reset:Hide()
+            row.dot:ClearAllPoints()
+        else
+            row.grey:Hide() row.tag:Hide() row.box:Hide()
+            local label = m.label .. (off and " |cffff9933(off screen)|r" or "")
+                .. (ES.LinkOf(m.key) and " |cff999999(attached)|r" or "")
+            row.check = UI.Checkbox(row, label, not IsParked(m.key), function(v) SetParked(m, not v) end)
+            row.check:SetPoint("LEFT")
+            local textW = row.check._zText and row.check._zText:GetStringWidth() or 0
+            row.dot:ClearAllPoints()
+            row.dot:SetPoint("LEFT", row, "LEFT", M.CHECK + 7 + textW + 6, 0)
+            row.reset:SetScript("OnClick", function()
+                if m.reset then m.reset(true) ES.Check() RefreshBar() end
+            end)
+            row.reset:SetShown(m.reset ~= nil)
+            row.cog:SetScript("OnClick", function() OpenSettings(m) end)
+            row.cog:SetShown(ES.PageFor(m) ~= nil)
+        end
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", bar.list, "TOPLEFT", 0, -y)
         row:SetPoint("RIGHT", bar.list, "RIGHT", 0, 0)
+        PaintRow(row)
         y = y + ROW
         row:Show()
     end
-    for i = #current + 1, #bar.rows do bar.rows[i]:Hide() end
+    for i = #shown + 1, #bar.rows do
+        bar.rows[i]:Hide()
+        bar.rows[i].movable = nil
+    end
 
     -- the list gets what the screen allows, up to a ceiling; past that
     -- it scrolls, and the scrollbar takes its width from the rows
+    local fixed = BarHeight(0)
     local room = (UIParent:GetHeight() or 768) - 80 - fixed
-    local listH = math.max(ROW, math.min(y, room, 14 * ROW))
+    local listH = math.max(ROW, math.min(math.max(y, ROW), room, 14 * ROW))
     local scrolls = y > listH + 1
-    local listW = innerW - (scrolls and (M.SCROLL_W + 4) or 0)
+    local listW = iw - (scrolls and (M.SCROLL_W + 4) or 0)
     bar.scroll:SetSize(listW, listH)
     bar.list:SetSize(listW, math.max(1, y))
     bar.scroll:Recalculate(y)
     if not scrolls then bar.scrollBar:SetValue(0) end
+    bar._rowCount = #shown
 
     bar:SetHeight(fixed + listH)
 
@@ -695,16 +1241,60 @@ FillBar = function()
     if d.barPoint then
         bar:SetPoint(d.barPoint, UIParent, d.barPoint, d.barX or 0, d.barY or 0)
     else
-        bar:SetPoint("TOP", UIParent, "TOP", 0, -40)
+        -- top left: the middle of the screen is where the HUD is placed
+        bar:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -20)
     end
+    RefreshBar()
+end
+
+RefreshBar = function()
+    if not bar then return end
+    local n = ES.MovedCount()
+    bar.count:SetText(n == 0 and "" or (n == 1 and "1 moved" or (n .. " moved")))
+    bar.undo:SetDisabled(not ES.CanUndo())
+    local anyShown = false
+    for _, m in ipairs(current) do
+        if not IsParked(m.key) and not IsGrey(m) then anyShown = true break end
+    end
+    bar.showHide:SetLabel(anyShown and "Hide all" or "Show all")
+    for _, row in ipairs(bar.rows) do
+        if row:IsShown() and row.movable then PaintRow(row) end
+    end
+end
+
+-- the list scrolled so a row is in view
+local function ScrollTo(key)
+    for i, row in ipairs(bar.rows) do
+        if row:IsShown() and row.movable and row.movable.key == key then
+            local top = (i - 1) * ROW
+            local h = bar.scroll:GetHeight() or 0
+            local _, max = bar.scrollBar:GetMinMaxValues()
+            local v = math.max(0, math.min(max or 0, top - h / 2 + ROW / 2))
+            bar.scrollBar:SetValue(v)
+            return
+        end
+    end
+end
+
+-- ============================================================
+-- KEYS (through the handle kit's keyboard frame, up for the pass)
+-- ============================================================
+local function Key(key)
+    if picking and key == "ESCAPE" then StopPick() return true end
+    if key == "Z" and IsControlKeyDown() then
+        if ES.Undo() then RefreshBar() end
+        return true
+    end
+    return false
 end
 
 -- ============================================================
 -- ENTER / EXIT
 -- ============================================================
 -- PREVIEW WATCHERS: things with nothing to move but something to show
--- while the HUD is being arranged (the crosshair) register a function
--- here and are told on every enter (true) and exit (false).
+-- while the HUD is being arranged (the crosshair, the meter windows'
+-- lock state) register a function here and are told on every enter
+-- (true) and exit (false).
 local watchers = {}
 local function WatchEditMode(fn)
     watchers[#watchers + 1] = fn
@@ -713,43 +1303,133 @@ local function NotifyWatchers(on)
     for _, fn in ipairs(watchers) do pcall(fn, on) end
 end
 
-local function Enter()
-    if active then return end
+local KIT_HOOKS = {
+    snap = Snap,
+    select = function(h) Kit.Select(h) end,
+    changed = function() ES.Check() end,
+    dropped = function() end,
+    menu = function(h)
+        local m = MovableOf(h)
+        if not m then return false end
+        Kit.Select(h)
+        return Menu(m)
+    end,
+    key = Key,
+}
+
+-- opts.focus: a key (or list of keys) to pick out - a settings page's
+-- "Move in Edit Mode" sends its frame here
+local function Enter(opts)
     if InCombatLockdown and InCombatLockdown() then
-        Print("edit mode waits for combat to end.")
+        Print("Edit Mode can't open in combat - frames that hold secure buttons can't move in a fight. Try again when it ends.")
+        return
+    end
+    local focus = opts and opts.focus
+    if active then
+        if focus then ns.EditModeFocus(focus) end
         return
     end
     active = true
+    openPage = nil
+    filterText = ""
+    wipe(filtered)
 
-    -- the config window gets out of the way and comes back on Lock
+    -- the config window gets out of the way and comes back on the way out
     reopenConfig = ns.ConfigIsOpen and ns.ConfigIsOpen() or false
     if reopenConfig and ZacUIConfigFrame then UI.CloseWindow(ZacUIConfigFrame) end
 
     current = Movables()
+    wipe(byKey)
+    for _, m in ipairs(current) do byKey[m.key] = m end
+    ES.SetMovables(current)
     ShowOverlay()
     for _, m in ipairs(current) do
         if IsParked(m.key) then FadeContent(m) else ShowMovable(m) end
     end
     ShowGuides()
+    ES.Begin()
+    ES.OnChange = function() RefreshBar() end
+    Kit.edit = KIT_HOOKS
+    Kit.EditKeys(true)
 
     if not bar then BuildBar() end
+    bar.filter:SetText("")
     FillBar()
     bar.dim:SetValue(DB().dim)
     bar.grid:SetChecked(DB().grid)
+    bar.snap:SetChecked(DB().snap)
     UI.OpenWindow(bar)
     NotifyWatchers(true)
+    if focus then ns.EditModeFocus(focus) end
 end
 
-Exit = function()
+-- pick one element out: shown, selected, its row in view, a short flash
+function ns.EditModeFocus(keys)
     if not active then return end
+    if type(keys) ~= "table" then keys = { keys } end
+    local first
+    for _, key in ipairs(keys) do
+        local m = byKey[key]
+        if m and not IsGrey(m) then
+            if IsParked(key) then SetParked(m, false) end
+            first = first or m
+        end
+    end
+    if not first then return end
+    if filterText ~= "" then
+        filterText = ""
+        bar.filter:SetText("")
+        ApplyFilter()
+    end
+    wipe(focusKeys)
+    for _, key in ipairs(keys) do if byKey[key] then focusKeys[key] = true end end
+    focusUntil = (GetTime and GetTime() or 0) + 1.6
+    local ok, list = pcall(first.frames or function() end)
+    local h = ok and type(list) == "table" and list[1]
+    if h and Kit.IsDressed(h) then Kit.Select(h) end
+    FillBar()
+    ScrollTo(first.key)
+    if guides then guides._acc = 1 end
+end
+
+-- mode: "save" keeps everything (the default), "cancel" puts back every
+-- frame moved in this pass
+Exit = function(mode)
+    if not active then return end
+    StopPick()
+    if UI.CloseAllDropdowns then UI.CloseAllDropdowns() end
+    local undone
+    if mode == "cancel" then
+        undone = ES.Cancel()
+    else
+        ES.Check()
+    end
     active = false
+    ES.OnChange = nil
+    Kit.edit = nil
+    Kit.Select(nil)
+    Kit.EditKeys(false)
     HideGuides()
     for _, m in ipairs(current) do m.hide() end
     UnfadeAll()
+    ES.End()
     current = {}
+    wipe(byKey)
+    wipe(filtered)
+    filterText = ""
+    wipe(focusKeys)
+    focusUntil = nil
     if overlay then overlay:Hide() end
     if bar and bar:IsShown() then bar:Hide() end
-    if reopenConfig and ns.OpenConfig then
+    if undone and undone > 0 then
+        Print(undone == 1 and "1 frame put back where it was." or (undone .. " frames put back where they were."))
+    end
+    local page = openPage
+    openPage = nil
+    if page and ns.OpenConfig then
+        reopenConfig = false
+        ns.OpenConfig(page)
+    elseif reopenConfig and ns.OpenConfig then
         reopenConfig = false
         ns.OpenConfig()
     end
@@ -757,19 +1437,52 @@ Exit = function()
 end
 
 local function Toggle()
-    if active then Exit() else Enter() end
+    if active then Exit("save") else Enter() end
 end
 
--- combat: the mover proxies are plain frames and stay draggable, but the
--- meter unlock and the config reopen are not worth the lockdown errors -
--- a pull ends the pass
+-- combat: secure frames cannot move in a fight, the meter unlock and the
+-- config reopen are not worth the lockdown errors - a pull ends the pass,
+-- keeping what was done
 local guard = CreateFrame("Frame")
 guard:RegisterEvent("PLAYER_REGEN_DISABLED")
-guard:SetScript("OnEvent", function() if active then Exit() end end)
+guard:SetScript("OnEvent", function()
+    if active then
+        Exit("save")
+        Print("Edit Mode closed for combat - your changes are kept.")
+    end
+end)
 
 -- shared with later ZacUI files
 ns.EnterEditMode = Enter
 ns.ExitEditMode = Exit
+ns.CancelEditMode = function() Exit("cancel") end
 ns.ToggleEditMode = Toggle
 ns.IsEditMode = function() return active end
 ns.WatchEditMode = WatchEditMode
+ns.EditModeMovables = Movables
+-- the movable frames a settings page styles that can be moved here now
+-- (its "Move in Edit Mode" button; Config_EditLinks)
+ns.EditModeKeysForPage = function(pageId)
+    local out = {}
+    for _, m in ipairs(Movables()) do
+        if ES.PageFor(m) == pageId then
+            -- asked quietly: a page build never prints the "managed by
+            -- Edit Mode" note a real move would
+            local reg = MOVERS[m.key]
+            local f = reg and reg.getFrame()
+            local grey
+            if reg then
+                grey = (not f) or MoverBlocked(m.key, f, true)
+            else
+                grey = (m.blocked and m.blocked()) or (m.state and m.state() ~= nil)
+            end
+            if not grey then out[#out + 1] = m.key end
+        end
+    end
+    return out
+end
+-- Attach to... / Match width... / Match height... for `key` (the menu's
+-- items; tests drive the pick through this)
+ns.EditModeStartPick = function(kind, key)
+    if active and byKey[key] then StartPick(kind, byKey[key]) end
+end

@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI
 ## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB
@@ -64,6 +64,18 @@ Core\Core_Boot.lua
 # Which game this is (Classic Era, TBC, Forever) and what is off on each.
 # Right after Boot: every later file and every part may ask.
 Core\Core_Flavor.lua
+# SETUP2: every CVar ZacUI writes goes through ns.CVar (recorded, put back on
+# disable / uninstall). Right after Flavor, before anything that writes one.
+Core\Core_CVar.lua
+# Feature cluster 1 (2026-11-07): /zui dev secrets, the developer's switch
+# for the client's addon restrictions (through ns.CVar, so after it).
+Core\Core_DevSecrets.lua
+# One number formatter for every part (12.3k, separators, the parts' own
+# styles), safe on values the client hides. After Flavor (ns.IsSecret).
+Core\Core_Numbers.lua
+# WoW Forever's surnames on ZacUI's names, and character keys by ruleset
+# there (no realms). After Flavor (ns.IsSecret).
+Core\Core_Names.lua
 Core\Core_Colors.lua
 Core\Core_MediaNames.lua
 Core\Core_Sounds.lua
@@ -72,12 +84,27 @@ Core\Core_Registry.lua
 Core\Core_Profiles.lua
 Core\Core_SharedMedia.lua
 Core\Core_Media.lua
+# The Look: ZacUI's flat art or the game's own, read by every primitive
+# below at build time. After media (it names ZacUI's textures), before
+# the UI framework.
+Core\Core_Look.lua
+# HD polish (2026-11-07): edges one physical pixel thick under the ZacUI
+# look (ns.Pixel). After the Look (it asks which look is live), before
+# the UI framework (every primitive draws its borders through it).
+Core\Core_Pixel.lua
 Core\Core_Services.lua
 Core\Core_Encounter.lua
 # Each game version's raids: which kill ends one (clear timer, raid summary)
 Core\Core_FlavorRaids.lua
 # "A newer ZacUI is out": versions compared with the guild and group.
 Core\Core_VersionCheck.lua
+# Finish pass (2026-11-07): one login popup at a time (ns.Popups) - the
+# import offer, the look picker, the welcome, what's new, stale parts.
+# Before every file that puts one up; makes nothing at load.
+Core\Core_Popups.lua
+# Fresh install / after Reset ZacUI: ZacUI's bars and unit frames start
+# where Blizzard's were (the parts call it; makes nothing at load).
+Core\Core_FreshLayout.lua
 
 # ---------- UI framework ----------
 # Base before Widgets before Panels: each layer calls down, never up.
@@ -102,9 +129,15 @@ UI\Framework\UIF_Custom.lua
 UI\Framework\UIF_CustomUI.lua
 UI\Framework\UIF_Pool.lua
 UI\Framework\UIF_Movers.lua
+# Edit Mode's session (undo, cancel), frames attached to frames, size
+# matching. After Movers (it reads the registry), before EditMode.
+UI\Framework\UIF_EditSession.lua
 # Every mover at once over a grid, with the control box. After Movers
 # (it drives the registry) and Controls (it is built from the widgets).
 UI\Framework\UIF_EditMode.lua
+# Drag to customise in the /zui preview strips: pages hand it their
+# pieces (UIF_PreviewDrag's header). After EditMode; makes nothing at load.
+UI\Framework\UIF_PreviewDrag.lua
 
 # ---------- Minimap button tray ----------
 UI\Tray\Tray_Buttons.lua
@@ -119,8 +152,26 @@ UI\Auras\Auras_Core.lua
 Modules\Blizzard\Blz_Hooks.lua
 Modules\Blizzard\Blz_Minimap.lua
 Modules\Blizzard\Blz_Chat.lua
+# Other addons' LibDataBroker blocks on the chat bar (after Blz_Chat).
+Modules\Blizzard\Chat_LDB.lua
+# Chat extras (2026-11-07, feature cluster 1): each a file of its own on
+# top of Blz_Chat - the chat kept across /reload, a sound on a whisper,
+# the streaming privacy cover. Each puts its card on the Chat page itself.
+Modules\Blizzard\Chat_History.lua
+Modules\Blizzard\Chat_WhisperSound.lua
+Modules\Blizzard\Chat_Privacy.lua
+# Chat extras, group D (2026-11-07, feature cluster 1): links (clickable
+# addresses, hover tooltips), what each line says (short channel names,
+# time stamps, names in colour), the whole chat's idle fade and visibility
+# rule, and the panel / tab / size / bar extras. Each on top of Blz_Chat.
+Modules\Blizzard\Chat_Links.lua
+Modules\Blizzard\Chat_Lines.lua
+Modules\Blizzard\Chat_Fade.lua
+Modules\Blizzard\Chat_Panel.lua
 Modules\Blizzard\Blz_RaidTimer.lua
 Modules\Blizzard\Blz_Tooltip.lua
+# Feature cluster 1 (2026-11-07): the short stat lines on item tooltips.
+Modules\Blizzard\Tooltip_Stats.lua
 Modules\Blizzard\Blz_Auras.lua
 Modules\Blizzard\Blz_ActionBars.lua
 Modules\Blizzard\Blz_UnitFrames.lua
@@ -157,12 +208,18 @@ UI\Minimap\Minimap_Options.lua
 # ---------- Config window ----------
 UI\Config\Config_Base.lua
 UI\Config\Config_Search.lua
+# The search box and its dropdown of results (the index above draws
+# nothing; the window below lends it the nav column).
+UI\Config\Config_SearchBox.lua
 # The preview dock pages declare with L:Preview. Before the window,
 # which drives it around every page build.
 UI\Config\Config_Preview.lua
 UI\Config\Config_Window.lua
 UI\Config\Config_PagesMain.lua
 UI\Config\Config_PagesStyle.lua
+# The look picker: the Style page, the look cards, the first-run look
+# popup and the part pages' look banner (Core_Look's model).
+UI\Config\Config_Style.lua
 UI\Config\Config_PagesMotion.lua
 UI\Config\Config_PagesMinimap.lua
 # General > Game versions: what runs on Era, TBC and Forever, and the
@@ -173,6 +230,12 @@ UI\Config\Config_PagesFlavor.lua
 UI\Config\Config_AceRender.lua
 UI\Config\Config_Import.lua
 UI\Config\Config_Profiles.lua
+# Drag to customise: the tooltip, buffs and minimap previews' pieces,
+# registered by preview key (UIF_PreviewDrag). After the pages.
+UI\Config\Config_PreviewDrag.lua
+# "Move in Edit Mode" on every page that styles a movable frame (wraps
+# the page header). After Config_Base; makes nothing at load.
+UI\Config\Config_EditLinks.lua
 
 # ---------- Changelog ----------
 # The version history (data, newest first), then the popup after an
@@ -187,7 +250,11 @@ UI\Changelog\Changelog.lua
 # methods to see what a page builds), before Boot_Events, whose
 # ADDON_LOADED notes whether this is a fresh install.
 UI\Tutorial\Tutorial_Core.lua
-UI\Tutorial\Tutorial_Setup.lua
+# SETUP2: one-time hints, the layout presets, then the step-by-step setup
+# (Tutorial_Setup.lua stays on disk one release, not loaded).
+UI\Tutorial\Tutorial_Hints.lua
+UI\Tutorial\Tutorial_Layouts.lua
+UI\Tutorial\Tutorial_Setup2.lua
 UI\Tutorial\Tutorial_Tour.lua
 
 # ---------- Minimap button ----------

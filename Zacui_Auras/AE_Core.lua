@@ -27,7 +27,7 @@ ns.AuraEngine = E
 E.addon = ADDON_NAME
 -- Forever's rules for the combat log: that client, or ZacUI's game-version
 -- override's Forever (Core_Flavor; only the combat log is switched off)
-E.FOREVER = (_G.ZACUI_IS_FOREVER or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
+E.FOREVER = (_G.ZACUI_MODERN or (ns.NoCombatLog and ns.NoCombatLog())) and true or false
 
 -- ============================================================
 -- THE PUBLIC TABLE

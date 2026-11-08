@@ -420,7 +420,7 @@ local function Tab_general(L)
             label = "Times", format = function(v) return tostring(v) end, onChange = function(v) g.ttsRepeatCount = v end })
         local r2 = UI.Slider(L.current, { width = 240, min = 10, max = 300, step = 5, value = g.ttsRepeatInterval or 60,
             label = "Every", format = function(v) return format("%d s", v) end, onChange = function(v) g.ttsRepeatInterval = v end })
-        L:Dependent({ r1, r2 }, g.ttsRepeat, 2, M.CHECK + 6)
+        L:Dependent({ r1, r2 }, g.ttsRepeat, 2, M.CHECK + 6, "Say it again after the buff is gone")
     end
     L:EndCard()
 end
@@ -539,7 +539,12 @@ local function Tab_items(L)
         onEnter = function(t) addId = tonumber(t) end })
     L:Row(eb, 30)
     local cats = { { value = "custom", text = "Custom" } }
-    for _, k in ipairs(D.CATEGORY_KEYS) do cats[#cats + 1] = { value = k, text = D.CATEGORY_NAMES[k] } end
+    for _, k in ipairs(D.CATEGORY_KEYS) do
+        -- (no Chronoboon category where the bars do not know them: Core_Flavor)
+        if not (k == "chronoboon" and ns.FeatureOn and not ns.FeatureOn("chronoboon")) then
+            cats[#cats + 1] = { value = k, text = D.CATEGORY_NAMES[k] }
+        end
+    end
     Drop(L, "Category", cats, function() return addCat end, function(v) addCat = v end)
     local add = UI.Button(L.current, "Add item", { width = 120, onClick = function()
         if not addId or addId <= 0 then if ns.Print then ns.Print("Enter an item ID first.") end return end
@@ -632,7 +637,7 @@ local function Tab_items(L)
         end
         Check(L, "Say this one", CB.Voice.ItemOn(vid), function(v) Item(true).ttsEnabled = v and true or false Tidy() end)
         Check(L, "Say it again after it is gone", CB.Voice.RepeatOn(vid), function(v)
-            Item(true).repeatEnabled = (not v) and false or nil Tidy() end)
+            if v then Item(true).repeatEnabled = nil else Item(true).repeatEnabled = false end Tidy() end)
         local t = Item(false)
         local eb2 = UI.EditBox(L.current, { width = 220, text = (t and t.ttsText) or "", hint = D.SpokenName(ItemName(vid)),
             onEnter = function(s) Item(true).ttsText = (s ~= "") and s or nil Tidy() end })

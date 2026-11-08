@@ -123,14 +123,19 @@ function AB.UpdateHotkeys(self)
     local key = AB.KeyFor(n, i)
     local text = AB.ShortKey(key)
     if text == "" then
-        fs:SetText(RANGE_INDICATOR or "")
+        -- the game's range dot on a button with no key (core.rangeDot;
+        -- nothing saved = shown, as ever): an empty text keeps the game's
+        -- range update from showing it
+        local core = AB._core or AB.CoreCfg()
+        fs:SetText((core.rangeDot == false) and "" or (RANGE_INDICATOR or ""))
         fs:Hide()
     else
         fs:SetText(text)
         fs:Show()
     end
     local cfg = self.zCfg
-    fs:SetAlpha((cfg and cfg.hideHotkey) and 0 or 1)
+    -- keybind mode shows every key, a hidden key text too
+    fs:SetAlpha((cfg and cfg.hideHotkey and not AB.keyMode) and 0 or 1)
 end
 AB.RefreshHotkey = AB.UpdateHotkeys
 
@@ -141,16 +146,60 @@ AB.RefreshHotkey = AB.UpdateHotkeys
 -- something is on the cursor (ACTIONBAR_SHOWGRID), in Quick Keybind Mode,
 -- while the bars are unlocked, or when the bar asks for it.
 AB.gridShown = false
+
+-- THE EMPTY SLOT BACKING (core.emptyBacking, Look tab; off = as ever): a
+-- flat square behind an empty button while it shows (the grid is up, the
+-- bar shows empty slots, keybind mode), so an empty slot reads as a slot
+-- rather than a bare border. Region work: safe in combat.
+AB.EMPTY_BACKING = { r = 0.05, g = 0.05, b = 0.05, a = 0.6 }
+-- The ZacUI look (match pass): nothing saved = on, in the reference's
+-- flat 0.15 grey at 50 %; a saved off (false) stays off. Other looks:
+-- off unless switched on, 0.05 at 60 %, as ever.
+AB.HD_EMPTY_BACKING = { r = 0.15, g = 0.15, b = 0.15, a = 0.5 }
+function AB.EmptyBackingOn(core)
+    core = core or AB._core or AB.CoreCfg()
+    if core.emptyBacking ~= nil then return core.emptyBacking and true or false end
+    return AB.HDOn and AB.HDOn() or false
+end
+function AB.EmptyBackingColour(core)
+    core = core or AB._core or AB.CoreCfg()
+    if core.emptyBackingColor then return core.emptyBackingColor end
+    return (AB.HDOn and AB.HDOn()) and AB.HD_EMPTY_BACKING or AB.EMPTY_BACKING
+end
+function AB.EmptyBacking(btn, empty)
+    local core = AB._core or AB.CoreCfg()
+    local tex = btn.zEmptyBg
+    if not (empty and AB.EmptyBackingOn(core)) then
+        if tex then tex:Hide() end
+        return
+    end
+    if not tex then
+        tex = btn:CreateTexture(nil, "BACKGROUND", nil, -7)
+        tex._zui_own = true
+        tex:SetTexture(ns.FLAT or "Interface\\Buttons\\WHITE8X8")
+        tex:SetAllPoints(btn)
+        btn.zEmptyBg = tex
+    end
+    tex:SetVertexColor(ns.ColorOf(AB.EmptyBackingColour(core), AB.EMPTY_BACKING))
+    tex:Show()
+end
+
 function AB.RefreshEmpty(self)
     local cfg = self.zCfg
     local action = self.action or self:GetAttribute("action")
     local has = action and C_ActionBar and C_ActionBar.HasAction and C_ActionBar.HasAction(action)
     if not has and action and HasAction then has = HasAction(action) end
-    local show = has or AB.gridShown or AB.unlocked or (cfg and cfg.showgrid)
+    local show = has or AB.gridShown or AB.unlocked or AB.keyMode or (cfg and cfg.showgrid) or self.zKitGrid
     self:SetAlpha(show and 1 or 0)
+    AB.EmptyBacking(self, show and not has)
+    -- the Classic kit's ring: the empty-slot art on an empty slot
+    if AB.KitSlot then AB.KitSlot(self, has) end
     -- the equipped-item cue moves onto our border; the stock ring is gone
     if self._zui_borderTex then
-        AB.TintButtonBorder(self, (has and IsEquippedAction and IsEquippedAction(action)) and true or false)
+        local eq = (has and IsEquippedAction and IsEquippedAction(action)) and true or false
+        -- the item's quality colour for the ring (the ZacUI look's, match pass)
+        self.zEquipQ = (eq and AB.HDOn and AB.HDOn() and AB.ItemQualityColour) and AB.ItemQualityColour(action) or nil
+        AB.TintButtonBorder(self, eq)
     end
     AB.UpdateGlow(self, has and action or nil)
 end
@@ -247,7 +296,9 @@ if ActionButton_UpdateCooldownNumberHidden then
 end
 
 local function TooltipGate(self)
-    local core = AB.Profile().core
+    -- (the cached core settings: AB.Profile() re-filled the whole bars
+    -- profile from a fresh default on every hover)
+    local core = AB.CoreCfg()
     local mode = core and core.tooltip or "enabled"
     if mode == "disabled" or (mode == "nocombat" and InCombatLockdown()) then
         if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
@@ -602,6 +653,8 @@ local function CreateButton(header, n, i)
     btn.zCount  = AB.Region(btn, "Count", "Count")
     btn.zName   = AB.Region(btn, "Name", "Name")
 
+    -- (the template's own sizes first, for a game look's kit: AB_Core)
+    if AB.KitCapture then AB.KitCapture(btn) end
     SkinSecureIcon(btn)
     local cd = AB.Region(btn, "cooldown", "Cooldown")
     if cd and cd.SetDrawEdge then cd:SetDrawEdge(false) end
@@ -623,6 +676,8 @@ end
 -- secure writes: callers are out of combat (ApplyAll guarantees it).
 local function ConfigureButton(btn, cfg, core)
     btn.zCfg = cfg
+    -- a game look's chrome bar shows its empty slots (AB_Core)
+    btn.zKitGrid = (AB.KitShowsGrid and AB.KitShowsGrid(cfg, btn.zBar)) or nil
     btn:EnableMouse(not cfg.clickthrough)
     btn:SetAttribute("checkselfcast", core.selfcast and true or nil)
     btn:SetAttribute("checkfocuscast", core.focuscast and true or nil)
@@ -675,6 +730,10 @@ function AB.ReassignBindings()
         end
         for _, btn in ipairs(header.buttons) do AB.RefreshHotkey(btn) end
     end
+    -- the pet and stance bars' keys too (AB_Extras): taken only when those
+    -- bars were applied, a key moved off one kept firing it, over its new
+    -- binding, until the next loading screen
+    if AB.RebindSmallBars then AB.RebindSmallBars() end
 end
 
 local function ApplyBar(n, cfg, core)
@@ -690,13 +749,16 @@ local function ApplyBar(n, cfg, core)
     header:SetAttribute("offset", cfg.offset or 0)
     AB.Place(header, cfg)
     AB.LayoutButtons(header, header.buttons, cfg, cfg.buttonSize or AB.BUTTON, cfg.buttons or 12)
+    -- a game look's chrome: end caps (bar 1 by default), WoW Forever's
+    -- frame and dividers (AB_Core, THE BAR'S CHROME)
+    if AB.KitChrome then AB.KitChrome(header, cfg, cfg.buttonSize or AB.BUTTON, cfg.buttons or 12, n) end
     for _, btn in ipairs(header.buttons) do ConfigureButton(btn, cfg, core) end
     header:SetAlpha(cfg.alpha or 1)
     header:Show()
     -- drivers last: the page driver fires at once and writes every
     -- button's action attribute through the snippet
     UnregisterStateDriver(header, "page")
-    RegisterStateDriver(header, "page", AB.PageDriver(cfg))
+    RegisterStateDriver(header, "page", AB.PageDriver(cfg, n))
     UnregisterStateDriver(header, "visibility")
     RegisterStateDriver(header, "visibility", AB.VisibilityDriver(cfg))
     AB.RegisterFade(header, cfg)
@@ -710,7 +772,9 @@ local function ApplyActionBars(profile)
     for n = 1, AB.NUM_BARS do ApplyBar(n, profile.bars[n], core) end
     -- Blizzard's own lock: the pickup modifier is theirs too
     if core.buttonlock ~= nil then
-        pcall(SetCVar, "lockActionBars", core.buttonlock and "1" or "0")
+        -- SETUP2: through ns.CVar (recorded; put back when the bars are off)
+        if ns.CVar then ns.CVar.Set("lockActionBars", core.buttonlock and "1" or "0", "bars")
+        else pcall(SetCVar, "lockActionBars", core.buttonlock and "1" or "0") end
     end
     AB.ReassignBindings()
 end

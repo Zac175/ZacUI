@@ -147,7 +147,14 @@ end
 -- What this character should mount with right now: { kind = "item"|"spell", name, quality }
 -- or nil. Inside AQ40 the crystal wins outright; elsewhere the fastest
 -- thing carried or known.
+-- The mount journal (the Mainline client: Forever, Retail) learns mounts
+-- instead of carrying them: the macro summons a random favourite through
+-- it, and the bag scan below is not asked. Detected by the API, never by
+-- a version number (SM.Journal tells the Game versions row).
+local MJ = _G.C_MountJournal
+SM.Journal = (MJ and type(MJ.SummonByID) == "function") and true or false
 function SM.Pick()
+    if SM.Journal then return { kind = "journal", name = "a random favourite mount", quality = 10 } end
     local mounts = BagMounts()
     local inAQ = InAQ40()
     local best
@@ -354,6 +361,8 @@ function SM.Body(pick)
         return head .. "/run ZacUI.Print(\"No mount in your bags.\")"
     end
     if pick.kind == "spell" then return head .. "/cast " .. pick.name end
+    -- (the journal: 0 is "a random favourite", the game's own Summon Random Favorite Mount)
+    if pick.kind == "journal" then return head .. "/run C_MountJournal.SummonByID(0)" end
     return head .. "/use " .. pick.name
 end
 

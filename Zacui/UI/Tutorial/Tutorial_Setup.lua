@@ -188,7 +188,8 @@ function Setup.Parts()
     local out = {}
     for _, s in ipairs(PartSpecs()) do
         local ok, ready = pcall(function() return (not s.ready) or s.ready() end)
-        if Loaded(s.addon) and ok and ready then out[#out + 1] = s end
+        -- (a part this game version does not run is not offered: Core_Flavor)
+        if Loaded(s.addon) and ok and ready and not (ns.PartOff and ns.PartOff(s.addon)) then out[#out + 1] = s end
     end
     return out
 end

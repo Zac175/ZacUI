@@ -34,6 +34,9 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: Retail's pet page is the stable; a Retail version comes later):
+-- this window stands down here, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_character") then return end
 
 -- shared state from earlier ZacUI files
 local FLAT = ns.FLAT
@@ -342,7 +345,16 @@ local function SetValue(fs, text, key)
 end
 
 local function FillCard(card)
-    local lines = card.fn()
+    local lines
+    if _G.ZACUI_MODERN then
+        -- (WoW Forever and Retail can hand the pet's stats back hidden: the card keeps
+        -- what it last showed)
+        local ok, r = pcall(card.fn)
+        if not ok then return end
+        lines = r
+    else
+        lines = card.fn()
+    end
     for i, row in ipairs(card.rows) do
         local spec = lines[i]
         row.spec = spec
@@ -614,6 +626,14 @@ local function BuildModel(parent)
         self.zoom = max(0, min(self.maxZoom, self.zoom + delta * (MODELFRAME_ZOOM_STEP or 0.15)))
         if self.SetPortraitZoom then self:SetPortraitZoom(self.zoom) end
     end)
+    -- WoW Forever: the modern client loads the model after SetUnit and
+    -- resets the camera then; the framing goes back on once it is in
+    if _G.ZACUI_MODERN and m.HasScript and m:HasScript("OnModelLoaded") then
+        m:SetScript("OnModelLoaded", function(self)
+            self:SetRotation(self.rotation)
+            if self.SetPortraitZoom then self:SetPortraitZoom(self.zoom) end
+        end)
+    end
     m:SetScript("OnHide", StopDrag)
     -- What PetModelFrame does on a UI scale / resolution change.
     m:RegisterEvent("UI_SCALE_CHANGED")
@@ -920,6 +940,9 @@ local function Build()
     RegisterEvents(ev)
     ev:SetScript("OnEvent", OnEvent)
 
+    -- Forever's modern window chrome (pane divider, toggle): hushed by name
+    Kit.CharacterCover(win, "pet")
+
     -- Blizzard pieces around the cover are silenced only while this page
     -- is up, so the other Character tabs get them back.
     win:HookScript("OnShow", function()
@@ -951,11 +974,19 @@ end
 function Leftovers()
     local t = {}
     local function Add(f) if f then t[#t + 1] = f end end
-    Add(_G.CharacterFrameCloseButton)
-    Add(_G.CharacterFramePortrait)
-    if CharacterFrame then
-        Add(CharacterFrame.PortraitContainer)
-        Add(CharacterFrame.NineSlice)
+    -- (on the modern client the window's own chrome - close button,
+    -- portrait, frame art, title bar - is Kit.CharacterCover's, quietened
+    -- in a side table with the other parts, never with fields on them)
+    if not _G.ZACUI_MODERN then
+        Add(_G.CharacterFrameCloseButton)
+        Add(_G.CharacterFramePortrait)
+        if CharacterFrame then
+            Add(CharacterFrame.PortraitContainer)
+            Add(CharacterFrame.NineSlice)
+            -- Forever's (modern) CharacterFrame has a title bar at frame level
+            -- 510 that draws over the cover ("Zac Warrior" twice); Classic's has none
+            Add(CharacterFrame.TitleContainer)
+        end
     end
     Add(_G.PetModelFrame)
     Add(_G.PetPaperDollCloseButton)
@@ -964,6 +995,9 @@ function Leftovers()
             if r.IsObjectType and r:IsObjectType("Texture") and not r._zui_own then Add(r) end
         end
     end
+    -- (Forever's pane divider and toggle are Kit.CharacterCover's:
+    -- quietened by name, never hidden; Forever's own pet page is a
+    -- sidebar of the paperdoll, with no PetPaperDollFrame to cover)
     return t
 end
 

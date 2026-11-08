@@ -16,6 +16,7 @@
 local ADDON_NAME = ...
 local ns = _G.ZacUI
 if not ns then return end
+if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -26,7 +27,8 @@ local H = ns.Hesitation
 
 local GetTime = GetTime
 local GetSpellInfo = GetSpellInfo
-local GetSpellCooldown = GetSpellCooldown
+-- (WoW Forever: the HUD's reader, which never hands back a hidden cooldown)
+local GetSpellCooldown = (issecretvalue ~= nil and ns.HUD and ns.HUD.GetSpellCooldown) or GetSpellCooldown
 local IsUsableSpell = IsUsableSpell
 local IsSpellInRange = IsSpellInRange
 local UnitExists, UnitCanAttack, UnitIsDeadOrGhost = UnitExists, UnitCanAttack, UnitIsDeadOrGhost
@@ -388,6 +390,8 @@ end
 local function PlayerAP()
     if not UnitAttackPower then return 0 end
     local base, pos, neg = UnitAttackPower("player")
+    -- (WoW Forever can hide your own attack power: no reading)
+    if ns.Hidden(base, pos, neg) then return 0 end
     return (base or 0) + (pos or 0) + (neg or 0)
 end
 
@@ -412,6 +416,7 @@ function H.MainHandSpeeds()
     local f = WR and WR.Facts and WR.Facts(id)
     local speed = f and f.speed
     if not speed and UnitAttackSpeed then speed = UnitAttackSpeed("player") end
+    if ns.IsSecret(speed) then speed = nil end
     return norm, speed
 end
 
@@ -426,6 +431,8 @@ local function AutoWWFirstAt(now, force)
     if not UnitDamage then return nil end
     local ap = PlayerAP()
     local lo, hi, _, _, _, _, pct = UnitDamage("player")
+    -- (hidden on WoW Forever: the fixed count stands)
+    if ns.Hidden(lo, hi, pct) then return nil end
     if not (lo and hi and hi > 0 and ap > 0) then return nil end
     local ww = (lo + hi) / 2                      -- the sheet's main hand, all bonuses in
     -- (2026-10-30) Whirlwind hits with the NORMALISED speed (dagger 1.7,
@@ -438,7 +445,9 @@ local function AutoWWFirstAt(now, force)
     -- every hit that crits leaves Deep Wounds (60% of the weapon's average
     -- hit over 12 s) on THAT mob: worth the same per hit for both, so it
     -- counts once for Bloodthirst and once per mob for Whirlwind
-    local crit = (GetCritChance and GetCritChance() or 0) / 100
+    local critRead = GetCritChance and GetCritChance() or 0
+    if ns.IsSecret(critRead) then critRead = 0 end
+    local crit = critRead / 100
     local dw = 0.6 * crit * (lo + hi) / 2
     bt, ww = bt + dw, ww + dw
     local be, we = H.byName[BT_NAME], H.byName[WW_NAME]
@@ -717,7 +726,7 @@ local function RcPlan(e)
     local cache = RC and RC.encounterCache
     local cfg = cache and cache.mobConfig
     if not (cfg and cfg.enabled and type(cfg.abilities) == "table") then return nil, nil end
-    if cache.targetGUID and UnitGUID and cache.targetGUID ~= UnitGUID("target") then return nil, nil end
+    if cache.targetGUID and UnitGUID and cache.targetGUID ~= ns.SafeGUID("target") then return nil, nil end
     local a = cfg.abilities
     local keys = { e.rcKey, e.itemId, e.itemId and tostring(e.itemId) }
     local planned
@@ -743,6 +752,7 @@ local function CdRemaining(e, now)
     local s, d, en
     if e.slot then
         s, d, en = GetInventoryItemCooldown("player", e.slot)
+        if ns.Hidden(s, d, en) then return 0 end  -- (hidden on WoW Forever: unknown, so ready)
         if en == 0 then return nil end           -- a trinket with nothing to use
     else
         s, d = GetSpellCooldown(e.name)
@@ -1846,7 +1856,7 @@ local function Tick()
     local now = GetTime()
     local dt = lastTick and (now - lastTick) or 0
     lastTick = now
-    local gs, gd = GetSpellCooldown(GCD_SPELL)
+    local gs, gd = GetSpellCooldown(ns.GCDSpell and ns.GCDSpell() or GCD_SPELL)
     local onGCD = (gs and gd and gs > 0 and gd > 0 and (gs + gd - now) > 0) and true or false
     -- the plate row wants a target at all (attacking or not)
     local plateTarget = HUD.TargetAttackable()
@@ -1927,6 +1937,8 @@ local function Tick()
     H.prioName = wwFirst and WW_NAME or BT_NAME
     H.wwFirst = wwFirst
     local rage = UnitPower and UnitPower("player", 1) or 0
+    -- hidden (WoW Forever): no maths on it, so "short by" sits out
+    if ns.IsSecret and ns.IsSecret(rage) then rage = nil end
     if executing and not noControl then
         if not H.execSince then H.execSince = now end
     else
@@ -1934,7 +1946,7 @@ local function Tick()
     end
     if target and H.fight then
         local tn = UnitName("target")
-        if tn then H.fight.targets[tn] = (H.fight.targets[tn] or 0) + 1 end
+        if tn and not ns.IsSecret(tn) then H.fight.targets[tn] = (H.fight.targets[tn] or 0) + 1 end
     end
     local worst, worstWait
     local showingStillReady = false
@@ -1983,7 +1995,7 @@ local function Tick()
             and not quietExec and not noControl and not dying
         -- how much rage it is short, while it is back or nearly (the "-6")
         local need = CostOf(e)
-        e.shortBy = (gate and need > 0 and rage < need and (not onCD or (s + d - now) <= 1.5)) and (need - rage) or nil
+        e.shortBy = (gate and rage and need > 0 and rage < need and (not onCD or (s + d - now) <= 1.5)) and (need - rage) or nil
         -- what kept it waiting, for the scorecard's "worst"
         if able and e.since then
             if dumped then e.cause = "HS queued"

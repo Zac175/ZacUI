@@ -320,6 +320,8 @@ events:SetScript("OnEvent", function(self, event, a1, a2, a3, a4)
         Release()
         if not loggedIn then
             loggedIn = true
+            -- the parts against the core, once (a popup in the login queue)
+            pcall(VC.CheckParts)
             C_Timer.After(LOGIN_DELAY + math.random() * 5, function()
                 groupChan = IsInGroup and IsInRaid and GroupChannel and GroupChannel() or nil
                 Hello()
@@ -334,6 +336,73 @@ end)
 
 if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
     pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX)
+end
+
+-- ============================================================
+-- THE PARTS AGAINST THE CORE (finish pass)
+-- ============================================================
+-- Every Zacui_* addon in the AddOns folder should carry the core's
+-- version: a part left behind by an update errors in ways that look like
+-- ZacUI bugs. At login each one's TOC version is compared with ours; a
+-- mismatch is one popup naming the stale parts, in its turn in the login
+-- popup queue (Core_Popups, after the others), once a session. A part
+-- without a plain version (a development copy) is not judged.
+--   ns.VersionCheck.StaleParts()  { { addon, version }, ... } (sorted)
+--   ns.VersionCheck.CheckParts()  the popup when any are stale; true when it was asked for
+local function AddonNames()
+    local out = {}
+    local num = (C_AddOns and C_AddOns.GetNumAddOns) or GetNumAddOns
+    local info = (C_AddOns and C_AddOns.GetAddOnInfo) or GetAddOnInfo
+    if not (num and info) then return out end
+    local ok, n = pcall(num)
+    if not ok or type(n) ~= "number" then return out end
+    for i = 1, n do
+        local okI, name = pcall(info, i)
+        if okI and type(name) == "string" and name:find("^Zacui_") then out[#out + 1] = name end
+    end
+    table.sort(out)
+    return out
+end
+
+function VC.StaleParts()
+    local out = {}
+    if not mine then return out end
+    local get = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    if not get then return out end
+    for _, name in ipairs(AddonNames()) do
+        local ok, v = pcall(get, name, "Version")
+        v = ok and Clean(v) or nil
+        if v and Compare(v, mine) ~= 0 then out[#out + 1] = { addon = name, version = v } end
+    end
+    return out
+end
+
+local partsAsked = false
+function VC.CheckParts()
+    if partsAsked then return false end
+    local stale = VC.StaleParts()
+    if #stale == 0 then return false end
+    partsAsked = true
+    local list = {}
+    for _, p in ipairs(stale) do list[#list + 1] = p.addon:gsub("^Zacui_", "") .. " " .. p.version end
+    local function Show()
+        local UI = ns.UI
+        if not (UI and UI.Confirm) then
+            Print("These ZacUI parts are not version " .. mine .. ": " .. table.concat(list, ", ")
+                .. ". Update every ZacUI folder together.")
+            return nil
+        end
+        return UI.Confirm({
+            title = "ZacUI parts out of date",
+            text = "These ZacUI parts are not the same version as ZacUI (" .. mine .. "):\n"
+                .. table.concat(list, ", ") .. "\n"
+                .. "Update every ZacUI folder together (the CurseForge app does). Until then they can show "
+                .. "errors that are not real bugs.",
+            acceptText = "Okay", noCancel = true,
+        })
+    end
+    if ns.Popups then ns.Popups.Want("parts", Show, { delay = 2 }) else Show() end
+    return true
 end
 
 -- ============================================================

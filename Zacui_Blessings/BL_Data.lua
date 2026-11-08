@@ -13,6 +13,11 @@
 local ADDON_NAME = ...
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table): where the
+-- part is off the whole part stands down here, before it publishes
+-- anything. Every later file of the part needs ns.BlessingsData and returns
+-- at once without it, so no frame, event or ticker is ever made there.
+if ns.PartOff and ns.PartOff("Zacui_Blessings") then return end
 
 local D = {}
 ns.BlessingsData = D

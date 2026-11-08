@@ -16,6 +16,7 @@
 --          and `true` fifth for a line set all in small capitals (the art's "THE")
 
 local _, ns = ...
+if ns.flavorOff then return end   -- (ZacUI: not on this game version, Core.lua: nothing here loads)
 
 local LAND_INK, LAND_GLOW = { 78, 44, 12 }, { 243, 189, 81 }
 local SEA_INK, SEA_GLOW = { 66, 60, 44 }, { 168, 172, 152 }

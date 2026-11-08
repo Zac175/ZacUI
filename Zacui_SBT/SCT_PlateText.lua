@@ -35,6 +35,10 @@ local ns = _G.ZacUI
 if not ns then return end
 local S = ns.SBT
 if not S then return end
+-- not where there is no combat log to feed it (Forever, or the game-
+-- version override's Forever; Core_Flavor): nothing here loads, and the
+-- page has no nameplate settings
+if ns.FeatureOn and not ns.FeatureOn("sbt_plates") then return end
 local PT = {}
 S.PlateText = PT
 
@@ -198,6 +202,9 @@ end
 
 local function Short(n)
     if not n then return "" end
+    -- (feature cluster 3) the shared formatter's "plate" style is this
+    -- function to the byte, and takes a value the client hides
+    if ns.Numbers then return ns.Numbers.Format(n, "plate") end
     if n < 1000 then return tostring(math_floor(n + 0.5)) end
     if n < 10000 then
         local s = string_format("%.1fk", n / 1000)
@@ -237,7 +244,7 @@ function Cols:GetNum()
         n = CreateFrame("Frame", nil, self.preview and self.root or nil)
         n:SetSize(1, 1)
         n.ic = n:CreateTexture(nil, "ARTWORK")
-        n.ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        ZacUI.Look.CropIcon(n.ic)
         n.ic:SetPoint("BOTTOMLEFT", n, "BOTTOMLEFT", 0, 0)
         n.fs = n:CreateFontString(nil, "OVERLAY")
         n.fs:SetJustifyH("LEFT")

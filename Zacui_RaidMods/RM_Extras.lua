@@ -107,7 +107,7 @@ local function Dress(f, cfg)
         local t = icon:CreateTexture(nil, "ARTWORK")
         t._zui_own = true
         t:SetAllPoints()
-        t:SetTexCoord(0.06, 0.94, 0.06, 0.94)
+        ZacUI.Look.CropIcon(t)
         f.plain = t
         function icon:SetIconTexture(tex) t:SetTexture(tex) end
         function icon:SetGlow() end

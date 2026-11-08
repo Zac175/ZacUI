@@ -20,7 +20,7 @@ local function buildMockFrame(parent, cfg)
     local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     f.cfg = cfg
     f:SetSize(cfg.width, cfg.height)
-    ns.UI:Backdrop(f, cfg.bgColor, cfg.borderColor)
+    ns.UI:FrameBackdrop(f, cfg.bgColor, cfg.borderColor)
     ns.BuildElements(f, true)   -- a preview: kept out of the live frame sets
     return f
 end
@@ -41,6 +41,10 @@ local function fillMock(f, label, hp)
     -- no unit, so ns.UpdateHealPrediction can't run here - this draws by hand
     -- through the same chip pool.
     if ns.MockHealChips then ns.MockHealChips(f, hp) end
+    -- the portrait (when the group wears one): every placeholder shows you
+    if ns.PaintPortrait and f.Portrait then
+        ns.PaintPortrait(f, nil, { isPlayer = true, class = select(2, UnitClass("player")) })
+    end
     if f.Power then
         f.Power:SetMinMaxValues(0, 1); f.Power:SetValue(0.6)
         f.Power:SetStatusBarColor(0.3, 0.4, 0.9)

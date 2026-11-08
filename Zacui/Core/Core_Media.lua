@@ -66,8 +66,9 @@ function Media.BarName()
     return nil
 end
 
--- the file behind the chosen texture; `default` (or ZacUI's gradient)
--- when nothing is chosen or the name is not registered
+-- the file behind the chosen texture; `default` (or the Look's bar file:
+-- ZacUI's gradient under the ZacUI look, Core_Look) when nothing is
+-- chosen or the name is not registered
 function Media.BarPath(default)
     local n = Media.BarName()
     local lsm = LSM()
@@ -75,7 +76,20 @@ function Media.BarPath(default)
         local p = lsm:Fetch("statusbar", n, true)
         if p then return p end
     end
-    return default or ns.TEX_NORM
+    return default or (ns.Look and ns.Look.For(nil).barTexture) or ns.TEX_NORM
+end
+
+-- The fill ZacUI's own bars fall back on when no texture is chosen: the
+-- ZacUI look's (flat, HD polish 2026-11-07) while that look is live, else
+-- ZacUI's gradient as it always was - so the other looks draw exactly
+-- what they drew before.
+function Media.HouseBar()
+    local L = ns.Look
+    if L and L.Active and L.Active() == "zacui" then
+        local z = L.Get and L.Get("zacui")
+        if z and z.barTexture then return z.barTexture end
+    end
+    return ns.TEX_NORM
 end
 
 function Media.SetFont(name)

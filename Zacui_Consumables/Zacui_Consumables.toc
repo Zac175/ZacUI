@@ -1,8 +1,8 @@
-## Interface: 11509, 20506, 16001
+## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Consumables|r
 ## Notes: ZacUI consumable bars: flasks, elixirs, food and jujus, potions, weapon stones and oils - one click each. Readycheck's consumables, potion and weapon bars, ZacUI's way.
 ## Author: Zac
-## Version: 2.0.0
+## Version: 3.0.0
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
