@@ -14,6 +14,19 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.2",
+        date = "2026-11-08",
+        title = "Quieter starting settings",
+        sections = {
+            {
+                type = "changed",
+                items = {
+                    "A fresh install starts with the warrior HUD, the hesitation prompts, the threat screen glow and scrolling combat text off. Each one can be turned on in the settings.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.1",
         date = "2026-11-08",
         title = "A smoother setup and better starting settings",

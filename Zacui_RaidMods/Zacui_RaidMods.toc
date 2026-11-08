@@ -3,7 +3,7 @@
 ## Title: ZacUI |cff33ff99Raid mods|r
 ## Notes: Boss mods for the Classic Era raids (Molten Core to Naxxramas) and, on TBC, Karazhan to the Sunwell, as part of ZacUI: timers, warnings, icons, lists, raid frame and nameplate marks, driven by the combat log. ZacUI's own code - no aura engine needed.
 ## Author: Zac
-## Version: 3.0.1
+## Version: 3.0.2
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui, Zacui_RaidTools

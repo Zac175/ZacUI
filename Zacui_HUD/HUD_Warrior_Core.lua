@@ -39,7 +39,10 @@ local IsCurrentSpell_C   = HUD.IsCurrentSpell
 
 -- Settings storage (ZacUIDB.hud.warrior)
 local DEFAULTS = {
-    enabled = true,
+    -- off on a fresh install (2026-11-08, Zac: "I want all 4 of those
+    -- things off by default"); HUD.Store nil-fills, so a save that already
+    -- has the HUD keeps it on. The Warrior HUD page turns it on.
+    enabled = false,
 
     -- Row/group toggles + saved anchor offsets (WA group offsets, all
     -- relative to screen CENTER). hidden = { [key] = true } removes an

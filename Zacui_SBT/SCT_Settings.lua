@@ -59,7 +59,7 @@ S.AREA_DEFAULTS = AREA_DEFAULTS
 S.AREA_ORDER = { "incoming", "outgoing", "notification", "static" }
 
 local DEFAULTS = {
-    enabled     = true,
+    enabled     = false,      -- off on a fresh install (2026-11-08, Zac); Fill only writes missing keys, so a save that has it keeps it
     font        = false,      -- false: the font ZacUI wears
     outline     = "OUTLINE",  -- "", "OUTLINE", "THICKOUTLINE", "MONOCHROME"
     shadow      = true,

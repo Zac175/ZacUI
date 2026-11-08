@@ -92,7 +92,7 @@ H.STYLES = {
 
 -- Storage: ZacUIDB.hud.hesitation
 local DEFAULTS = {
-    enabled = true,
+    enabled = false,             -- off on a fresh install (2026-11-08, Zac); a save that has it keeps it
     grace = 1.0,
     style = "noob",
     showPopup = false,           -- the big alert box; the nameplate row says it now (2026-10-19)

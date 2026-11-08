@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Bags|r
 ## Notes: ZacUI combined bag and auction house.
 ## Author: Zac
-## Version: 3.0.1
+## Version: 3.0.2
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

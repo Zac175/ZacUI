@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99QoL|r
 ## Notes: ZacUI quality of life: automation, mutes, raid performance mode. Replaces Leatrix Plus.
 ## Author: Zac
-## Version: 3.0.1
+## Version: 3.0.2
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

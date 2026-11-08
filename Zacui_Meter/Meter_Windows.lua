@@ -109,6 +109,10 @@ local function DB()
         d.threat = {
             updateSpeed = 1, absoluteMode = false, hidePullBar = false,
             onlyMyGroup = false, showPartyPets = false,
+            -- (2026-11-08, Zac: off by default) the screen-edge glow is
+            -- written off on a fresh save only; an older save keeps the
+            -- class default it already had (nil = on for a warrior)
+            glow = false,
         }
     end
     -- REV 2: rev 1 shipped the window background drawn - a faithful port
