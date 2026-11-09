@@ -90,6 +90,9 @@ local Preview = {}
 -- the mouse wheel over the sample zooms it (Zac, 2026-11-08): a factor on
 -- the fitted scale, for this session; back to 100% by wheeling back
 Preview.zoom = 1
+-- and a drag on the sample's empty space (left or middle button) moves it
+-- about, in the box's own units; back at 100% it re-centres
+Preview.panX, Preview.panY = 0, 0
 Preview.stats = { updates = 0, builds = 0, replays = 0 }
 
 -- THE STRIP GROWS TO FIT ITS SAMPLE, up to a cap: a share of the
@@ -724,7 +727,7 @@ local function NoteText(e)
     if not e or not e.P then return nil end
     -- (the wheel's zoom over the sample, 2026-11-08)
     if math.abs(Preview.zoom - 1) > 0.001 then
-        return "Zoom " .. math.floor(Preview.zoom * 100 + 0.5) .. "%"
+        return "Zoom " .. math.floor(Preview.zoom * 100 + 0.5) .. "% - drag to move"
     end
     local pct = math.floor((e.P.fit or 1) * 100 + 0.5)
     local scaled = pct < 100
@@ -766,9 +769,9 @@ local function LayoutInside(e, w, h)
     local foot = Foot(e)
     if clipped then
         -- the top of a long list, at its size
-        e.canvas:SetPoint("TOP", view, "TOP", 0, -BOX_PAD / 2 / (R * fit))
+        e.canvas:SetPoint("TOP", view, "TOP", Preview.panX / (R * fit), (Preview.panY - BOX_PAD / 2) / (R * fit))
     else
-        e.canvas:SetPoint("CENTER", view, "CENTER", 0, foot / 2 / (R * fit))
+        e.canvas:SetPoint("CENTER", view, "CENTER", Preview.panX / (R * fit), (Preview.panY + foot / 2) / (R * fit))
     end
     e.foot = foot
     e.P.scale, e.P.fit, e.P.real, e.P.clipped = R * fit, fit, R, clipped
@@ -1048,8 +1051,35 @@ local function EnsureDock()
         if math.abs(z - 1) < 0.05 then z = 1 end
         if z == Preview.zoom then return end
         Preview.zoom = z
+        if z == 1 then Preview.panX, Preview.panY = 0, 0 end
         Layout()
     end)
+    -- the pan: press on the box (not on a piece - those drag themselves),
+    -- move, let go; one re-lay per frame while it moves
+    view:EnableMouse(true)
+    local panFrom
+    view:SetScript("OnMouseDown", function(self, button)
+        if button ~= "LeftButton" and button ~= "MiddleButton" then return end
+        local x, y = GetCursorPosition()
+        local s = self:GetEffectiveScale() or 1
+        panFrom = { x / s, y / s, Preview.panX, Preview.panY }
+        self:SetScript("OnUpdate", function()
+            if not panFrom then self:SetScript("OnUpdate", nil) return end
+            local cx, cy = GetCursorPosition()
+            local nx = panFrom[3] + (cx / s - panFrom[1])
+            local ny = panFrom[4] + (cy / s - panFrom[2])
+            if nx ~= Preview.panX or ny ~= Preview.panY then
+                Preview.panX, Preview.panY = nx, ny
+                Layout()
+            end
+        end)
+    end)
+    local function StopPan(self)
+        panFrom = nil
+        self:SetScript("OnUpdate", nil)
+    end
+    view:SetScript("OnMouseUp", StopPan)
+    view:HookScript("OnHide", StopPan)
 
     -- FOLDED: the whole slim bar opens it again, lit on hover.
     slim = CreateFrame("Button", nil, dock)
