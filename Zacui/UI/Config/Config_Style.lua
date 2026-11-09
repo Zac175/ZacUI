@@ -339,13 +339,20 @@ function Look.Cards(parent, opts)
                         tooltip = (not loaded) and ("Turn " .. p.label .. " on to give it a look.") or nil,
                         checked = function() return Look.EffectiveFor(key) == id end,
                         func = function()
-                            -- ticking moves the part here; it leaves a card
-                            -- only by being ticked under another
+                            -- ticking moves the part here; unticking it
+                            -- sends it back (2026-11-08, Zac: "cant click
+                            -- these again to deselect them"): to the look
+                            -- that is on everywhere, or to ZacUI's look when
+                            -- this card IS that look
                             if Look.EffectiveFor(key) ~= id then
                                 Look.StagePart(key, id)
-                                holder:Refresh()
-                                if opts.onParts then opts.onParts() end
+                            else
+                                local global = Look.Pending() or Look.Active()
+                                local back = (id ~= global) and global or (id ~= "zacui" and "zacui" or nil)
+                                if back then Look.StagePart(key, back) end
                             end
+                            holder:Refresh()
+                            if opts.onParts then opts.onParts() end
                         end,
                     }
                 end

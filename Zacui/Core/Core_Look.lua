@@ -183,8 +183,8 @@ local CAST_BORDER   = "Interface\\CastingBar\\UI-CastingBar-Border"
 LOOKS.classic = {
     id = "classic",
     name = "Classic WoW UI",
-    tag = "Old gold",
-    desc = "The 2004 gold borders, rings and round minimap.",
+    tag = "Original 2004",
+    desc = "The 2004 frames, portrait rings, stone action bar and round minimap.",
     -- the card's colour (match pass, 2026-11-07: each look its own accent,
     -- the reference picker's values, zui_tests/MATCH_SPEC_1107.md): bronze
     rule = { r = 0.86, g = 0.65, b = 0.42 },
@@ -682,6 +682,10 @@ local function DressWindow(f, look)
         if bfill and bfill.SetAlpha then bfill:SetAlpha(0) end
         local art = rawget(bar, "_zArt")
         if art and art.SetAlpha then art:SetAlpha(0) end
+        -- the flat header's hairline is ZacUI's too: under a game look it
+        -- drew a line straight through the title (Zac 2026-11-08)
+        local rule = rawget(bar, "_zFlatRule")
+        if rule and rule.SetAlpha then rule:SetAlpha(0) end
     end
 end
 Look.dressers.window = DressWindow

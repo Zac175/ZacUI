@@ -987,7 +987,7 @@ end
 -- Report to chat in the foot. The recap itself keeps its size.
 local RECAP_PANEL_H = RECAP_H - UM.TITLEBAR - 34 - 34
 local function BuildRecap()
-    local f = UI.Popup("ZacUIMeterDeathRecap", RECAP_W, RECAP_H, "Death recap")
+    local f = UI.Popup("ZacUIMeterDeathRecap", RECAP_W, RECAP_H, "Death recap", { part = "meter" })
     local top, pad = f.headerHeight, f.pad
     f.prev = UI.SettingsBuild(UI.Button, f, "<", { width = 26, height = 24, tooltip = "An earlier death" })
     f.prev:SetPoint("TOPLEFT", f, "TOPLEFT", pad, -top)

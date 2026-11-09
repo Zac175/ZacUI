@@ -530,8 +530,10 @@ local function LayoutAlt(view)
     -- the window fits what it shows (the live layout puts its own size
     -- back when you return to your own bags)
     local PAD, HEADER, FOOTER = 10, 56, 22
-    local w = PAD * 2 + cols * size + (cols - 1) * gap
-    local h = M.TITLEBAR + HEADER + math.max(y - gap, size) + FOOTER + 6
+    -- (the window's own spots: ZacUI's, or the client's bag's under its chrome)
+    local geo = view.geo or { l = PAD, r = PAD, top = M.TITLEBAR + HEADER, bottom = FOOTER + 6 }
+    local w = geo.l + geo.r + cols * size + (cols - 1) * gap
+    local h = geo.top + math.max(y - gap, size) + geo.bottom
     view.frame:SetSize(math.max(300, w), h)
     local ago = rec.t and (time() - rec.t) or nil
     local when = ago and ((ago < 60 and "just now") or (ago < 3600 and (math.floor(ago / 60) .. " min ago"))
@@ -582,7 +584,11 @@ local function BuildViewDrop(view)
     grid:Hide()
     view.altGrid = grid
     local note = UI.Font(frame, F.SMALL, { cat = "text", key = "gray" })
-    note:SetPoint("BOTTOMLEFT", 10, 7)
+    if view.coinBand then
+        note:SetPoint("LEFT", view.coinBand, "LEFT", 8, 0)
+    else
+        note:SetPoint("BOTTOMLEFT", 10, 7)
+    end
     note:Hide()
     view.altNote = note
     local dd = UI.Dropdown(frame, { width = 150,
@@ -605,7 +611,7 @@ local function BuildViewDrop(view)
     local last = view.bagSlots and view.bagSlots[#view.bagSlots]
     if last then
         dd:SetPoint("TOP", last, "TOP", 0, 0)
-        dd:SetPoint("RIGHT", frame, "RIGHT", -10, 0)
+        dd:SetPoint("RIGHT", frame, "RIGHT", -((view.geo and view.geo.r) or 10), 0)
     else
         dd:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -(M.TITLEBAR + 30))
     end

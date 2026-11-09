@@ -577,7 +577,17 @@ function UI.ColorPicker(parent, opts)
         host:_zPaint()
         Changed("color")
     end
-    host:SetScript("OnClick", function()
+    host:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    host:SetScript("OnClick", function(self, button)
+        if button == "RightButton" then
+            -- right-click: back to the theme colour (Zac 2026-11-08)
+            if ColorPickerFrame and ColorPickerFrame:IsShown() then ColorPickerFrame:Hide() end
+            if type(opts.reset) == "function" then pcall(opts.reset)
+            elseif opts.set then pcall(opts.set, nil) end
+            host:_zPaint()
+            Changed("color")
+            return
+        end
         local r, g, b, a = Read()
         UI.OpenColorPicker({ r = r, g = g, b = b, a = a, alpha = opts.alpha,
             onChange = Put, onCancel = Put })

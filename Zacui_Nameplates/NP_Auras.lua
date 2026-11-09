@@ -38,13 +38,38 @@ local function GetAura(unit, index, filter)
             if hiddenClient then return false, a end
             return
         end
-        return a.icon, a.applications, a.duration, a.expirationTime
+        return a.icon, a.applications, a.duration, a.expirationTime, a.name
     elseif UnitAura then
         local name, icon, count, _, duration, expirationTime =
             UnitAura(unit, index, filter)
         if not name then return end
-        return icon, count, duration, expirationTime
+        return icon, count, duration, expirationTime, name
     end
+end
+
+-- A debuff ZacUI's own debuff groups draw on this plate already (Faerie
+-- Fire, the curses, Demoralizing Shout... in the row under the bar;
+-- Sunder as the count at its end): this strip leaves it to them, so it
+-- shows once, in the row with the others (2026-11-08, Zac: "why is there
+-- a demo shout icon behind the noob stuff and not under the mob name
+-- like ff and curse of reck").
+local function OwnedByGroups(name)
+    local D = NP.Debuffs
+    return name ~= nil and D ~= nil and D.Shows ~= nil and D.Shows(name)
+end
+
+-- The HUD's BT/WW row (HUD > Hesitation) standing over this plate right
+-- now, else nil. It stands over the name, where this strip goes: while
+-- it is there the strip goes over the row instead, never behind it.
+local function RowOver(f)
+    local H = ns.Hesitation
+    return H and H.RowOver and H.RowOver(f) or nil
+end
+
+-- the row came onto one plate and/or left another (HUD_Hesitation)
+function NP.RowOverChanged(was, now)
+    if was and was.auras then NP.LayoutAuras(was) end
+    if now and now ~= was and now.auras then NP.LayoutAuras(now) end
 end
 
 -- ============================================================
@@ -114,7 +139,10 @@ function NP.LayoutAuras(f)
     -- the bar, the name moved up to clear it, and the auras have to keep
     -- their spacing above the name rather than land on top of it.
     -- (match pass: 2 px over a name above the bar, the reference's row)
-    if NP.MatchOn and NP.MatchOn() and f.name and not f._nameInside and not f.nameOnly then
+    local row = RowOver(f)
+    if row then
+        NP.Place(f, holder, "auras", NP.SetDef(f, "auras", "BOTTOM", row, "TOP", 0, 2))
+    elseif NP.MatchOn and NP.MatchOn() and f.name and not f._nameInside and not f.nameOnly then
         NP.Place(f, holder, "auras", NP.SetDef(f, "auras", "BOTTOM", f.name, "TOP", 0, 2))
     else
         NP.Place(f, holder, "auras", NP.SetDef(f, "auras", "BOTTOM", f, "TOP", 0, 14 + (f._iconOverhang or 0)))
@@ -149,12 +177,14 @@ function NP.UpdateAuras(f)
     local shown = 0
     local index = 1
     while shown < d.auras.max do
-        local icon, count, duration, expirationTime =
+        local icon, count, duration, expirationTime, aname =
             GetAura(f.unit, index, filter)
         if icon == nil or (hiddenClient and index > 40) then break end
         index = index + 1
 
-        if icon == false then
+        if icon ~= false and OwnedByGroups(aname) then
+            -- (drawn by the debuff groups: see OwnedByGroups)
+        elseif icon == false then
             -- (WoW Forever: hidden details; `count` holds the aura's table)
             if count then
                 shown = shown + 1

@@ -14,6 +14,51 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.3",
+        date = "2026-11-08",
+        title = "Sharper buttons and a Twitch link",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "A Twitch button next to the Discord one in the settings.",
+                    "Classic WoW UI: the original stone bar behind the main action bar.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "Close buttons, switches and slider knobs are sharper at any UI scale.",
+                    "Settings: Reload and the window's size are small icons in the header; the bar along the bottom is gone.",
+                    "The colour picker is smooth, and right-clicking a colour box resets it.",
+                    "Small popups have a smaller close button, and their buttons always show.",
+                    "Chat: the icons sit in a column joined to the chat's left side and show when the mouse is over the chat (the Chat page can keep them always up). The Party / Chat / Hide msgs buttons over the chat are gone - the icons do the same jobs.",
+                    "Style page: a part ticked under a look can be unticked again.",
+                    "The \"Move in Edit Mode\" tag on the settings pages is gone; Edit Mode is in the sidebar.",
+                    "Windows use the flat header from the settings, with no sparkle.",
+                    "Bags under the WoW Forever and Blizzard looks use the game's own bag window: the portrait, rim, title, close button and coin box.",
+                    "Classic WoW UI on WoW Forever: the minimap gets the 2004 grey ring and zone bar, the character pane and spellbook the 2004 look, and the bag bar and menu buttons their 2004 art.",
+                    "Nameplates: the hesitation icons sit above the mob's name instead of on it, and Demoralizing Shout shows with your other debuffs under the bar.",
+                    "The changelog window is more compact.",
+                    "Classic WoW UI on WoW Forever: the game's own windows (character, spellbook, vendors, quests, mail, bank, friends, options, popups, tooltips and more) wear the 2004 border, gold title, round close button, old tabs and old buttons.",
+                    "Known issue: a few windows may still not fully match the look you picked (the world map keeps ZacUI's own frame). Keep sending screenshots.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "Buffs and the bag bar were not getting ZacUI's look on Era and TBC.",
+                    "A second close button on the loot window on Era and TBC.",
+                    "Square corners on the nameplate target glow.",
+                    "The colour picker's colour wheel was blank on Era and TBC, and the picker could open behind the settings.",
+                    "The mount button on Era and TBC used a call that only works on WoW Forever and never mounted you; it uses your mount from your bags again.",
+                    "The auction house buy window: the Buy button no longer covers the text, and it shows the amount and price again.",
+                    "An error in the unit frame preview.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.2",
         date = "2026-11-08",
         title = "Quieter starting settings",

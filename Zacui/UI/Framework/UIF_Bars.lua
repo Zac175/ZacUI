@@ -305,7 +305,17 @@ local function SkinSecureIcon(btn, opts)
     -- On some buttons (bag slots, the keyring) it is the ARTWORK itself,
     -- and killing it empties the slot - so it is only cropped there.
     local normal = btn.GetNormalTexture and btn:GetNormalTexture()
-    if normal then
+    -- ...but on a bag slot with a picture of its own (the client's
+    -- ItemButtonTemplate: the bag in $parentIconTexture, the NormalTexture
+    -- the 64 x 64 grey Quickslot frame round it; Forever's bag-border
+    -- atlas) the NormalTexture is only the frame, and it stood as the big
+    -- grey slot round ZacUI's border (Zac on TBC Anniversary, 2026-11-08).
+    -- Hidden by alpha, never emptied: the picture is the icon. The key
+    -- ring (its NormalTexture is its picture, no icon) keeps it.
+    if normal and opts.keepNormal and type(icon) == "table" and icon ~= normal
+        and icon.SetTexCoord and normal.SetAlpha then
+        normal:SetAlpha(0)
+    elseif normal then
         if opts.keepNormal then
             if normal.SetTexCoord then ns.Look.CropIcon(normal, nil, nil, { border = false }) end
             SharpenIcon(normal)

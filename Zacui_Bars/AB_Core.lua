@@ -2394,6 +2394,7 @@ local function HideChrome(st)
     if not st then return end
     if st.host then st.host:Hide() end
     if st.under then st.under:Hide() end
+    if st.stone then st.stone:Hide() end
 end
 
 -- Paints bar n's chrome round its button grid (count buttons of `size`,
@@ -2413,8 +2414,11 @@ function AB.KitChrome(header, cfg, size, count, n)
     local set = c and CapArt(c)
     local capsOn = c ~= nil and not vertical and AB.KitCapsOn(cfg, n)
     local frameOn = kit == "forever" and AB.KitFrameOn(cfg, n) and AB.AtlasOK(AB.KIT_FRAME.frame)
+    -- Classic WoW UI: the original main bar's stone behind a one-row bar
+    -- (Zac 2026-11-08: "even in elesmere he had the vanilla art correct")
+    local stoneOn = kit == "classic" and not vertical and rows == 1 and AB.KitFrameOn(cfg, n)
     WaitFaction(capsOn and set == nil and c.art ~= nil)
-    if not capsOn and not frameOn then return HideChrome(st) end
+    if not capsOn and not frameOn and not stoneOn then return HideChrome(st) end
     if not st then st = {} rawset(header, "_zChrome", st) end
 
     local anchor, v, hz = AB.AnchorOf(cfg)
@@ -2534,6 +2538,48 @@ function AB.KitChrome(header, cfg, size, count, n)
         under:Show()
     elseif under then
         under:Hide()
+    end
+
+    -- Classic WoW UI's stone: the stock main bar art (MainMenuBarTexture0
+    -- and 1 of FrameXML: UI-MainMenuBar-Dwarf, two 256 x 43 strips) laid
+    -- under the buttons as the stock bar lays it under its twelve 36 px
+    -- buttons - 8 px of stone left of the first, 6 right of the last, 4
+    -- below and 3 above - stretched to this bar's own row
+    local stone = st.stone
+    if stoneOn then
+        local k = size / 36
+        if not stone then
+            stone = CreateFrame("Frame", nil, header)
+            stone._zui_own = true
+            stone:EnableMouse(false)
+            st.stone = stone
+            st.stoneL = stone:CreateTexture(nil, "BACKGROUND", nil, -4)
+            st.stoneR = stone:CreateTexture(nil, "BACKGROUND", nil, -4)
+            for i, t in ipairs({ st.stoneL, st.stoneR }) do
+                t._zui_own = true
+                t:SetTexture("Interface\\MainMenuBar\\UI-MainMenuBar-Dwarf")
+            end
+            st.stoneL:SetTexCoord(0, 1, 0.83203125, 1.0)
+            st.stoneR:SetTexCoord(0, 1, 0.58203125, 0.75)
+        end
+        stone:SetFrameLevel(math.max(0, lvl - 1))
+        stone:ClearAllPoints()
+        stone:SetPoint(anchor, header, anchor, ox, oy)
+        stone:SetSize(gw, gh)
+        -- across, the stock bar's 42 px step (36 + 6) scaled to this bar's
+        -- step, so the art's button bays sit under the buttons
+        local kx = (count == 12) and ((size + padX) / 42) or k
+        local l, b, t = -8 * kx, -4 * k, 3 * k
+        local r = (count == 12) and (l + 512 * kx - gw) or 6 * kx
+        st.stoneL:ClearAllPoints()
+        st.stoneL:SetPoint("TOPLEFT", stone, "TOPLEFT", l, t)
+        st.stoneL:SetPoint("BOTTOMRIGHT", stone, "BOTTOM", (l + r) / 2, b)
+        st.stoneR:ClearAllPoints()
+        st.stoneR:SetPoint("TOPLEFT", stone, "TOP", (l + r) / 2, t)
+        st.stoneR:SetPoint("BOTTOMRIGHT", stone, "BOTTOMRIGHT", r, b)
+        stone:Show()
+    elseif stone then
+        stone:Hide()
     end
 end
 

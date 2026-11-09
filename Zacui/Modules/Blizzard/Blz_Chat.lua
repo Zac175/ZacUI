@@ -2817,6 +2817,24 @@ function RM.PaintStrip()
     s.msgBtn:SetShown(not RM.peek)
     PaintUnread()
     s.msgBtn:SetLabel(DB().raidMsgsHidden and "Show msgs" or "Hide msgs")
+    -- (2026-11-08, Zac: the Party / Chat / Show msgs / Hide msgs buttons
+    -- go - the chat rail's raid-frames, chat and messages icons do the
+    -- same jobs). The strip stays as the frames' holder, but draws nothing
+    -- and takes no clicks, and the chat's tabs keep their width.
+    if RM.RailHasSwap == nil or RM.RailHasSwap() then
+        s.raidBtn:Hide()
+        s.chatBtn:Hide()
+        s.msgBtn:Hide()
+        s:EnableMouse(false)
+        DockInset(0)
+    end
+end
+-- the rail is up with its swap icons (Chat_Panel): then the strip's own
+-- buttons are not needed
+function RM.RailHasSwap()
+    local CP = Chat.Panel or ns.ChatPanel
+    if CP and CP.RailOn then return CP.RailOn() and true or false end
+    return true
 end
 
 function RM.Build()

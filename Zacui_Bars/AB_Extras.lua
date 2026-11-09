@@ -394,10 +394,174 @@ local function ApplyBagBar(profile)
         for _, b in ipairs(bagbar.buttons) do
             local hm = b.zHome
             if hm and hm.w and hm.w > 0 and hm.h and hm.h > 0 and b ~= KeyRingButton then b:SetSize(hm.w, hm.h) end
+            if AB.Kit() == "classic" and AB.Modern2004() then AB.ClassicBagSlot(b) end
         end
     end
 end
 AB.RegisterApplier(ApplyBagBar)
+
+-- ============================================================
+-- CLASSIC WOW UI ON A MODERN CLIENT: THE 2004 BAG SLOTS AND MICRO MENU
+-- ============================================================
+-- Era and TBC draw these in the 2004 art themselves. Forever and Retail
+-- draw their bronze bag borders and micro buttons (Zac 2026-11-08: "they
+-- still have Forever's gold/bronze borders"), so under Classic WoW UI on
+-- those clients:
+--   bag slots   the vanilla bag slot: the Quickslot ring (64 on a 37
+--               slot, one down) as the slot's frame, the square hilight,
+--               the checked hilight while its bag is open
+--   micro menu  each button's vanilla file (UI-MicroButton-<name>-Up /
+--               -Down, the 32 x 40 button in the lower 40 rows of its
+--               32 x 64 sheet; the shared hilight), the character
+--               button's portrait in the vanilla face window (18 x 25,
+--               4 under the top, texcoords 0.2-0.8 / 0.0666-0.9); a
+--               button with no vanilla file (professions, the store...)
+--               or a client without the file keeps its art, gone grey.
+-- Region calls only (the client's buttons; some are protected). The
+-- client re-sets a micro button's atlases on press and release
+-- (MainMenuBarMicroButtonMixin SetPushed / SetNormal): each puts ours
+-- back after it. Under every other look none of this runs.
+local QUICKSLOT = "Interface\\Buttons\\UI-Quickslot2"
+local HILIGHT_SQ = "Interface\\Buttons\\ButtonHilight-Square"
+local CHECK_HI = "Interface\\Buttons\\CheckButtonHilight"
+local MICRO_HI = "Interface\\Buttons\\UI-MicroButton-Hilight"
+local MICRO_TC = { 0, 1, 24 / 64, 1 }
+-- the vanilla / TBC sheet each button wears (by the client's button name)
+AB.MICRO_2004 = {
+    CharacterMicroButton = "Character", SpellbookMicroButton = "Spellbook", TalentMicroButton = "Talents",
+    QuestLogMicroButton = "Quest", SocialsMicroButton = "Socials", WorldMapMicroButton = "World",
+    MainMenuMicroButton = "MainMenu", HelpMicroButton = "Help", LFDMicroButton = "LFG",
+}
+
+function AB.Modern2004()
+    local P = ns.Look and ns.Look.Panels
+    return (P and P.Modern and P.Modern()) and true or false
+end
+local function FileOK(path)
+    local P = ns.Look and ns.Look.Panels
+    if P and P.FileOK then return P.FileOK(path) end
+    return true
+end
+local function Grey(t)
+    local P = ns.Look and ns.Look.Panels
+    if P and P.Grey then P.Grey(t) end
+end
+local function IsTex(t) return type(t) == "table" and t.SetTexture ~= nil end
+
+local function Art(t, file, tc)
+    if not IsTex(t) then return end
+    t:SetTexture(file)
+    if t.SetTexCoord then
+        if tc then t:SetTexCoord(tc[1], tc[2], tc[3], tc[4]) else t:SetTexCoord(0, 1, 0, 1) end
+    end
+    if t.SetDesaturated then t:SetDesaturated(false) end
+    if t.SetVertexColor then t:SetVertexColor(1, 1, 1, 1) end
+end
+
+function AB.ClassicBagSlot(b)
+    if type(b) ~= "table" or b == KeyRingButton then return end
+    local w, h = b:GetWidth(), b:GetHeight()
+    if type(w) ~= "number" or w <= 0 then w = 37 end
+    if type(h) ~= "number" or h <= 0 then h = w end
+    local nt = b.GetNormalTexture and b:GetNormalTexture()
+    if not IsTex(nt) then nt = rawget(b, "NormalTexture") end
+    if IsTex(nt) then
+        Art(nt, QUICKSLOT)
+        nt:SetAlpha(1)
+        nt:ClearAllPoints()
+        nt:SetSize(w * 64 / 37, h * 64 / 37)
+        nt:SetPoint("CENTER", b, "CENTER", 0, -h / 37)
+    end
+    local hl = b.GetHighlightTexture and b:GetHighlightTexture()
+    if IsTex(hl) then
+        Art(hl, HILIGHT_SQ)
+        if hl.SetBlendMode then hl:SetBlendMode("ADD") end
+        hl:ClearAllPoints() hl:SetAllPoints(b)
+    end
+    local sh = rawget(b, "SlotHighlightTexture")
+    if IsTex(sh) then
+        Art(sh, CHECK_HI)
+        if sh.SetBlendMode then sh:SetBlendMode("ADD") end
+        sh:ClearAllPoints() sh:SetAllPoints(b)
+    end
+    rawset(b, "_zKit2004", nt or true)
+    -- the client puts its own border back on some updates
+    if not rawget(b, "_zKit2004Hook") then
+        rawset(b, "_zKit2004Hook", true)
+        for _, m in ipairs({ "SetNormalAtlas", "SetNormalTexture" }) do
+            if type(b[m]) == "function" then
+                hooksecurefunc(b, m, function(self)
+                    if AB.Kit() == "classic" and AB.Modern2004() then AB.ClassicBagSlot(self) end
+                end)
+            end
+        end
+    end
+end
+
+-- the character button's portrait in the vanilla face window
+local function MicroPortrait(b, pushed)
+    local pt = rawget(b, "Portrait")
+    if not IsTex(pt) then return end
+    local mask = rawget(b, "PortraitMask")
+    if mask and pt.RemoveMaskTexture then pcall(pt.RemoveMaskTexture, pt, mask) end
+    local w, h = b:GetWidth(), b:GetHeight()
+    if type(w) ~= "number" or w <= 0 then w = 32 end
+    if type(h) ~= "number" or h <= 0 then h = 40 end
+    local kw, kh = w / 32, h / 40
+    pt:ClearAllPoints()
+    pt:SetSize(18 * kw, 25 * kh)
+    pt:SetPoint("TOP", b, "TOP", (pushed and 1 or 0) * kw, -(pushed and 5 or 4) * kh)
+    if pt.SetTexCoord then pt:SetTexCoord(0.2, 0.8, 0.0666, 0.9) end
+    for _, k in ipairs({ "Shadow", "PushedShadow" }) do
+        local s = rawget(b, k)
+        if s and s.SetAlpha then s:SetAlpha(0) end
+    end
+end
+
+function AB.ClassicMicro(b)
+    if type(b) ~= "table" then return end
+    local name = b.GetName and b:GetName()
+    local sheet = name and AB.MICRO_2004[name]
+    local base = sheet and ("Interface\\Buttons\\UI-MicroButton-" .. sheet .. "-")
+    local own = base and FileOK(base .. "Up") and FileOK(base .. "Down")
+    local nt = b.GetNormalTexture and b:GetNormalTexture()
+    local pt = b.GetPushedTexture and b:GetPushedTexture()
+    local dt = b.GetDisabledTexture and b:GetDisabledTexture()
+    local ht = b.GetHighlightTexture and b:GetHighlightTexture()
+    if own then
+        Art(nt, base .. "Up", MICRO_TC)
+        Art(pt, base .. "Down", MICRO_TC)
+        Art(dt, FileOK(base .. "Disabled") and (base .. "Disabled") or (base .. "Up"), MICRO_TC)
+        if dt and dt.SetDesaturated and not FileOK(base .. "Disabled") then dt:SetDesaturated(true) end
+        if FileOK(MICRO_HI) then
+            Art(ht, MICRO_HI, MICRO_TC)
+            if ht and ht.SetBlendMode then ht:SetBlendMode("ADD") end
+        end
+        for _, k in ipairs({ "Background", "PushedBackground" }) do
+            local x = rawget(b, k)
+            if x and x.SetAlpha then x:SetAlpha(0) end
+        end
+        if rawget(b, "Portrait") then MicroPortrait(b, rawget(b, "_zKitPushed")) end
+        rawset(b, "_zKit2004", base)
+    else
+        Grey(nt) Grey(pt) Grey(dt) Grey(ht)
+        Grey(rawget(b, "Background")) Grey(rawget(b, "PushedBackground"))
+        rawset(b, "_zKit2004", "grey")
+    end
+    if not rawget(b, "_zKit2004Hook") then
+        rawset(b, "_zKit2004Hook", true)
+        local function again(self) if AB.Kit() == "classic" and AB.Modern2004() then AB.ClassicMicro(self) end end
+        for _, m in ipairs({ "SetNormal", "SetPushed", "SetNormalAtlas", "SetPushedAtlas", "SetHighlightAtlas" }) do
+            if type(b[m]) == "function" then
+                hooksecurefunc(b, m, function(self)
+                    if m == "SetPushed" then rawset(self, "_zKitPushed", true)
+                    elseif m == "SetNormal" then rawset(self, "_zKitPushed", nil) end
+                    again(self)
+                end)
+            end
+        end
+    end
+end
 
 -- ============================================================
 -- MICRO MENU
@@ -519,6 +683,11 @@ local function ApplyMicro(profile)
     if UpdateMicroButtonsParent then pcall(UpdateMicroButtonsParent, micro) end
     SmallBarCommon(micro, cfg, micro.buttons, 32, #micro.buttons, cfg.initial)
     MicroLayout()
+    -- Classic WoW UI on Forever / Retail: the 2004 micro buttons (after
+    -- the layout: the portrait is fitted to the laid-out button)
+    if stockArt and AB.Kit() == "classic" and AB.Modern2004() then
+        for _, b in ipairs(micro.buttons) do AB.ClassicMicro(b) end
+    end
 end
 AB.RegisterApplier(ApplyMicro)
 

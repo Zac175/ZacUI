@@ -98,7 +98,7 @@ local function DefaultGroups()
                       "demoshout", "demoroar", "curseofweakness", "thunderclap", "thunderfury", "disarm",
                       "judgelight", "judgewisdom", "huntersmark" },
           memberOn = { curseofelements = false, curseofshadow = false,
-                       demoshout = false, demoroar = false, curseofweakness = false, thunderclap = false,
+                       curseofweakness = false, thunderclap = false,
                        thunderfury = false, disarm = false,
                        judgelight = false, judgewisdom = false, huntersmark = false } },
     }
@@ -168,6 +168,20 @@ local function Cfg()
         c._rowLevelV1 = true
         for _, g in ipairs(c.groups) do
             if g.id == "under" and g.offsetY == -3 then g.offsetY = -2 end
+        end
+    end
+    -- Demoralizing Shout / Roar join the row (2026-11-08, Zac: "why is
+    -- there a demo shout icon behind the noob stuff and not under the mob
+    -- name like ff and curse of reck"): shipped muted, so the plate's
+    -- other aura strip drew it over the name instead. A save still on the
+    -- shipped mute is unmuted once; the tick box still turns it off.
+    if not c._demoRowV1 then
+        c._demoRowV1 = true
+        for _, g in ipairs(c.groups) do
+            if g.id == UNDER_ID and type(g.memberOn) == "table" then
+                if g.memberOn.demoshout == false then g.memberOn.demoshout = nil end
+                if g.memberOn.demoroar == false then g.memberOn.demoroar = nil end
+            end
         end
     end
     if not c._layoutEV1 then
@@ -439,6 +453,25 @@ end
 local active, friendly, dirty = {}, {}, {}
 local hasDirty = false
 local running = false          -- between D.Start and D.Stop
+
+-- Does a group draw this debuff (by its name) on the plates right now -
+-- the module running, the debuff ticked in a group that is on? The
+-- plate's other aura strip (NP_Auras) leaves those to the groups, so
+-- each debuff shows once, in its group's spot.
+function D.Shows(name)
+    if not running or type(name) ~= "string" then return false end
+    if not next(byName) then ResolveCatalog() end
+    local key = byName[name]
+    if not key then return false end
+    for _, g in ipairs(Cfg().groups) do
+        if g.enabled and MemberEnabled(g, key) then
+            for _, m in ipairs(g.members or {}) do
+                if m == key then return true end
+            end
+        end
+    end
+    return false
+end
 
 -- what a group measures from: always the health bar's own edges and
 -- corners - a group hanging under the plate drops further by whatever

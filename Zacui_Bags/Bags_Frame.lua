@@ -647,8 +647,9 @@ local function KitButton(b)
 end
 
 -- the sort button on a modern look: the bag's own autosort button art
--- (the panel button where the client lacks it)
-local function KitSortButton(b, kit)
+-- (the panel button where the client lacks it). tpl: the combined bag's
+-- own button (BagItemAutoSortButton: 28 x 26, its hover 24 x 23 centred)
+local function KitSortButton(b, kit, tpl)
     if kit == "classic" or not AtlasOK(KIT.sortUp) then return KitButton(b) end
     HideFlat(b)
     for _, r in ipairs({ b:GetRegions() }) do
@@ -667,11 +668,181 @@ local function KitSortButton(b, kit)
     b:HookScript("OnMouseUp", function() p:Hide() n:Show() end)
     b:HookScript("OnLeave", function() p:Hide() n:Show() end)
     local hi = OwnTex(b, "HIGHLIGHT")
-    hi:SetAllPoints(b)
+    if tpl then
+        b:SetSize(tpl.w, tpl.h)
+        hi:SetPoint("CENTER", b, "CENTER", 0, 0)
+        hi:SetSize(tpl.hiW, tpl.hiH)
+    else
+        hi:SetAllPoints(b)
+    end
     FileArt(hi, KIT.hilight)
     if hi.SetBlendMode then hi:SetBlendMode("ADD") end
     rawset(b, "_zKitBtn", true)
     return b
+end
+
+-- ------------------------------------------------------------ the client's own bag chrome
+-- (2026-11-08, Zac: the bag under the modern looks has to look exactly
+-- like the client's own "Combined Backpack".) Where the client has the
+-- template the combined bag is built from, ZacUI's bag and bank windows
+-- wear a frame of that very template laid under them (same box, the
+-- window's level, no mouse): its portrait ring with the backpack's icon,
+-- its metal rim, its title band, its red close button, its flat panel.
+-- ZacUI's content sits where the client's bag puts its own. Every number
+-- is Blizzard's (wow-ui-source live, Blizzard_UIPanels_Game/Mainline/
+-- ContainerFrame.xml + .lua, Blizzard_SharedXML/Mainline/NineSliceLayouts,
+-- Blizzard_MoneyFrame/Mainline/MoneyFrame.xml):
+--   ContainerFrameCombinedBags inherits PortraitFrameFlatTemplate, wears
+--     the NineSlice layout HeldBagLayout (its layoutType)
+--   ContainerFrame_OnLoad: SetPortraitTextureSizeAndOffset(36, -4, 1),
+--     SetTitleOffsets(35); UpdateMiscellaneousFrames: SetPortraitToAsset
+--     ("Interface/Icons/Inv_misc_bag_08")
+--   SetSearchBoxPoint: TOPLEFT 62, -37, width 330 on the 430 bag (its right
+--     edge 38 in), BagItemSearchBox 18 high
+--   BagItemAutoSortButton: 28 x 26 at TOPRIGHT -9, -34, hover 24 x 23
+--   GetPaddingWidth 15 (the slots end 8 in from the right, so 7 at the
+--     left); the slots start 75 below the top (GetPaddingHeight 75 +
+--     CalculateExtraHeight money 16 + 12, the first slot 4 over the money)
+--   MoneyFrame: BOTTOMLEFT 8, 8 to BOTTOMRIGHT -8, 8, 16 high, its Border
+--     common-coinbox-left / _common-coinbox-center / common-coinbox-right
+--     (8 | middle | 8 on 17); SmallMoneyFrame's copper 13 in from its right
+-- ZacUI's own bag-slot row has no twin in the client's bag: it sits in a
+-- row of its own between the search box and the slots (BAGBTN + 7 more).
+-- Classic WoW UI keeps the dialog border (the Era / TBC clients have no
+-- such template, and the classic container art is per-bag, not sizeable).
+local TPL = {
+    name = "PortraitFrameFlatTemplate", layout = "HeldBagLayout",
+    portrait = "Interface/Icons/Inv_misc_bag_08", pSize = 36, pX = -4, pY = 1, titleLeft = 35,
+    searchX = 62, searchY = -37, searchR = -38, searchH = 18,
+    sort = { w = 28, h = 26, x = -9, y = -34, hiW = 24, hiH = 23 },
+    left = 7, right = 8, slotsTop = 75, rowGap = 7, firstOverMoney = 4,
+    moneyX = 8, moneyY = 8, moneyH = 16, copperIn = 13,
+    coin = { "common-coinbox-left", "_common-coinbox-center", "common-coinbox-right" }, coinCap = 8, coinH = 17,
+}
+
+-- does this client have the template (asked once)
+local tplOK
+local function ChromeOK()
+    if tplOK == nil then
+        tplOK = false
+        local X = C_XMLUtil
+        if X and X.GetTemplateInfo then
+            local ok, info = pcall(X.GetTemplateInfo, TPL.name)
+            tplOK = (ok and info ~= nil) and true or false
+        end
+    end
+    return tplOK
+end
+
+-- the template's frame under view's window (nil when the client could not
+-- build it whole: the window then keeps the look's own dress)
+-- Classic WoW UI keeps the dialog dress: its 32 px round close reaches 37
+-- down, so the search row starts 4 lower than ZacUI's (39, not 35) and the
+-- rows under it follow
+local CLASSIC_DROP = 4
+
+local function KitChrome(view)
+    local f = view.frame
+    local ok, c = pcall(CreateFrame, "Frame", nil, f, TPL.name)
+    if not (ok and c) then return nil end
+    local tc = c.TitleContainer
+    if not (c.NineSlice and c.PortraitContainer and tc and tc.TitleText and c.CloseButton) then
+        c:Hide()
+        return nil
+    end
+    c:SetAllPoints(f)
+    c:EnableMouse(false)
+    if c.SetFrameLevelsFromBaseLevel then pcall(c.SetFrameLevelsFromBaseLevel, c, f:GetFrameLevel()) end
+    c:SetFrameLevel(f:GetFrameLevel())
+    if c.SetBorder then pcall(c.SetBorder, c, TPL.layout) end
+    -- (2026-11-08, Zac: "the grey is infront of the bag icons") the
+    -- template's background panel comes at a fixed high level (10000 on
+    -- Forever) and drew over the slots: it goes to the window's own level,
+    -- under every slot, the search box and the coins; the rim (NineSlice)
+    -- stays over the edges as the game's bag draws it
+    local function Down(fr)
+        pcall(function()
+            if fr.SetFixedFrameLevel then fr:SetFixedFrameLevel(false) end
+            fr:SetFrameLevel(math.max(0, f:GetFrameLevel()))
+        end)
+    end
+    pcall(function()
+        local bg = rawget(c, "Bg")
+        if not bg then return end
+        Down(bg)
+        -- (Zac: "the grey needs to be transparent") the world shows
+        -- through the panel, as through the game's own bag
+        bg:SetAlpha(0.72)
+        local ts = rawget(bg, "TopSection")
+        if ts then Down(ts) end
+        c:HookScript("OnShow", function() Down(bg) end)
+    end)
+    local portrait = c.GetPortrait and c:GetPortrait() or c.PortraitContainer.portrait
+    if c.SetPortraitTextureSizeAndOffset then
+        pcall(c.SetPortraitTextureSizeAndOffset, c, TPL.pSize, TPL.pX, TPL.pY)
+    elseif portrait then
+        portrait:SetSize(TPL.pSize, TPL.pSize)
+        portrait:SetPoint("TOPLEFT", c, "TOPLEFT", TPL.pX, TPL.pY)
+    end
+    if portrait then portrait:SetTexture(TPL.portrait) end
+    if c.SetTitleOffsets then pcall(c.SetTitleOffsets, c, TPL.titleLeft) end
+    local title = tc.TitleText
+    title:SetText(view.title or "")
+    -- the game's font at the stock 12, outlined (Zac keeps the black edge)
+    KitFont(title, 12)
+    title:SetTextColor(KIT.gold[1], KIT.gold[2], KIT.gold[3], 1)
+    local close = c.CloseButton
+    close:SetScript("OnClick", function()
+        if UI.CloseWindow then UI.CloseWindow(f) else f:Hide() end
+    end)
+    close:Show()
+    -- the banker's face on the bank, as the client's bank wears it
+    if view.key == "bank" and c.SetPortraitToUnit then
+        f:HookScript("OnShow", function()
+            if UnitExists and UnitExists("npc") then pcall(c.SetPortraitToUnit, c, "npc") end
+        end)
+    end
+    -- ZacUI's own window steps back: the fill, the edge, the title bar
+    -- (still the drag handle, drawn by nothing), its words and its X
+    HideFlat(f)
+    local bar = f.titleBar
+    if bar then bar:SetAlpha(0) end
+    if f.titleText then
+        f.titleText:SetAlpha(0)
+        if hooksecurefunc and f.titleText.SetText then
+            hooksecurefunc(f.titleText, "SetText", function(_, t) title:SetText(t) end)
+        end
+    end
+    if f.closeButton then
+        f.closeButton:Hide()
+        f.closeButton:EnableMouse(false)
+    end
+    rawset(f, "_zKitChrome", c)
+    return c
+end
+
+-- the client's money box along the bottom (the coin-box three-slice)
+-- (a bare frame holds the place; the art is the window's own, under its
+-- texts, so the money and the free count draw over it)
+local function KitCoinBand(f)
+    local band = CreateFrame("Frame", nil, f)
+    band:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", TPL.moneyX, TPL.moneyY)
+    band:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -TPL.moneyX, TPL.moneyY)
+    band:SetHeight(TPL.moneyH)
+    if AtlasOK(TPL.coin[1]) then
+        local l, m, r = OwnTex(f, "BORDER"), OwnTex(f, "BORDER"), OwnTex(f, "BORDER")
+        l:SetPoint("LEFT", band, "LEFT", 0, 0)
+        l:SetSize(TPL.coinCap, TPL.coinH)
+        r:SetPoint("RIGHT", band, "RIGHT", 0, 0)
+        r:SetSize(TPL.coinCap, TPL.coinH)
+        m:SetPoint("TOPLEFT", l, "TOPRIGHT", 0, 0)
+        m:SetPoint("BOTTOMRIGHT", r, "BOTTOMLEFT", 0, 0)
+        AtlasArt(l, TPL.coin[1])
+        AtlasArt(m, TPL.coin[2])
+        AtlasArt(r, TPL.coin[3])
+        band.pieces = { l, m, r }
+    end
+    return band
 end
 
 -- A ZacUI close button (UI.CloseX) as the look's: Classic's round red
@@ -1558,7 +1729,8 @@ end
 local function BuildBagBar(view)
     local count = view.key == "bank" and (Bags.NUM_BANKBAGSLOTS or 7) or 4
     view.bagSlots = {}
-    local x = PAD
+    local geo = view.geo
+    local x, y = geo.l, -geo.rowY
     -- (a game look's rings reach past the slot: the stock row's wider step)
     local step = BAGBTN + (KitNow() and KIT.bagGap or 3)
     if view.key ~= "bank" then
@@ -1566,7 +1738,7 @@ local function BuildBagBar(view)
         -- the row reads wrong without it at the front.
         local pack = CreateFrame("Frame", nil, view.frame)
         pack:SetSize(BAGBTN, BAGBTN)
-        pack:SetPoint("TOPLEFT", x, -(M.TITLEBAR + HEADER - BAGBTN - 4))
+        pack:SetPoint("TOPLEFT", x, y)
         local ico = pack:CreateTexture(nil, "ARTWORK")
         ico._zui_own = true
         ico:SetAllPoints()
@@ -1579,7 +1751,7 @@ local function BuildBagBar(view)
     end
     for i = 1, count do
         local btn = CreateBagSlot(view, i)
-        btn:SetPoint("TOPLEFT", x, -(M.TITLEBAR + HEADER - BAGBTN - 4))
+        btn:SetPoint("TOPLEFT", x, y)
         view.bagSlots[i] = btn
         x = x + step
     end
@@ -1617,7 +1789,7 @@ local function PaintWindow(frame)
     end
     -- a game look: the look's window over the flat one (the dialog border
     -- and background, the client's rim); returns at once under ZacUI's
-    if KitNow() and ns.Look and ns.Look.Dress then ns.Look.Dress(frame, "window", "bags") end
+    if KitNow() and not rawget(frame, "_zKitChrome") and ns.Look and ns.Look.Dress then ns.Look.Dress(frame, "window", "bags") end
 end
 
 -- The footer's text (free slots, money): ZacUI's font until one is chosen.
@@ -1676,7 +1848,13 @@ end
 local function DressViewKit(view, kit)
     local f = view.frame
     view.kit = kit
+    local chrome = view.chrome
     local bar, label = f.titleBar, f.titleText
+    if chrome then
+        -- the client's own chrome carries the title and the close button
+        view.kitTitle = chrome.TitleContainer.TitleText
+        bar, label = nil, nil
+    end
     if bar and label then
         -- ZacUI's mark: the texture the title is anchored to
         local _, mark = label:GetPoint(1)
@@ -1685,30 +1863,84 @@ local function DressViewKit(view, kit)
             mark:SetAlpha(0)
         end
         local t = KitLabel(bar, label, 12, "CENTER")
-        t:SetPoint("CENTER", bar, "CENTER", 0, 1)
+        if kit == "classic" then
+            -- a Blizzard dialog's title: centred just inside the border's
+            -- top edge, the way the stock frames and EllesmereUI's one bag
+            -- sit it (the bar's middle put it on the border's inner rim)
+            t:SetPoint("TOP", f, "TOP", 0, -16)
+        else
+            -- the modern rims carry a title band (about 20 px) along the
+            -- top: the title is centred in it, as the client's own panels
+            -- set theirs - the bar's middle put it on the band's lower line
+            t:SetPoint("TOP", f, "TOP", 0, -5)
+        end
         t:SetTextColor(KIT.gold[1], KIT.gold[2], KIT.gold[3], 1)
         view.kitTitle = t
     end
     local close = f.closeButton
-    if close and bar then
+    if close and bar and not chrome then
         KitClose(close, kit)
         close:ClearAllPoints()
-        if kit == "classic" or not AtlasOK(KIT.closeModern[1]) then
+        if kit == "classic" then
+            -- in the border's top-right corner, as on the stock panels
+            close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
+        elseif AtlasOK(KIT.closeModern[1]) then
+            -- the client's red X in the rim's top-right corner, on the
+            -- title band (the stock panels: TOPRIGHT, 1 out)
+            close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 1, 1)
+        else
             -- the round button's art sits in the middle of its 32: its
             -- edge lands 5 in from the bar's
             close:SetPoint("RIGHT", bar, "RIGHT", 2, 0)
-        else
-            close:SetPoint("RIGHT", bar, "RIGHT", -3, 0)
+        end
+    end
+    if chrome and view.search then
+        -- the combined bag's search box: under the title, 62 in, 38 short
+        -- of the right edge, 18 high
+        local s = view.search
+        s:ClearAllPoints()
+        s:SetPoint("TOPLEFT", f, "TOPLEFT", TPL.searchX, TPL.searchY)
+        s:SetPoint("TOPRIGHT", f, "TOPRIGHT", TPL.searchR, TPL.searchY)
+        s:SetHeight(TPL.searchH)
+    end
+    if kit == "classic" and view.search then
+        view.search:ClearAllPoints()
+        view.search:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -(M.TITLEBAR + 5 + CLASSIC_DROP))
+        if view.sortButton then
+            view.sortButton:ClearAllPoints()
+            view.sortButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, -(M.TITLEBAR + 5 + CLASSIC_DROP))
         end
     end
     KitSearch(view.search)
     local sort = view.sortButton
-    if sort then
+    if sort and chrome and AtlasOK(KIT.sortUp) then
+        -- the combined bag's autosort button, at its own spot
+        KitSortButton(sort, kit, TPL.sort)
+        sort:ClearAllPoints()
+        sort:SetPoint("TOPRIGHT", f, "TOPRIGHT", TPL.sort.x, TPL.sort.y)
+    elseif sort then
         KitSortButton(sort, kit)
         if kit ~= "classic" and AtlasOK(KIT.sortUp) then
             -- the autosort button, centred on the search row
             sort:ClearAllPoints()
             sort:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, -(M.TITLEBAR + 3))
+        end
+    end
+    if chrome then
+        -- the money along the bottom in the client's coin box: the free
+        -- count at its left, the money its copper 13 in from the right
+        local band = KitCoinBand(f)
+        view.coinBand = band
+        view.footerDef.free = { point = "LEFT", to = band, relPoint = "LEFT", x = TPL.coinCap, y = 0 }
+        view.footerDef.money = { point = "RIGHT", to = band, relPoint = "RIGHT", x = -TPL.copperIn, y = 0, justify = "RIGHT" }
+        local cfg = BagCfg()
+        PlaceFooterText(view.freeText, "free", cfg, view.footerDef.free, view.footerTo)
+        PlaceFooterText(view.moneyText, "money", cfg, view.footerDef.money, view.footerTo)
+        local hit = view.moneyHit
+        if hit then
+            hit:ClearAllPoints()
+            hit:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -TPL.moneyX, TPL.moneyY)
+            hit:SetHeight(TPL.moneyH)
         end
     end
 end
@@ -1719,6 +1951,24 @@ local function CreateView(key, globalName, title, bagList)
 
     local frame = UI.Window(globalName, 400, 400, title)
     view.frame = frame
+    -- a modern look on a client with the combined bag's template: that
+    -- template's chrome under the window (THE GAME LOOKS' KIT)
+    local kit0 = KitNow()
+    if kit0 and kit0 ~= "classic" and ChromeOK() then view.chrome = KitChrome(view) end
+    -- where the content sits: ZacUI's own spots, or the client's bag's
+    if view.chrome then
+        view.geo = { l = TPL.left, r = TPL.right,
+            rowY = -TPL.searchY + TPL.searchH + TPL.rowGap,
+            top = TPL.slotsTop + BAGBTN + TPL.rowGap,
+            gridBottom = TPL.moneyY + TPL.moneyH + TPL.firstOverMoney,
+            bottom = TPL.moneyY + TPL.moneyH + TPL.firstOverMoney }
+    else
+        -- (Classic: the search row, the bag row and the slots CLASSIC_DROP
+        -- lower, under the title and clear of the 32 px round close)
+        local drop = (kit0 == "classic") and CLASSIC_DROP or 0
+        view.geo = { l = PAD, r = PAD, rowY = M.TITLEBAR + HEADER - BAGBTN - 4 + drop,
+            top = M.TITLEBAR + HEADER + drop, gridBottom = FOOTER, bottom = FOOTER + 6 }
+    end
     local ownPaint = frame._zPaint
     frame._zPaint = function(self)
         if ownPaint then ownPaint(self) end
@@ -1838,8 +2088,9 @@ local function CreateView(key, globalName, title, bagList)
 
     -- The grid area, and one ID-carrying holder per bag on top of it.
     local grid = CreateFrame("Frame", nil, frame)
-    grid:SetPoint("TOPLEFT", PAD, -(M.TITLEBAR + HEADER))
-    grid:SetPoint("BOTTOMRIGHT", -PAD, FOOTER)
+    local geo = view.geo
+    grid:SetPoint("TOPLEFT", geo.l, -geo.top)
+    grid:SetPoint("BOTTOMRIGHT", -geo.r, geo.gridBottom)
     view.grid = grid
 
     for _, bag in ipairs(bagList) do
@@ -1959,8 +2210,9 @@ local function CreateView(key, globalName, title, bagList)
 
         -- Size the window to the grid it actually drew.
         local rows = math.max(1, math.ceil(n / cols))
-        local w = PAD * 2 + cols * size + (cols - 1) * gap
-        local h = M.TITLEBAR + HEADER + rows * size + (rows - 1) * gap + FOOTER + 6
+        local geo = self.geo
+        local w = geo.l + geo.r + cols * size + (cols - 1) * gap
+        local h = geo.top + rows * size + (rows - 1) * gap + geo.bottom
         self.frame:SetSize(math.max(300, w), h)
 
         self._layoutSig = sig

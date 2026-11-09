@@ -70,7 +70,9 @@ end
 local Header = Layout.Header
 function Layout:Header(title, subtitle)
     local f = Header(self, title, subtitle)
-    if self.live and self.pageId and f and ns.EnterEditMode then
+    -- (2026-11-08, Zac: "the move in edit mode in the top right i really
+    -- dont like that") off: Edit Mode stays one click away in the sidebar
+    if false and self.live and self.pageId and f and ns.EnterEditMode then
         local ok, keys = pcall(KeysFor, self.pageId)
         local b = buttons[self.pageId]
         if ok and keys and #keys > 0 then

@@ -3,7 +3,7 @@
 ## Title: ZacUI |cff33ff99Blessings|r
 ## Notes: ZacUI paladin blessings: who blesses which class, the casting bar, auras. Talks to paladins running PallyPower. Replaces PallyPower.
 ## Author: Zac
-## Version: 3.0.2
+## Version: 3.0.3
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

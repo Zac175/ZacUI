@@ -388,6 +388,11 @@ local function LookTab(L, A, p, id, kind, cfg)
             function(v) cfg.endCaps = v and true or false end,
             (kit == "classic") and "The gryphons from the original main bar, one at each end."
                 or "The client's own end caps (gryphons or wyverns by faction), one at each end.")
+        if kit == "classic" then
+            Check(L, "The original stone bar behind the buttons", function() return A.KitFrameOn(cfg, n) end,
+                function(v) cfg.kitFrame = v and true or false end,
+                "The main bar's stone art from 2004 behind a one-row bar.")
+        end
         if kit == "forever" then
             Check(L, "WoW Forever's frame behind the buttons", function() return A.KitFrameOn(cfg, n) end,
                 function(v) cfg.kitFrame = v and true or false end,

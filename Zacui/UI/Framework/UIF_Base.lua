@@ -505,7 +505,7 @@ local function SkinCloseButton(btn, size, look)
     local is = math.floor(s * 0.95 + 0.5)
     t:SetSize(is, is)
     t:SetPoint("CENTER")
-    t:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\close")
+    t:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\close128", "CLAMP", "CLAMP", "TRILINEAR")
     t:SetVertexColor(nc.r, nc.g, nc.b, 1)
     btn._zui_xIcon = t
 

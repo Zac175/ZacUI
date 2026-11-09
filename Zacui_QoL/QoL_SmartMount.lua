@@ -119,8 +119,12 @@ end
 -- item id is, is worked out once a session (GetItemInfo and the tooltip
 -- only for an id not seen before); a pass is then one id read per slot.
 local itemInfo = {}        -- item id -> { name, quality, mount, qiraji }
+-- An item the client has not described yet (GetItemInfo is nil for it a
+-- few seconds after login) is asked again on the next pass; SM.uncached
+-- says the last pass met one, so the events look again shortly.
 local function BagMounts()
     local out = {}
+    SM.uncached = false
     for bag = 0, 4 do
         local n = GetContainerNumSlots(bag) or 0
         for slot = 1, n do
@@ -133,6 +137,8 @@ local function BagMounts()
                         local mount, qiraji = Classify(id, name, classID, subclassID)
                         info = { name = name, quality = quality or 0, mount = mount, qiraji = qiraji }
                         itemInfo[id] = info
+                    else
+                        SM.uncached = true
                     end
                 end
                 if info and info.mount then
@@ -151,9 +157,24 @@ end
 -- instead of carrying them: the macro summons a random favourite through
 -- it, and the bag scan below is not asked. Detected by the API, never by
 -- a version number (SM.Journal tells the Game versions row).
+--
+-- (2026-11-08, Zac: "my mount macro thing in zui is also just not letting
+-- me mount") THE API ALONE IS NOT THE JOURNAL. Classic Era (since 1.15.0)
+-- and TBC Anniversary (2.5.5) carry C_MountJournal.SummonByID too, but
+-- their mounts are still items in the bags and spells in the book - there
+-- are no favourites to summon. Testing only for the function turned the
+-- macro into "/run C_MountJournal.SummonByID(0)" on Era, which answers
+-- "You have no valid favorite mounts." and mounts nothing. The journal is
+-- used only on the Mainline client (Core_Forever's ZACUI_MODERN: Forever,
+-- Retail), where mounts are learned there.
 local MJ = _G.C_MountJournal
-SM.Journal = (MJ and type(MJ.SummonByID) == "function") and true or false
+local function UseJournal()
+    return _G.ZACUI_MODERN == true and MJ ~= nil and type(MJ.SummonByID) == "function"
+end
+SM.UseJournal = UseJournal
+SM.Journal = UseJournal()
 function SM.Pick()
+    SM.Journal = UseJournal()
     if SM.Journal then return { kind = "journal", name = "a random favourite mount", quality = 10 } end
     local mounts = BagMounts()
     local inAQ = InAQ40()
@@ -447,12 +468,21 @@ f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 f:RegisterEvent("BAG_UPDATE_DELAYED")
 f:RegisterEvent("PLAYER_REGEN_ENABLED")
 local queued = false
+local retries = 0
 local function Queue(delay)
     if queued then return end
     queued = true
     C_Timer.After(delay or 1, function()
         queued = false
         SM.Apply("event")
+        -- a bag item not described yet: look again (a few times, then the
+        -- next bag change does it)
+        if SM.uncached and retries < 5 then
+            retries = retries + 1
+            Queue(3)
+        elseif not SM.uncached then
+            retries = 0
+        end
     end)
 end
 f:SetScript("OnEvent", function(_, event)

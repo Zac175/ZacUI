@@ -113,7 +113,7 @@ local F = {  -- font sizes by role
 local S = {
     -- the window
     W = 1300, H = 946, MIN_W = 1000, MIN_H = 640, MAX_W = 1600, MAX_H = 1100,
-    SIDEBAR = 295, HEADER = 138, TABS = 40, FOOTER = 82,
+    SIDEBAR = 295, HEADER = 138, TABS = 40, FOOTER = 0,
     PAD = 45, TOP_PAD = 10, SIDE = 20, CARD_GAP = 10, SECTION = 40,
     -- the sidebar
     NAV_TOP = 114, NAV_ROW = 40, NAV_ICON_W = 45, NAV_ICON_H = 32, NAV_LEFT = 20, NAV_GAP = 10,
@@ -209,13 +209,14 @@ end
 local function Canvas(s) local c = 1 while c < s do c = c * 2 end return c end
 -- part: nil (the whole disc), "left" or "right" (its half)
 function UI.DiscArt(tex, n, part)
-    local s = DiscOf(n)
-    local c = Canvas(s)
-    local o = (c - s) / 2
-    local l, r, t, b = o / c, (o + s) / c, o / c, (o + s) / c
-    if part == "left" then r = (o + s / 2) / c elseif part == "right" then l = (o + s / 2) / c end
-    tex:SetTexture(DISC_PATH .. s)
-    tex:SetTexCoord(l, r, t, b)
+    -- (2026-11-08, Zac: "make these on and off sliders more hd") one large
+    -- 128 px disc drawn down to size: shrunk with the game's filtering its
+    -- edge stays smooth at any UI scale, where a disc drawn at its own pixel
+    -- size went jagged once the UI scale stretched it
+    local l, r = 0, 1
+    if part == "left" then r = 0.5 elseif part == "right" then l = 0.5 end
+    tex:SetTexture(DISC_PATH .. "128", "CLAMP", "CLAMP", "TRILINEAR")
+    tex:SetTexCoord(l, r, 0, 1)
 end
 -- A pill on `host` (filling it: h = the host's height): three textures,
 -- the ends half a height wide. pill:Color(r, g, b, a); pill:Show(on).
@@ -783,7 +784,9 @@ end
 -- palette. The one piece of ZacUI furniture that deliberately has no box
 -- around it. The icon's glyph spans 12/32 of it, so at 0.95 of the button
 -- it is as wide as the bars were.
-ns.ICON_CLOSE = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\close"
+-- (2026-11-08, Zac: "the x buttons in zui still look like shit") a 128 px
+-- anti-aliased X drawn down to size (trilinear): crisp at any UI scale
+ns.ICON_CLOSE = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\close128"
 function UI.CloseX(parent, size, onClick)
     local b = CreateFrame("Button", nil, parent)
     size = size or 22
@@ -803,7 +806,7 @@ function UI.CloseX(parent, size, onClick)
         local s = math.floor(size * 0.95 + 0.5)
         t:SetSize(s, s)
         t:SetPoint("CENTER")
-        t:SetTexture(ns.ICON_CLOSE)
+        t:SetTexture(ns.ICON_CLOSE, "CLAMP", "CLAMP", "TRILINEAR")
         return t
     end
     -- (one icon; _zB is the same texture so callers that paint both work)
@@ -2676,11 +2679,40 @@ function UI.OpenColorPicker(o)
         end
         return a0
     end
-    local function Commit()
+    -- (2026-11-08, Zac: "the color picker is super laggy") the wheel fires
+    -- on every mouse move and each change repaints the UI: the latest
+    -- colour is applied at most ten times a second, the last one always
+    local pending, waiting, gen = false, false, 0
+    local function Flush()
+        waiting = false
+        if not pending then return end
+        pending = false
         local r, g, b = CPF:GetColorRGB()
         if o.onChange then o.onChange(r, g, b, Alpha()) end
     end
+    local last = -1
+    local function Commit()
+        pending = true
+        if waiting then return end
+        local now = GetTime and GetTime() or 0
+        -- the first change after a pause applies at once (the drag starts
+        -- live); changes inside the next tenth of a second fold into one
+        if now - last >= 0.1 or now == last then
+            last = now
+            Flush()
+            return
+        end
+        waiting = true
+        local my = gen
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.1, function() if my == gen then last = GetTime and GetTime() or 0 Flush() end end)
+        else
+            Flush()
+        end
+    end
     local function Cancel()
+        gen = gen + 1
+        pending, waiting = false, false
         if o.onCancel then o.onCancel(r0, g0, b0, a0) end
     end
     if CPF.SetupColorPickerAndShow then
@@ -2740,6 +2772,17 @@ function UI.Swatch(parent, cat, key, onChange)
         UI.OpenColorPicker({ r = cur.r, g = cur.g, b = cur.b, a = cur.a,
             onChange = Put, onCancel = Put })
     end)
+    -- right-click: back to the theme's colour (Zac 2026-11-08)
+    sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    sw:HookScript("OnClick", function(self, button)
+        if button ~= "RightButton" then return end
+        if ColorPickerFrame and ColorPickerFrame:IsShown() then ColorPickerFrame:Hide() end
+        if ns.ResetColor then ns.ResetColor(cat, key) end
+        self:_zPaint()
+        if onChange then onChange() end
+        Changed("color")
+    end)
+    UI.Tooltip(sw, "Colour", "Click to pick a colour. Right-click to reset it.")
     sw:_zPaint()
     return sw
 end
@@ -3813,7 +3856,9 @@ function UI.Window(name, width, height, title, opts)
     end)
 
     -- the same header art as the main window, at bar height
-    UI.HeaderArt(bar, { stepX = opts.stepX or 150, left = opts.left })
+    -- (the flat header: no sheen across it either - Zac 2026-11-08)
+    UI.HeaderArt(bar, { stepX = opts.stepX or 150, left = opts.left,
+        anim = (opts.oldHeader or not UI.FlatBar) and nil or false })
 
     local icon = bar:CreateTexture(nil, "ARTWORK", nil, 3)
     icon._zui_own = true
@@ -3823,7 +3868,7 @@ function UI.Window(name, width, height, title, opts)
     SharpenIcon(icon)
     -- pop-ups get the opening (drop, turn, ring, flare, sheen) and the
     -- hover; the idle sparkle and returning sheen stay on the main window
-    UI.AnimateMark(icon, bar, { idle = false })
+    if opts.oldHeader or not UI.FlatBar then UI.AnimateMark(icon, bar, { idle = false }) end  -- the flat header has no mark, so no sparkle (Zac 2026-11-08)
 
     local label = UI.Font(bar, F.TITLE, { text = title, cat = "text", key = "gold" })
     label:SetPoint("LEFT", icon, "RIGHT", 8, 2)
@@ -3836,6 +3881,24 @@ function UI.Window(name, width, height, title, opts)
 
     local close = UI.CloseX(bar, 22, function() UI.CloseWindow(f) end)
     close:SetPoint("RIGHT", -5, 0)
+
+    -- (2026-11-08, Zac: "bag still has the old header") the header in the
+    -- settings popups' look: flat, the white title, a hairline under it and
+    -- the settings X - no gold strip, no mark. opts.oldHeader keeps the old.
+    if not opts.oldHeader and UI.FlatBar then
+        local art = bar._zArt
+        if art then
+            for _, t in ipairs({ art.cutL, art.cutD, art.rules and art.rules[1], art.rules and art.rules[2], art.rules and art.rules[3] }) do
+                if t and t.Hide then t:Hide() t:SetAlpha(0) end
+            end
+        end
+        icon:Hide()
+        icon:SetAlpha(0)
+        label:ClearAllPoints()
+        label:SetPoint("LEFT", bar, "LEFT", 12, 1)
+        label._zPaint = function(self) self:SetTextColor(1, 1, 1, 1) end
+        UI.FlatBar(bar, { title = label, close = close })
+    end
 
     f.titleBar, f.titleText, f.closeButton = bar, label, close
     return f

@@ -1185,7 +1185,7 @@ end
 local function Build()
     if win then return end
     -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup)
-    win = UI.Popup("ZacUIRaidSummary", 600, 640, "Raid summary")
+    win = UI.Popup("ZacUIRaidSummary", 600, 640, "Raid summary", { part = "meter" })
     -- not on the Escape list: Escape closes every window on it at once,
     -- and the end of a raid is all loot windows and Escape - the summary
     -- went with them. Its X and /zui raid close it.

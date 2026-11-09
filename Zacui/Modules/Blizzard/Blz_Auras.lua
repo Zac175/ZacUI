@@ -1063,11 +1063,28 @@ local function HookContainer(container)
     end)
 end
 
+-- The list the client laid out BEFORE the hook went on. The pooled frame
+-- (1.15 Era, TBC Anniversary, Forever: AuraFrame_OnLoad) makes its buttons
+-- into frame.auraFrames and lays them out once, before any addon loads;
+-- after that the BUFF frame only fills and shows those buttons on an aura
+-- change and lays out again only on a consolidation or Edit Mode change.
+-- So on a client where neither comes after login the hook never saw a list,
+-- and the buff buttons were never styled or re-laid out (Zac on TBC
+-- Anniversary, 2026-11-08: Blizzard's stock buff icons under ZacUI's look).
+-- Same buttons, same list Blizzard passes - known by what the frame has,
+-- not by which client this is.
+local function SeedAuras(frame, container)
+    if container._zuiAuras == nil and type(frame.auraFrames) == "table" then
+        container._zuiAuras = frame.auraFrames
+    end
+end
+
 local function ApplyAuraStride()
     for _, frame in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
         local container = frame and frame.AuraContainer
         if container then
             HookContainer(container)
+            SeedAuras(frame, container)
             Restride(container)
         end
     end
@@ -1341,7 +1358,9 @@ Modules.auras = function()
     -- above) - each button once, and no child lists built per sweep.
     local function SweepModernAuras()
         for _, frame in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
-            local list = frame and frame.AuraContainer and frame.AuraContainer._zuiAuras
+            local container = frame and frame.AuraContainer
+            if container then SeedAuras(frame, container) end
+            local list = container and container._zuiAuras
             if list then
                 for i = 1, #list do AddTo(list[i]) end
             end

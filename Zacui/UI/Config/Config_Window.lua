@@ -960,11 +960,17 @@ local function Build()
     -- to copy (UIF_Dialogs UI.ShowContact). On the drag surface, as the
     -- window's other buttons are.
     if UI.ContactButton then
-        local help = UI.ContactButton(tb, 28)
-        -- (the mark is 40 tall from 30 down: 28 centred on it is 36 down)
-        help:SetPoint("TOPRIGHT", logo, "TOPRIGHT", -22, -36)
+        local help = UI.ContactButton(tb, 22)
+        -- on the version's line, after it: Discord then Twitch (the same
+        -- spot as Readycheck's, clear of the name)
+        help:SetPoint("LEFT", version, "RIGHT", 40, -4)
         help:SetFrameLevel(nav:GetFrameLevel() + 5)
         window.contactButton = help
+        -- Zac's Twitch, left of it
+        local tw = UI.ContactButton(tb, 20, "twitch")
+        tw:SetPoint("LEFT", help, "RIGHT", 10, 0)
+        tw:SetFrameLevel(nav:GetFrameLevel() + 5)
+        window.twitchButton = tw
     end
 
     -- EDIT MODE: the sidebar's one fixed row (EllesmereUI's Unlock Mode
@@ -1078,9 +1084,10 @@ local function Build()
         fold:SetFrameLevel(window:GetFrameLevel() + 30)
         local ft = fold:CreateTexture(nil, "ARTWORK")
         ft._zui_own = true
-        ft:SetSize(32, 32)
+        ft:SetSize(38, 38)
         ft:SetPoint("CENTER")
-        ft:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\collapse")
+        -- (drawn in the header's art set, the X's line weight)
+        ft:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\chevup128", "CLAMP", "CLAMP", "TRILINEAR")
         fold._zPaint = function(self) ft:SetVertexColor(1, 1, 1, self._zHot and 1 or S.DIM_A) end
         fold:SetScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
         fold:SetScript("OnLeave", function(self) self._zHot = nil self:_zPaint() GameTooltip:Hide() end)
@@ -1095,15 +1102,36 @@ local function Build()
     -- 180 / 160 x 36 at 24 in), the window's own scale between them. The
     -- buttons are the window's (on its drag surface), as before.
     do
-        local reload = UI.Button(tb, "Reload", { width = S.FOOT_BTN_W, height = S.FOOT_BTN_H, style = "footer",
-            tooltip = "/reload - the settings that say they need one.",
-            onClick = function() ns.RequestReload() end })
-        reload:SetPoint("BOTTOMLEFT", window, "BOTTOMLEFT", S.SIDEBAR + S.FOOT_PAD, S.FOOT_PAD)
-        reload:SetFrameLevel(window:GetFrameLevel() + 20)
+        -- (2026-11-08, Zac: "i wanted this bottom bar shit gone") Reload and
+        -- the scale sit in the header, left of fold; the footer's Close is
+        -- gone (the header's X closes) and the footer is only a margin
+        -- (drawn glyphs in the header's own style - the X's art set - not
+        -- text in boxes; Zac 2026-11-08)
+        local ICO = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\"
+        local function IconBtn(art, title, tip, onClick)
+            local b = CreateFrame("Button", nil, tb)
+            b:SetSize(32, 40)
+            b:SetFrameLevel(window:GetFrameLevel() + 30)
+            local t = b:CreateTexture(nil, "ARTWORK")
+            t._zui_own = true
+            t:SetSize(38, 38)
+            t:SetPoint("CENTER")
+            t:SetTexture(ICO .. art, "CLAMP", "CLAMP", "TRILINEAR")
+            -- the settings window's own hover, as its X: white at the dim
+            -- alpha, full white under the mouse - no plate, no tint
+            b._zPaint = function(self) t:SetVertexColor(1, 1, 1, self._zHot and 1 or S.DIM_A) end
+            b:SetScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
+            b:SetScript("OnLeave", function(self) self._zHot = nil self:_zPaint() GameTooltip:Hide() end)
+            b:SetScript("OnClick", onClick)
+            b:_zPaint()
+            UI.Tooltip(b, title, tip)
+            return b
+        end
+        local reload = IconBtn("reload128", "Reload", "/reload - the settings that say they need one.",
+            function() ns.RequestReload() end)
         local close = UI.Button(tb, "Close", { width = S.FOOT_CLOSE_W, height = S.FOOT_BTN_H, style = "close",
             onClick = function() UI.CloseWindow(window) end })
-        close:SetPoint("BOTTOMRIGHT", window, "BOTTOMRIGHT", -S.FOOT_PAD, S.FOOT_PAD)
-        close:SetFrameLevel(window:GetFrameLevel() + 20)
+        close:Hide()
         window.doneButton = close
 
         -- THE WINDOW'S SCALE: the window's, not the UI's - a big config on
@@ -1122,20 +1150,20 @@ local function Build()
             -- the preview keeps its sample at the real, in-game size
             if Preview and Preview.Place then Preview.Place() end
         end
-        local plus = UI.Button(tb, "+", { width = S.FOOT_BTN_H, height = S.FOOT_BTN_H, style = "footer",
-            onClick = function() SetScale(Scale() + 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end })
-        plus:SetPoint("RIGHT", close, "LEFT", -20, 0)
-        plus:SetFrameLevel(window:GetFrameLevel() + 20)
+        local plus = IconBtn("plus128", "Window scale", "Grows this window only.",
+            function() SetScale(Scale() + 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end)
+        plus:SetPoint("RIGHT", window.foldButton, "LEFT", -6, 0)
         local pct = UI.SFont(tb, S.F_VALUE, { text = math.floor(Scale() * 100 + 0.5) .. "%", justify = "CENTER" })
         pct._zPaint = function(self) self:SetTextColor(1, 1, 1, S.DIM_A) end
         pct:_zPaint()
-        pct:SetWidth(52)
+        pct:SetWidth(46)
         pct:SetPoint("RIGHT", plus, "LEFT", 0, 0)
         window.scaleText = pct
-        local minus = UI.Button(tb, "-", { width = S.FOOT_BTN_H, height = S.FOOT_BTN_H, style = "footer",
-            onClick = function() SetScale(Scale() - 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end })
+        local minus = IconBtn("minus128", "Window scale", "Shrinks this window only.",
+            function() SetScale(Scale() - 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end)
         minus:SetPoint("RIGHT", pct, "LEFT", 0, 0)
-        minus:SetFrameLevel(window:GetFrameLevel() + 20)
+        reload:SetPoint("RIGHT", minus, "LEFT", -14, 0)
+        window.scaleUp, window.scaleDown, window.reloadButton = plus, minus, reload
         UI.Tooltip(pct, "Window scale", "Grows or shrinks this window only. Under the ZacUI look a size "
             .. "close to whole screen pixels is nudged onto them, so text and lines stay sharp.")
         window:SetScale(ExactScale(Scale()))

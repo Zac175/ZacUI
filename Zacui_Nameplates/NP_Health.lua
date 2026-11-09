@@ -524,10 +524,16 @@ function NP.SetTargetGlow(f, on)
     GlowGradient(B, "VERTICAL", r, g, b, a, true)
     GlowGradient(L, "HORIZONTAL", r, g, b, a, true)
     GlowGradient(R, "HORIZONTAL", r, g, b, a, false)
-    GlowGradient(TL, "VERTICAL", r, g, b, a * 0.5, false)
-    GlowGradient(TR, "VERTICAL", r, g, b, a * 0.5, false)
-    GlowGradient(BL, "VERTICAL", r, g, b, a * 0.5, true)
-    GlowGradient(BR, "VERTICAL", r, g, b, a * 0.5, true)
+    -- corners: a round falloff (Media glowcorner, full at the bar's corner,
+    -- gone n px out) that meets the sides' fade - the square half-strength
+    -- gradients read as odd corner blocks (Zac 2026-11-08)
+    local CORNER = "Interface\\AddOns\\ZacUI\\Media\\Textures\\glowcorner"
+    for i, tc in ipairs({ { 1, 0, 1, 0 }, { 0, 1, 1, 0 }, { 1, 0, 0, 1 }, { 0, 1, 0, 1 } }) do
+        local t = gl[4 + i]
+        t:SetTexture(CORNER)
+        t:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+        t:SetVertexColor(r, g, b, a)
+    end
     for _, t in ipairs(gl) do t:Show() end
 end
 

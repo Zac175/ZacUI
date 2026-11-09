@@ -66,7 +66,9 @@ local confirm, input
 --                                 (their layouts hang off it): flat, a
 --                                 white 0.06 hairline, title white, X 0.53
 local POP = {
-    small  = { PAD = 24, TOP = 22, T = 20, D = 13, GAP = 14, LINE = 6 },
+    -- (2026-11-08, Zac: "way to big ... huge x button") a small popup is
+    -- compact: a 16 title, tighter margins
+    small  = { PAD = 18, TOP = 16, T = 16, D = 12, GAP = 10, LINE = 4 },
     medium = { PAD = 30, TOP = 24, T = 24, D = 14, GAP = 18, LINE = 8 },
     big    = { PAD = 45, TOP = 35, T = 36, D = 14, GAP = 24, LINE = 12 },
     BTN_H = 32, BTN_GAP = 10, BTN_MIN = 110, FOOT_GAP = 20,
@@ -193,13 +195,34 @@ function UI.Popup(name, width, height, title, opts)
     if opts.close == false and close then close:Hide() end
     -- (a level set on the window after its header was made: the header
     -- and the close box go back above the window's own fill)
+    -- (2026-11-08, Zac: "huge x button") the X sized to the popup: the big
+    -- settings-size X only on a big popup
+    if close and close._zA then
+        local g = (P == POP.big) and 38 or (P == POP.medium and 26 or 18)
+        close:SetSize(g + 2, g + 2)
+        close._zA:SetSize(g, g)
+        close:ClearAllPoints()
+        close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(P.PAD - 8), -(P.TOP - 6))
+    end
+    -- Every child above the popup's own fill, whatever raised it: a raise
+    -- moved the popup's level and its children kept the old one - they
+    -- drew UNDER the fill (the AH buy window showed its words but no
+    -- buttons and no X, 2026-11-08)
     local function Relevel()
         local lv = f:GetFrameLevel() or 1
         bar:SetFrameLevel(lv + 1)
         if close then close:SetFrameLevel(lv + 30) end
+        for _, c in ipairs({ f:GetChildren() }) do
+            if c ~= bar and c ~= close and c.GetFrameLevel and (c:GetFrameLevel() or 0) <= lv then
+                c:SetFrameLevel(lv + 5)
+            end
+        end
     end
     Relevel()
     hooksecurefunc(f, "SetFrameLevel", Relevel)
+    hooksecurefunc(f, "Raise", Relevel)
+    f:HookScript("OnShow", Relevel)
+    f:HookScript("OnMouseDown", Relevel)
 
     local icon
     if opts.icon then
@@ -318,6 +341,13 @@ function UI.Popup(name, width, height, title, opts)
 
     f.titleText, f.descText, f.titleIcon, f.headerRule = tt, dt, icon, rule
     f:SetTitle(title, opts.desc or "")
+    -- a game window of ZacUI's (opts.part: the look part it follows) wears
+    -- the look's dialog under a game look (Core_LookPanels' one helper);
+    -- under ZacUI's own look Look.Dress returns on its first line
+    if opts.part and ns.Look and ns.Look.Dress then
+        rawset(f, "_zDialogParts", { title = tt, close = close })
+        ns.Look.Dress(f, "dialog", opts.part)
+    end
     return f
 end
 
@@ -694,6 +724,8 @@ end
 -- link or reach the clipboard, so the name sits selected in a box, ready
 -- for Ctrl+C. The name cannot be typed over; Escape closes it.
 ns.CONTACT_DISCORD = "Zac12"
+ns.CONTACT_TWITCH = "twitch.tv/zac984"
+ns.ICON_TWITCH = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\twitch"
 ns.ICON_DISCORD = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\discord"
 local contact
 local CONTACT_W = 400
@@ -708,8 +740,9 @@ local function BuildContact()
     local eb = box.editBox
     -- the name cannot be typed over: any edit puts it back, selected
     eb:SetScript("OnTextChanged", function(self, user)
-        if user and self:GetText() ~= ns.CONTACT_DISCORD then
-            self:SetText(ns.CONTACT_DISCORD)
+        local want = f._zText or ns.CONTACT_DISCORD
+        if user and self:GetText() ~= want then
+            self:SetText(want)
             self:HighlightText()
         end
     end)
@@ -730,10 +763,15 @@ local function BuildContact()
     return f
 end
 
-function UI.ShowContact()
+-- kind: nil (Discord: Zac's name to message) or "twitch" (his channel)
+function UI.ShowContact(kind)
     local f = contact or BuildContact()
     local eb = f.editBox
-    eb:SetText(ns.CONTACT_DISCORD)
+    local tw = kind == "twitch"
+    f._zText = tw and ns.CONTACT_TWITCH or ns.CONTACT_DISCORD
+    f:SetTitle(tw and "Watch on Twitch" or "Need help?", tw and "Zac's channel" or "Message Zac on Discord")
+    if f.titleIcon then f.titleIcon:SetTexture(tw and ns.ICON_TWITCH or ns.ICON_DISCORD) end
+    eb:SetText(f._zText)
     UI.OpenWindow(f)
     f:Raise()
     eb:SetFocus()
@@ -744,7 +782,7 @@ ns.ShowContact = UI.ShowContact
 
 -- The settings window's contact button: the speech bubble, white at the
 -- window's dim alpha, full under the mouse; a tooltip says what it does.
-function UI.ContactButton(parent, size)
+function UI.ContactButton(parent, size, kind)
     local S = UI.S
     size = size or 28
     local b = CreateFrame("Button", nil, parent)
@@ -752,7 +790,7 @@ function UI.ContactButton(parent, size)
     local t = b:CreateTexture(nil, "ARTWORK")
     t._zui_own = true
     t:SetAllPoints()
-    t:SetTexture(ns.ICON_DISCORD)
+    t:SetTexture(kind == "twitch" and ns.ICON_TWITCH or ns.ICON_DISCORD)
     b._zIcon = t
     b._zPaint = function(self)
         if self._zHot then
@@ -764,9 +802,12 @@ function UI.ContactButton(parent, size)
     end
     b:HookScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
     b:HookScript("OnLeave", function(self) self._zHot = nil self:_zPaint() end)
-    b:SetScript("OnClick", function() UI.ShowContact() end)
-    UI.Tooltip(b, "Need help?", "Message Zac on Discord: " .. ns.CONTACT_DISCORD
-        .. ". Click to copy the name.")
+    b:SetScript("OnClick", function() UI.ShowContact(kind) end)
+    if kind == "twitch" then
+        UI.Tooltip(b, "Watch on Twitch", ns.CONTACT_TWITCH .. ". Click to copy the link.")
+    else
+        UI.Tooltip(b, "Need help?", "Message Zac on Discord: " .. ns.CONTACT_DISCORD .. ". Click to copy the name.")
+    end
     b:_zPaint()
     return b
 end

@@ -276,8 +276,36 @@ Modules.misc = function()
     -- swatches, so they are worth getting right.
     if ColorPickerFrame and not ZUI.skinned[ColorPickerFrame] then
         ZUI.skinned[ColorPickerFrame] = true
-        StripTextures(ColorPickerFrame)
+        -- (2026-11-08, Zac: "the color picker in zui is fucked and half the
+        -- time ... its behind the ui") on Era / TBC the frame IS the
+        -- ColorSelect: its wheel, value bar, their thumbs and the swatch
+        -- are the frame's own textures, and a full strip blanked the wheel.
+        -- Those stay; only the chrome goes.
+        local keep = {}
+        for _, fn in ipairs({ "GetColorWheelTexture", "GetColorWheelThumbTexture",
+                              "GetColorValueTexture", "GetColorValueThumbTexture",
+                              "GetColorAlphaTexture", "GetColorAlphaThumbTexture" }) do
+            local ok, t = pcall(function() return ColorPickerFrame[fn] and ColorPickerFrame[fn](ColorPickerFrame) end)
+            if ok and t then keep[t] = true end
+        end
+        if _G.ColorSwatch then keep[_G.ColorSwatch] = true end
+        for _, r in ipairs({ ColorPickerFrame:GetRegions() }) do
+            if r.IsObjectType and r:IsObjectType("Texture") and not keep[r] then
+                local n = r.GetName and r:GetName()
+                if not (n and (n:find("Swatch") or n:find("Wheel") or n:find("ColorValue"))) then
+                    r:SetTexture(nil)
+                    r:Hide()
+                end
+            end
+        end
         StripFrameChrome(ColorPickerFrame)
+        -- always over ZacUI's windows (the settings sit at DIALOG/HIGH)
+        ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+        ColorPickerFrame:SetToplevel(true)
+        ColorPickerFrame:HookScript("OnShow", function(self)
+            self:SetFrameStrata("FULLSCREEN_DIALOG")
+            self:Raise()
+        end)
         SkinBackdrop(ColorPickerFrame, "windowBg", 0.97)
         for _, n in ipairs({ "ColorPickerOkayButton", "ColorPickerCancelButton" }) do
             local b = _G[n]

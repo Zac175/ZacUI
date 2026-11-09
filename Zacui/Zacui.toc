@@ -2,7 +2,7 @@
 ## Title: ZacUI
 ## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
 ## Author: Zac
-## Version: 3.0.2
+## Version: 3.0.3
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB
@@ -88,6 +88,9 @@ Core\Core_Media.lua
 # below at build time. After media (it names ZacUI's textures), before
 # the UI framework.
 Core\Core_Look.lua
+# The game's own panels in the worn look (Classic WoW UI on Forever /
+# Retail) and ZacUI's dialogs' shared look helper. Right after the Look.
+Core\Core_LookPanels.lua
 # HD polish (2026-11-07): edges one physical pixel thick under the ZacUI
 # look (ns.Pixel). After the Look (it asks which look is live), before
 # the UI framework (every primitive draws its borders through it).

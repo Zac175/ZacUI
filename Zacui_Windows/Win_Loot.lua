@@ -381,6 +381,7 @@ local function Leftovers()
     Add(f.PortraitContainer)
     Add(f.TitleContainer)
     Add(f.CloseButton or _G.LootFrameCloseButton)
+    Add(_G.LootCloseButton)  -- Era/TBC name: left showing, it drew a second X beside ours
     Add(f.Inset or _G.LootFrameInset)
     Add(f._zui_panel)
     for i = 1, (LOOTFRAME_NUMBUTTONS or 4) do Add(_G["LootButton" .. i]) end

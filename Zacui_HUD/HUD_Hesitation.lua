@@ -215,10 +215,22 @@ local function DB() return H.Store() end
 local HidePlateRow            -- the plate cooldown row's hide, defined with the row below
 local Secondary               -- "the other one goes first", defined with the row below
 -- the row came or went over the target's plate: the crosshair (ZacUI
--- Nameplates) re-measures the plate so its line stops clear of the row
+-- Nameplates) re-measures the plate so its line stops clear of the row,
+-- and the plate's own aura strip (which sits over the name too) steps up
+-- over the row on the plate it now stands on, and back down on the one
+-- it left (2026-11-08, Zac: a Demo Shout icon peeking out behind the row)
+local prow                    -- the plate cooldown row, built further down
+local rowZF                   -- the ZacUI plate the row stood over at the last call
 local function Remeasure()
-    local CH = ns.Nameplates and ns.Nameplates.Crosshair
+    local NPm = ns.Nameplates
+    local CH = NPm and NPm.Crosshair
     if CH and CH.Remeasure then CH.Remeasure() end
+    local now = (prow and prow:IsShown() and prow._zf) or nil
+    if now ~= rowZF then
+        local was = rowZF
+        rowZF = now
+        if NPm and NPm.RowOverChanged then NPm.RowOverChanged(was, now) end
+    end
 end
 
 local function PlayerClass()
@@ -880,7 +892,7 @@ end
 -- DISPLAY: the big alert (a HUD mover) and the cooldown row over the
 -- target's nameplate
 -- ============================================================
-local popup, prow
+local popup                   -- (prow: declared with Remeasure above)
 local BIG                     -- the NOOB icon's size, set with the row below
 -- The row lives on UIParent, the plate on its own (scaled) frame: what
 -- is "N px" on the plate is N * k on the row. The target box sits 2 px
@@ -893,6 +905,32 @@ local function PlateK(zf)
     return bs / rs
 end
 local BOX_OUT = 3
+
+-- WHERE THE ROW STANDS on a ZacUI plate: what it sits on, and its offsets
+-- (in the row's units), plus how far its bottom is over the bar's top (in
+-- the bar's units, for the crosshair). With the mob's name ABOVE the bar
+-- (the ZacUI look's plate since 2026-11-08) the row stands on the name,
+-- plateRowY over it, and over a raid mark that sits on the name - never
+-- on top of them (Zac: "why is the noob stuff overlapping mob name").
+-- A name inside the bar (or none): plateRowY over the target box, as it
+-- always was.
+local function RowSpot(zf, db)
+    local k = PlateK(zf)
+    local ox, gap = tonumber(db.plateRowX) or 0, tonumber(db.plateRowY) or 2
+    local nm = zf.name
+    if nm and nm.IsShown and not zf._nameInside and not zf.nameOnly and nm:IsShown() then
+        local defs = zf._npDef
+        local up = 0
+        local ri, rdef = zf.raidIcon, defs and defs.raidMarker
+        if ri and ri:IsShown() and rdef and rdef.to == nm then up = (ri:GetHeight() or 0) + 1 end
+        local ny = (defs and defs.name and defs.name.to == zf.health and tonumber(defs.name.y)) or 2
+        local nh = nm.GetStringHeight and nm:GetStringHeight() or 12
+        -- (WoW Forever: a hidden name's measure is not a number to add to)
+        if type(nh) ~= "number" or (ns.IsSecret and ns.IsSecret(nh)) then nh = 12 end
+        return nm, "TOP", ox, gap + up * k, ny + nh + up + gap / k
+    end
+    return zf.health, "TOP", ox, gap + BOX_OUT * k, BOX_OUT + gap / k
+end
 
 -- A colour setting, or (unset) the palette colour it always was.
 local function Pal(c, cat, key, a)
@@ -1257,7 +1295,7 @@ end
 HidePlateRow = function()
     if prow and prow:IsShown() then
         prow:Hide()
-        prow._plate, prow._to, prow._pt = nil, nil, nil
+        prow._plate, prow._to, prow._pt, prow._zf = nil, nil, nil, nil
         prow._sig = nil
         local sz = DB().plateSize or 30
         for _, ic in ipairs(prow.icons) do
@@ -1341,12 +1379,14 @@ function H:PreviewPlateRow(zf)
     end
     if #self.watch == 0 then self:Rebuild() end
     f._preview = true
-    f._plate, f._to, f._pt = nil, nil, nil
-    f._ox, f._oy = tonumber(db.plateRowX) or 0, (tonumber(db.plateRowY) or 2) + BOX_OUT * PlateK(zf)
+    f._plate, f._pt = nil, nil
+    local to, pt, ox, oy = RowSpot(zf, db)
+    f._to, f._ox, f._oy, f._zf = to, ox, oy, zf
     f:ClearAllPoints()
-    f:SetPoint("BOTTOM", zf.health, "TOP", f._ox, f._oy)
+    f:SetPoint("BOTTOM", to, pt, ox, oy)
     FillSampleRow(f)
     f:Show()
+    Remeasure()
 end
 
 -- How far the row reaches above a ZacUI plate's health bar right now
@@ -1357,9 +1397,17 @@ end
 function H.PlateReach(plate, zf)
     if not (prow and prow:IsShown() and prow._plate == plate) then return 0 end
     local db = DB()
-    -- in the bar's units: the box, the gap over it, the row itself
+    -- in the bar's units: what the row stands on (the box, or the name
+    -- and a mark on it), the gap over it, the row itself
     local k = PlateK(zf)
-    return BOX_OUT + ((tonumber(db.plateRowY) or 2) + (prow._rowH or db.plateSize or 30)) / k
+    local lift = (type(zf) == "table" and zf.health) and select(5, RowSpot(zf, db)) or BOX_OUT
+    return lift + (prow._rowH or db.plateSize or 30) / k
+end
+
+-- The row's frame while it stands over this ZacUI plate (live or a
+-- settings sample), else nil: the plate's aura strip goes over it.
+function H.RowOver(zf)
+    if zf and prow and prow:IsShown() and prow._zf == zf then return prow end
 end
 
 -- The widest the row can ever get over a plate, as half its width in the
@@ -1473,13 +1521,16 @@ function H:UpdatePlateRow(hasTarget)
     local to, pt, ox, oy = plate, "TOP", 0, 6
     local zf = rawget(plate, "_zuiNP")           -- ZacUI's own plate frame
     if type(zf) == "table" and zf.health then
-        to, pt = zf.health, "TOP"
-        ox, oy = tonumber(db.plateRowX) or 0, (tonumber(db.plateRowY) or 2) + BOX_OUT * PlateK(zf)
+        to, pt, ox, oy = RowSpot(zf, db)
+    else
+        zf = nil
     end
     if f._plate ~= plate or f._to ~= to or f._ox ~= ox or f._oy ~= oy then
-        f._plate, f._to, f._pt, f._ox, f._oy = plate, to, pt, ox, oy
+        f._plate, f._to, f._pt, f._ox, f._oy, f._zf = plate, to, pt, ox, oy, zf
         f:ClearAllPoints()
         f:SetPoint("BOTTOM", to, pt, ox, oy)
+        -- (moved while up: the crosshair and the plates' aura strips follow)
+        if f:IsShown() then Remeasure() end
     end
     local soon = tonumber(db.plateSoon) or 1.5
     local markOn = db.nextMark ~= false
@@ -2470,8 +2521,12 @@ function H:Practice(e, delay)
     f:ClearAllPoints()
     local plate = C_NamePlate and C_NamePlate.GetNamePlateForUnit and C_NamePlate.GetNamePlateForUnit("target")
     local zf = plate and rawget(plate, "_zuiNP")
-    if type(zf) == "table" and zf.health then
-        f:SetPoint("BOTTOM", zf.health, "TOP", 0, 3 + (tonumber(db.plateRowY) or 2) + (prow and prow._rowH or db.plateSize or 30) + 6)
+    if prow and prow:IsShown() and type(zf) == "table" and prow._zf == zf then
+        -- over the row, which stands over the name
+        f:SetPoint("BOTTOM", prow, "TOP", 0, 6)
+    elseif type(zf) == "table" and zf.health then
+        local to, pt, ox, oy = RowSpot(zf, db)
+        f:SetPoint("BOTTOM", to, pt, ox, oy + (db.plateSize or 30) + 6)
     elseif plate then
         f:SetPoint("BOTTOM", plate, "TOP", 0, 40)
     else

@@ -3,7 +3,7 @@
 ## Title: ZacUI |cff33ff99World map|r
 ## Notes: One seamless world map: every zone stitched together, zoom out of one into the next. Built on OpenMap (MIT, credited in LICENSE.txt). /openmap
 ## Author: Zac (map engine: OpenMap contributors)
-## Version: 3.0.2
+## Version: 3.0.3
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## AddonCompartmentFunc: ZacuiWorldMap_OnAddonCompartmentClick
 ## AddonCompartmentFuncOnEnter: ZacuiWorldMap_OnAddonCompartmentEnter

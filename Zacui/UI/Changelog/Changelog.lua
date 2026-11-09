@@ -182,6 +182,10 @@ local function Fill()
             local title = UI.PopupText(child, "head", { text = v.title or ("Version " .. tostring(v.version)),
                 width = math.max(80, room), justify = "LEFT" })
             title:SetPoint("TOPLEFT", child, "TOPLEFT", x, y)
+            -- (2026-11-08, Zac likes Readycheck's: the version's title in
+            -- the accent, the heads in their colours, a compact window)
+            title._zPaint = function(self) local a = GetColor("ui", "accent") self:SetTextColor(a.r, a.g, a.b, 1) end
+            title:_zPaint()
             local extra = math.max(0, math.ceil(title:GetStringHeight() or 0) - (UI.POP.HEAD + 4))
             y = y - extra
             if IsNew(v) then
@@ -214,7 +218,7 @@ end
 -- window's look - the title and the version under it, the close box, the
 -- list, and a foot with "Show all versions" and Got it.
 local function BuildPopup()
-    local f = UI.Popup("ZacUIChangelogFrame", 460, 420, "What's new", { desc = " ", rule = true })
+    local f = UI.Popup("ZacUIChangelogFrame", 560, 380, "What's new", { desc = " ", rule = true, size = "small" })
     f:SetPoint("CENTER", 0, 40)
     f.version = f.descText
 

@@ -2065,6 +2065,8 @@ function ns.PaintName(frame, text, r, g, b)
         text = text:sub(1, cut)
     end
     frame.Name:SetText(text or "")
+    -- (a preview sample can come without a colour: white, never an error)
+    if type(r) ~= "number" or type(g) ~= "number" or type(b) ~= "number" then r, g, b = 1, 1, 1 end
     frame.Name:SetTextColor(r, g, b)
 end
 

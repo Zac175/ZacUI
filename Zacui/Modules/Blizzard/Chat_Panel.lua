@@ -148,6 +148,8 @@ function CP.PaintPanel(bg, d)
             end
         end
     end
+    -- (the rail beside the panel: no edge where they meet - CP.RailSeam)
+    if bg._zcpSeam and CP.RailSeam then CP.RailSeam() end
 end
 Chat.PanelExtra = CP.PaintPanel
 
@@ -371,8 +373,8 @@ end)
 --   scroll      to the newest line - only while you are scrolled up
 -- Each its own switch (chat.railItems[id] = false / true; nothing saved =
 -- the default above), the whole rail one (chat.rail = false), its side
--- (chat.railSide "left" / "right"; nothing saved = RIGHT, or left when
--- the chat sits too close to the screen's right edge for it). It hangs
+-- (chat.railSide "left" / "right"; nothing saved = LEFT, or right when
+-- the chat sits too close to the screen's left edge for it). It hangs
 -- outside the panel: the chat box never changes size or place for it. A right-click
 -- on the rail lists the icons to switch.
 -- ONLY UNDER THE ZACUI LOOK: under a game look (Classic, WoW Forever,
@@ -388,7 +390,7 @@ end)
 -- the counts every few seconds); nothing when it is not.
 local RAIL_ID = "chat_rail"
 local ICONS = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\"
-local RAIL = { W = 40, ICON = 22, FRIEND = 26, SPACE = 10, COUNT = 9, GLYPH = 18, FGLYPH = 17,
+local RAIL = { W = 40, MIN_W = 28, INSET = 38, ICON = 22, FRIEND = 26, SPACE = 10, COUNT = 9, GLYPH = 18, FGLYPH = 17,
     ALPHA = 0.4, HOVER = 0.9, DIM = 0.2, COUNT_A = 0.5, COUNT_HOVER = 0.9, HOVER_FILL = 0.08 }
 CP.RAIL = RAIL
 rail = {}                  -- the frame and its buttons, once built
@@ -622,6 +624,31 @@ function CP.RailAvailable()
     return not (Chat.ZacLook and not Chat.ZacLook())
 end
 function CP.RailOn() return CP.RailAvailable() and DB().rail ~= false end
+-- mouseover only (the default) or always up
+function CP.RailHover() return DB().railHover ~= false end
+function CP.RailFade(f, dt)
+    local want = 1
+    if CP.RailHover() then
+        local cf = DEFAULT_CHAT_FRAME
+        local bg = cf and cf._zui_chatbg
+        local over = (f.IsMouseOver and f:IsMouseOver())
+            or (bg and bg.IsMouseOver and bg:IsMouseOver())
+            or (cf and cf.IsMouseOver and cf:IsMouseOver())
+        if over then
+            rail.away = 0
+        else
+            rail.away = (rail.away or 0) + (dt or 0)
+            -- a short grace, so crossing the gap from chat to rail never blinks
+            if rail.away > 0.4 then want = 0 end
+        end
+    end
+    local a = f:GetAlpha() or 1
+    if math.abs(a - want) < 0.02 then
+        if a ~= want then f:SetAlpha(want) end
+        return
+    end
+    f:SetAlpha(a + (want - a) * math.min(1, (dt or 0.016) * 8))
+end
 function CP.RailItemHere(id)
     local it = RAIL_BY[id]
     if not it then return false end
@@ -664,6 +691,24 @@ local function Num(v) return type(v) == "number" and not (ns.IsSecret and ns.IsS
 function CP.RailSide(bg)
     local s = DB().railSide
     if s == "left" or s == "right" then return s end
+    if s == "inside" then return "inside" end
+    -- (2026-11-08, Zac: "i wanted the stuff on the other side" - the
+    -- right-hand rail sat on his weapon bar) LEFT of the chat, unless the
+    -- chat is too near the screen's left edge for it to fit there
+    local l = bg and bg.GetLeft and bg:GetLeft()
+    if Num(l) then
+        local k = 1
+        if bg.GetEffectiveScale and UIParent and UIParent.GetEffectiveScale then
+            local ok, a = pcall(bg.GetEffectiveScale, bg)
+            local ok2, u = pcall(UIParent.GetEffectiveScale, UIParent)
+            if ok and ok2 and Num(a) and Num(u) and u > 0 then k = a / u end
+        end
+        -- (2026-11-08, Zac: "house them outside the chat but to the left";
+        -- inside, the chat window took the clicks) a chat close to the
+        -- screen's edge gets a narrower column, down to RAIL.MIN_W; flush
+        -- against the panel, so all of that room is the column's
+        if l * k >= RAIL.MIN_W then return "left", l * k end
+    end
     local r = bg and bg.GetRight and bg:GetRight()
     local sw = UIParent and UIParent.GetRight and UIParent:GetRight()
     if not Num(sw) and UIParent and UIParent.GetWidth then sw = UIParent:GetWidth() end
@@ -781,6 +826,12 @@ local function BuildRail()
     -- the clock: scrolled up? (a quarter second), the counts (every 5 s)
     f:SetScript("OnShow", function() rail.t, rail.slow = 99, 99 end)
     f:SetScript("OnUpdate", function(self, dt)
+        -- (2026-11-08, Zac: "make this area next to the chat mouse over by
+        -- default but have the ability in the ui to make it not hover")
+        -- the icons fade in while the mouse is over the chat or the rail,
+        -- and out a moment after it leaves; chat.railHover = false keeps
+        -- them up
+        CP.RailFade(self, dt)
         rail.t = (rail.t or 99) + dt
         if rail.t < 0.25 then return end
         rail.slow = (rail.slow or 99) + rail.t
@@ -800,7 +851,18 @@ local function PaintRail(d)
         local pr, pg, pb = Chat.PanelRGB(d)
         if pr then r, g, b = pr, pg, pb end
     end
-    rail.fill:SetVertexColor(r, g, b, tonumber(d.opacity) or 0.65)
+    -- (2026-11-08, Zac: "add a background to these buttons") the column
+    -- has the chat's own panel colour behind it - the panel's fill exactly
+    -- as painted, so chat and rail read as one box
+    local a = tonumber(d.opacity) or 0.65
+    local cf = DEFAULT_CHAT_FRAME
+    local pfill = cf and cf._zui_chatbg and cf._zui_chatbg._zui_cbg
+    if pfill and pfill.GetVertexColor then
+        local pr, pg, pb, pa = pfill:GetVertexColor()
+        if Num(pr) and Num(pg) and Num(pb) then r, g, b = pr, pg, pb end
+        if Num(pa) then a = pa end
+    end
+    rail.fill:SetVertexColor(r, g, b, a)
     local er, eg, eb, ea = 1, 1, 1, 0.06
     if Chat.EdgeRGBA then
         local a1, a2, a3, a4 = Chat.EdgeRGBA(d)
@@ -812,25 +874,91 @@ local function PaintRail(d)
 end
 
 -- where everything sits: the rail beside the panel, the icons down it
+-- The chat windows' text, inset from the left by `px` (0 = as Blizzard
+-- lays it): the message lines live in the frame's FontStringContainer, so
+-- moving that moves the text and nothing else - the window keeps its saved
+-- size and place.
+function CP.InsetText(px)
+    px = px or 0
+    for i = 1, (NUM_CHAT_WINDOWS or 10) do
+        local cf = _G["ChatFrame" .. i]
+        local c = cf and rawget(cf, "FontStringContainer")
+        if c and c.ClearAllPoints and rawget(cf, "_zRailInset") ~= px then
+            c:ClearAllPoints()
+            c:SetPoint("TOPLEFT", cf, "TOPLEFT", px, 0)
+            c:SetPoint("BOTTOMRIGHT", cf, "BOTTOMRIGHT", 0, 0)
+            rawset(cf, "_zRailInset", px)
+        end
+    end
+end
+
+-- The panel's own edge where the rail meets it: hidden while the rail is
+-- up beside the panel (left: its LEFT edge, right: its RIGHT), back when
+-- the rail goes or moves inside - on every docked window's panel (they
+-- share the spot; the rail stays while another docked tab is up). A
+-- border set to 0 on the Chat page stays hidden either way. Called after
+-- every rail change and every panel paint.
+local function SeamOne(bg, want)
+    local strips = bg and bg._zui_borderTex
+    if not strips or strips._zEdge then return end      -- the Classic edge: the art's own
+    local was = bg._zcpSeam
+    if was and was ~= want and strips[was] then
+        local d = DB()
+        local size = Allowed(PANEL_ID) and tonumber(d.panelBorderSize) or nil
+        if size == nil or size > 0 then strips[was]:Show() end
+    end
+    if want and strips[want] then strips[want]:Hide() end
+    bg._zcpSeam = want
+end
+function CP.RailSeam()
+    local f = rail.frame
+    local want
+    if f and f:IsShown() and CP.RailOn() then
+        if rail.side == "left" then want = 3 elseif rail.side == "right" then want = 4 end
+    end
+    for i = 1, (NUM_CHAT_WINDOWS or 10) do
+        local cf = _G["ChatFrame" .. i]
+        local bg = cf and rawget(cf, "_zui_chatbg")
+        if bg then
+            local docked = cf == DEFAULT_CHAT_FRAME or cf.isDocked == true or cf.isDocked == 1
+            SeamOne(bg, docked and want or nil)
+        end
+    end
+end
+
 local function PlaceRail(d)
     local f = rail.frame
     local cf = DEFAULT_CHAT_FRAME
     local bg = cf and cf._zui_chatbg
     if not (f and bg) then return false end
-    local side = CP.RailSide(bg)
+    local side, room = CP.RailSide(bg)
     rail.side = side
     f:ClearAllPoints()
-    if side == "right" then
+    CP.InsetText(side == "inside" and RAIL.INSET or 0)
+    -- the column's width: 40, or what room the screen's edge leaves
+    local w = RAIL.W
+    if side == "left" and type(room) == "number" and room < RAIL.W then
+        w = math.max(RAIL.MIN_W, math.floor(room))
+    end
+    f:SetWidth(w)
+    if side == "inside" then
+        f:SetPoint("TOPLEFT", bg, "TOPLEFT", 0, 0)
+        f:SetPoint("BOTTOMLEFT", bg, "BOTTOMLEFT", 0, 0)
+    elseif side == "right" then
         f:SetPoint("TOPLEFT", bg, "TOPRIGHT", 0, 0)
         f:SetPoint("BOTTOMLEFT", bg, "BOTTOMRIGHT", 0, 0)
     else
         f:SetPoint("TOPRIGHT", bg, "TOPLEFT", 0, 0)
         f:SetPoint("BOTTOMRIGHT", bg, "BOTTOMLEFT", 0, 0)
     end
-    -- no edge on the panel's side: the panel's own edge is the divider
+    -- (2026-11-08, Zac: "the chat settings cog and that bar not attached
+    -- to the chat, looks weird with a gap") FLUSH against the panel, its
+    -- top and bottom (the bar the panel reaches down around included):
+    -- one box with the chat. No line where they meet - neither the
+    -- rail's edge nor the panel's (CP.RailSeam) - only the outer edges.
     -- (edges: TOP, BOTTOM, LEFT, RIGHT)
     if rail.edges[3] then rail.edges[3]:SetShown(side ~= "right") end
-    if rail.edges[4] then rail.edges[4]:SetShown(side == "right") end
+    if rail.edges[4] then rail.edges[4]:SetShown(side ~= "left") end
     local anchor = (side == "right") and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
     -- the icons from the top, 10 apart; the scroll button 10 off the bottom
     local h = f.GetHeight and f:GetHeight() or nil
@@ -957,6 +1085,8 @@ function CP.RailRefresh(d)
     local want = CP.RailOn() and Chat.Built and Chat.Built()
     if not want then
         if rail.frame then rail.frame:Hide() end
+        CP.InsetText(0)
+        CP.RailSeam()
         return
     end
     local cf = DEFAULT_CHAT_FRAME
@@ -968,6 +1098,7 @@ function CP.RailRefresh(d)
     -- up while the dock is (any docked window shown: General is hidden
     -- while another docked tab is selected, and the rail stays)
     rail.frame:SetShown((Chat.DockUp and Chat.DockUp() or bg:IsShown()) and true or false)
+    CP.RailSeam()
     rail.t, rail.slow = 99, 99
     CP.RailTick()
 end
@@ -977,7 +1108,7 @@ function CP.RailSync()
     local f = rail.frame
     if not f then return end
     local up = CP.RailOn() and Chat.DockUp and Chat.DockUp() and true or false
-    if f:IsShown() ~= up then f:SetShown(up) end
+    if f:IsShown() ~= up then f:SetShown(up) CP.RailSeam() end
 end
 Chat.RailSync = CP.RailSync
 
@@ -1157,9 +1288,15 @@ function CP.RailCard(L)
             end)
         end
     end
+    local hover = UI.Checkbox(L.current, "Only while the mouse is over the chat", CP.RailHover(), function(v)
+        if v then DB().railHover = nil else DB().railHover = false end
+        if rail.frame then rail.frame:SetAlpha(1) end
+    end, { tooltip = "On: the icons fade in when you mouse over the chat or the icons, and fade out after. "
+        .. "Off: they always show." })
+    table.insert(boxes, 1, hover)
     L:Dependent(boxes, CP.RailOn(), 2, nil, "Show the icon rail")
-    local SIDES = { { value = "auto", text = "Right (left when there is no room)" },
-        { value = "left", text = "Left of the chat" }, { value = "right", text = "Right of the chat" } }
+    local SIDES = { { value = "auto", text = "Left (right when there is no room)" },
+        { value = "left", text = "Outside, left of the chat" }, { value = "right", text = "Outside, right of the chat" } }
     local function SideText()
         local v = d.railSide or "auto"
         for _, it in ipairs(SIDES) do if it.value == v then return it.text end end
