@@ -325,6 +325,10 @@ local function Close(host, c, fixed)
     for _, r in ipairs({ b:GetRegions() }) do
         if r.IsObjectType and r:IsObjectType("Texture") and not rawget(r, "_zui_own") then Quiet(r) end
     end
+    -- (2026-11-08) a text "Close" button (the game options' ClosePanelButton)
+    -- wearing the round X: its word goes, or it read as a second button
+    local fs = b.GetFontString and b:GetFontString()
+    if fs and fs.SetAlpha then fs:SetAlpha(0) end
     local n, p, h = OwnTex(b, "ARTWORK"), OwnTex(b, "ARTWORK", 1), OwnTex(b, "HIGHLIGHT")
     if fixed then
         -- a protected panel: the button keeps its place and size, the

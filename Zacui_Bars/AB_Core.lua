@@ -2214,7 +2214,22 @@ local function PaintModern(btn, w, h, kit)
             icon:ClearAllPoints()
             icon:SetAllPoints(btn)
         end
-        if mask and mask.ClearAllPoints and icon then
+        -- (2026-11-09, Zac on Forever: "how are my action bar icons fucked
+        -- again") the Forever client's IconFrame-Mask is ITS art - a smaller
+        -- window for its bronze frame - so laid on the icon it cut every
+        -- icon down inside the retail frame. There the icon goes unmasked,
+        -- trimmed of its own edge, and the frame's window frames it.
+        local rf = ns.RealFlavor and ns.RealFlavor() or (ns.DetectFlavor and ns.DetectFlavor())
+        if rf == "forever" then
+            if mask and icon and icon.RemoveMaskTexture then pcall(icon.RemoveMaskTexture, icon, mask) end
+            if mask and mask.Hide then mask:Hide() end
+            rawset(btn, "_zKitUnmasked", true)
+            if icon and icon.SetTexCoord then icon:SetTexCoord(0.07, 0.93, 0.07, 0.93) end
+        elseif mask and mask.ClearAllPoints and icon then
+            if rawget(btn, "_zKitUnmasked") and icon.AddMaskTexture then
+                pcall(icon.AddMaskTexture, icon, mask)
+                rawset(btn, "_zKitUnmasked", nil)
+            end
             mask:ClearAllPoints()
             mask:SetAllPoints(icon)
             if mask.Show then mask:Show() end

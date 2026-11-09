@@ -580,6 +580,17 @@ local function CreateButton(header, n, i)
         Mixin(btn, Derived, BarMixin)
         btn.zBar, btn.zIndex, btn.zAbs = n, i, absid
         btn.zDerived = true                         -- eventsRegistered is ours to read
+        -- (2026-11-09, ADDON_ACTION_BLOCKED on hover in combat) the stock
+        -- OnEnter -> UpdateAction re-writes the ping attributes, a protected
+        -- ClearAttribute our button may not run in combat; they wait for
+        -- the next update out of combat
+        local ping = btn.UpdatePingAttributes
+        if type(ping) == "function" then
+            btn.UpdatePingAttributes = function(self, ...)
+                if InCombatLockdown() then return end
+                return ping(self, ...)
+            end
+        end
 
         -- ours before the stock setup runs, so the setup already uses them
         btn.UpdateHotkeys = AB.UpdateHotkeys

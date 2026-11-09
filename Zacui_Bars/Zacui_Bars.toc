@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Bars|r
 ## Notes: ZacUI action bars and bar loadouts. Replaces Bartender4 and Myslot.
 ## Author: Zac
-## Version: 3.0.4
+## Version: 3.0.5
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

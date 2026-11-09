@@ -252,6 +252,29 @@ function NP.LayoutFrame(f)
     -- (2026-11-08, Zac) the game looks' plates have nothing behind the
     -- health: the missing part shows the world, as the stock plates do
     if f.health.bg then f.health.bg:SetAlpha((NP.StockLook and NP.StockLook()) and 0 or 1) end
+    -- (2026-11-09, Zac's /fstack: NamePlate._zuiNP.healthBar._zui_edge)
+    -- the look's box edge over the bar - a tooltip box whose inside washed
+    -- the bar grey. Under a game look the plate's own art (the 2004
+    -- border, the client's rim) is the edge: this one never shows, and a
+    -- later SetAlpha from anywhere is put back to 0.
+    local edge = rawget(f.health, "_zui_edge")
+    if edge and edge.SetAlpha then
+        local stock = (NP.StockLook and NP.StockLook()) and true or false
+        rawset(edge, "_zNPHide", stock or nil)
+        if not rawget(edge, "_zNPHook") and hooksecurefunc then
+            rawset(edge, "_zNPHook", true)
+            hooksecurefunc(edge, "SetAlpha", function(self, a)
+                if rawget(self, "_zNPHide") and type(a) == "number" and a > 0 then self:SetAlpha(0) end
+            end)
+            -- not just see-through: not there at all (Zac's /fstack still
+            -- listed it at alpha 0) - shown again only off the game looks
+            hooksecurefunc(edge, "Show", function(self)
+                if rawget(self, "_zNPHide") then self:Hide() end
+            end)
+        end
+        edge:SetAlpha(stock and 0 or 1)
+        if stock then edge:Hide() else edge:Show() end
+    end
     local hc = d.target.hoverColor
     if hc then f.health.hover:SetColorTexture(hc[1] or 1, hc[2] or 1, hc[3] or 1, 1) end
     -- the target marks' host follows the bar (at rest: a playing target

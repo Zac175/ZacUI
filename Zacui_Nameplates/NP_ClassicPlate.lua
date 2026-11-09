@@ -66,7 +66,7 @@ local function Plate(bar, spec)
     end
     if not pieces then
         pieces = {}
-        for i = 1, 3 do
+        for i = 1, 4 do
             local t = bar:CreateTexture(nil, "OVERLAY", nil, 6)
             t._zui_own = true
             pieces[i] = t
@@ -92,9 +92,26 @@ local function Plate(bar, spec)
     R:SetWidth(spec.capR * k)
     R:SetPoint("TOPRIGHT", bar, "TOPRIGHT", spec.reachR * k, top)
     R:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", spec.reachR * k, -bot)
-    M:SetTexCoord(spec.c1, spec.c2, spec.t, spec.b)
-    M:SetPoint("TOPLEFT", L, "TOPRIGHT", 0, 0)
-    M:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT", 0, 0)
+    local M2 = pieces[4]
+    if spec == ART.health and M2 then
+        -- (2026-11-08, Zac: "there needs to be nothing behind the health
+        -- bars") the art's middle is cut in two: its rim above the bar and
+        -- its rim below it. The art's grey inside, over the bar, is left out.
+        local span = 1 + TOP + BOTTOM
+        local tt = spec.t + (spec.b - spec.t) * TOP / span
+        local bb = spec.b - (spec.b - spec.t) * BOTTOM / span
+        M:SetTexCoord(spec.c1, spec.c2, spec.t, tt)
+        M:SetPoint("TOPLEFT", L, "TOPRIGHT", 0, 0)
+        M:SetPoint("BOTTOMRIGHT", R, "TOPLEFT", 0, -top)
+        M2:SetTexCoord(spec.c1, spec.c2, bb, spec.b)
+        M2:SetPoint("TOPLEFT", L, "BOTTOMRIGHT", 0, bot)
+        M2:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT", 0, 0)
+    else
+        if M2 then M2:Hide() end
+        M:SetTexCoord(spec.c1, spec.c2, spec.t, spec.b)
+        M:SetPoint("TOPLEFT", L, "TOPRIGHT", 0, 0)
+        M:SetPoint("BOTTOMRIGHT", R, "BOTTOMLEFT", 0, 0)
+    end
 end
 NP.ClassicPlate = Plate
 
@@ -154,10 +171,62 @@ local function Shade(bar, on)
     local h = SafeHeight(bar, 10)
     local top, bottom, ends = math.max(2, math.floor(h * 0.2)), math.max(1, math.floor(h * 0.1)), math.max(2, math.floor(h * 0.15))
     for i = 1, 4 do sh[i]:ClearAllPoints() sh[i]:Show() end
-    sh[1]:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0) sh[1]:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0) sh[1]:SetHeight(top)
-    sh[2]:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0) sh[2]:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0) sh[2]:SetHeight(bottom)
-    sh[3]:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0) sh[3]:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0) sh[3]:SetWidth(ends)
-    sh[4]:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0) sh[4]:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0) sh[4]:SetWidth(ends)
+    -- (2026-11-08) on the fill only: the missing part shows nothing
+    local fl = bar.GetStatusBarTexture and bar:GetStatusBarTexture() or bar
+    if type(fl) ~= "table" then fl = bar end
+    sh[1]:SetPoint("TOPLEFT", fl, "TOPLEFT", 0, 0) sh[1]:SetPoint("TOPRIGHT", fl, "TOPRIGHT", 0, 0) sh[1]:SetHeight(top)
+    sh[2]:SetPoint("BOTTOMLEFT", fl, "BOTTOMLEFT", 0, 0) sh[2]:SetPoint("BOTTOMRIGHT", fl, "BOTTOMRIGHT", 0, 0) sh[2]:SetHeight(bottom)
+    sh[3]:SetPoint("TOPLEFT", fl, "TOPLEFT", 0, 0) sh[3]:SetPoint("BOTTOMLEFT", fl, "BOTTOMLEFT", 0, 0) sh[3]:SetWidth(ends)
+    sh[4]:SetPoint("TOPRIGHT", fl, "TOPRIGHT", 0, 0) sh[4]:SetPoint("BOTTOMRIGHT", fl, "BOTTOMRIGHT", 0, 0) sh[4]:SetWidth(ends)
+end
+
+-- (2026-11-08) the stock bar background's RIM only, round the health: the
+-- atlas cut into four edge slices from its own sheet coordinates, so its
+-- grey inside never sits behind the bar. Reach: 2 left, 3 up, 6 right,
+-- 6 down - where the whole art was hung.
+local RIM = { l = 2, t = 3, r = 6, b = 6 }
+function NP.ModernRim(bar, on)
+    local rim = rawget(bar, "_zModernRim")
+    if not on then
+        if rim then for i = 1, #rim do rim[i]:Hide() end end
+        return
+    end
+    -- (2026-11-09, Zac: "doesnt fully connect and the health still goes
+    -- outside the border") the stock art cut into slices never met at the
+    -- corners. Drawn instead, exact: a light rim line ON the bar's outer
+    -- pixel all round (over the fill, so the fill can never show past it)
+    -- and a dark line just outside it - closed at every corner.
+    if not rim then
+        rim = {}
+        for i = 1, 8 do
+            local t = bar:CreateTexture(nil, "OVERLAY", nil, i <= 4 and 5 or 4)
+            t._zui_own = true
+            t:SetTexture("Interface\\Buttons\\WHITE8X8")
+            rim[i] = t
+        end
+        rawset(bar, "_zModernRim", rim)
+    end
+    for i = 1, 8 do rim[i]:ClearAllPoints() rim[i]:Show() end
+    for i = 1, 4 do rim[i]:SetVertexColor(0.80, 0.75, 0.60, 1) end
+    for i = 5, 8 do rim[i]:SetVertexColor(0, 0, 0, 0.9) end
+    local function Box(t, r, o)
+        -- r = the four textures from index t; o = 0 on the bar's edge, 1 outside
+        local top, bot, lf, rt = rim[t], rim[t + 1], rim[t + 2], rim[t + 3]
+        top:SetPoint("TOPLEFT", bar, "TOPLEFT", -o, o)
+        top:SetPoint("TOPRIGHT", bar, "TOPRIGHT", o, o)
+        top:SetHeight(1)
+        bot:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -o, -o)
+        bot:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", o, -o)
+        bot:SetHeight(1)
+        lf:SetPoint("TOPLEFT", bar, "TOPLEFT", -o, o)
+        lf:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", -o, -o)
+        lf:SetWidth(1)
+        rt:SetPoint("TOPRIGHT", bar, "TOPRIGHT", o, o)
+        rt:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", o, -o)
+        rt:SetWidth(1)
+    end
+    Box(1, nil, 0)
+    Box(5, nil, 1)
 end
 
 -- the modern art on a bar (`kind` "health" | "cast"), or put away (nil)
@@ -165,6 +234,7 @@ local function Modern(bar, kind, lookId)
     if not bar then return end
     local bg = rawget(bar, "_zModernBg")
     local want = kind and AtlasOK(kind == "cast" and CAST_BG or BAR_BG)
+    if not want or kind ~= "health" then NP.ModernRim(bar, false) end
     if not want then
         if bg then bg:Hide() end
         Shade(bar, false)
@@ -174,7 +244,7 @@ local function Modern(bar, kind, lookId)
         if rawget(bar, "_zModernOn") then
             local edge = rawget(bar, "_zui_edge")
             if edge and edge.SetAlpha then edge:SetAlpha(1) end
-            if bar.bg and bar.bg.SetAlpha then bar.bg:SetAlpha(1) end
+            if bar.bg and bar.bg.SetAlpha then bar.bg:SetAlpha((kind == nil and NP.StockLook and NP.StockLook()) and 0 or 1) end
             rawset(bar, "_zModernOn", nil)
         end
         return
@@ -196,28 +266,36 @@ local function Modern(bar, kind, lookId)
         bg:SetPoint("TOPLEFT", bar, "TOPLEFT", -2, 3)
         bg:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 6, -6)
     end
+    -- (2026-11-08, Zac: "there needs to be nothing behind the health
+    -- bars") the health keeps no backing art - its grey fill read as a
+    -- background; the look's plain edge rims the bar instead. The cast
+    -- bar keeps the client's cast background.
+    -- (2026-11-09) the client's own art, exactly as its plate hangs it
+    -- (Blizzard_NamePlateUnitFrame UpdateAnchors: the bar background at
+    -- -2,3 / 6,-6). The grey that read over it was ZacUI's box edge, gone
+    -- now (NP_Health); the drawn rim is put away.
+    NP.ModernRim(bar, false)
     bg:Show()
     -- the bar's own dark backing goes (the art is the backing now)
     if bar.bg and bar.bg.SetAlpha then bar.bg:SetAlpha(0) end
     if kind == "health" then
-        local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
-        if AtlasOK(BAR) and type(fill) == "table" and fill.AddMaskTexture and bar.CreateMaskTexture then
-            local m = rawget(bar, "_zModernMask")
-            if not m then
-                m = bar:CreateMaskTexture()
-                m:SetAtlas(BAR)
-                rawset(bar, "_zModernMask", m)
-            end
-            m:ClearAllPoints()
-            m:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
-            m:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, lookId == "forever" and 1 or 0)
-            if rawget(bar, "_zModernMasked") ~= fill then
-                pcall(fill.RemoveMaskTexture, fill, m)
-                fill:AddMaskTexture(m)
-                rawset(bar, "_zModernMasked", fill)
+        -- (2026-11-09, Zac: "the health bar still goes in front of the
+        -- border art") the client's own fill, as its plate draws it
+        -- (BarTexture atlas UI-HUD-CoolDownManager-Bar, all points): made to
+        -- sit inside the background's rim, its shading baked in. No flat
+        -- fill cut by a mask, no extra shade.
+        local m, fill0 = rawget(bar, "_zModernMask"), rawget(bar, "_zModernMasked")
+        if m and fill0 and fill0.RemoveMaskTexture then pcall(fill0.RemoveMaskTexture, fill0, m) end
+        rawset(bar, "_zModernMasked", nil)
+        Shade(bar, false)
+        if AtlasOK(BAR) then
+            pcall(bar.SetStatusBarTexture, bar, BAR)
+            local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+            if type(fill) == "table" and fill.SetAtlas then
+                local ok, cur = pcall(fill.GetAtlas, fill)
+                if not (ok and cur and cur:lower() == BAR:lower()) then pcall(fill.SetAtlas, fill, BAR) end
             end
         end
-        Shade(bar, true)
     end
 end
 NP.ModernPlate = Modern
@@ -229,7 +307,36 @@ NP.ModernPlate = Modern
 -- place of ZacUI's box / arrows / glow, which NP_Core and NP_Extras keep
 -- off under a game look. Shaped like the fill under the modern looks.
 -- ============================================================
+-- the client's own target border on a modern look (UI-HUD-Nameplates-
+-- Selected round the bar background: -1,1 / -3,3 from it, as the stock
+-- plate hangs it)
+local SELECTED = "UI-HUD-Nameplates-Selected"
+function NP.StockSelected(f, on)
+    local hb = f and f.health
+    if not hb then return end
+    local sel = rawget(hb, "_zStockSel")
+    local bg = rawget(hb, "_zModernBg")
+    if not (on and bg and bg:IsShown() and AtlasOK(SELECTED)) then
+        if sel then sel:Hide() end
+        return
+    end
+    if not sel then
+        sel = hb:CreateTexture(nil, "OVERLAY", nil, 1)
+        sel._zui_own = true
+        sel:SetAtlas(SELECTED)
+        rawset(hb, "_zStockSel", sel)
+    end
+    sel:ClearAllPoints()
+    sel:SetPoint("TOPLEFT", bg, "TOPLEFT", -1, 1)
+    sel:SetPoint("BOTTOMRIGHT", bg, "BOTTOMRIGHT", -3, 3)
+    sel:SetVertexColor(1, 1, 1, 1)
+    sel:Show()
+end
+
 function NP.StockTargetWash(f, on)
+    -- (2026-11-09, Zac: "why is there a white border when targeting mobs")
+    -- no target border either: the target reads by the plate's full alpha
+    NP.StockSelected(f, false)
     local hb = f and f.health
     if not hb then return end
     local w = rawget(hb, "_zStockWash")

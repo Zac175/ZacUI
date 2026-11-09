@@ -14,6 +14,24 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.5",
+        date = "2026-11-08",
+        title = "Clear nameplate bars",
+        sections = {
+            {
+                type = "fixed",
+                items = {
+                    "Nameplates under the game styles show nothing behind the missing health - no grey backing or white wash.",
+                    "Nameplates under the Forever and live styles use the game's own bar art.",
+                    "The game options window under the 2004 style has one close button, not two.",
+                    "Quest and gossip text under the game styles is no longer heavy black.",
+                    "No more blocked-action error when hovering an action button in combat.",
+                    "Action bar icons under the live style on WoW Forever fill their slots again.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.4",
         date = "2026-11-08",
         title = "Party frames and a new buy window",

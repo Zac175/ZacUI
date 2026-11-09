@@ -174,7 +174,14 @@ local function ApplyFonts()
                 fontBase[objName] = base
             end
             local newFlags = base.flags
-            if cfg.outline == "OUTLINE" then
+            -- (2026-11-08, Zac: "why the super black text on 2004 style")
+            -- the parchment's quest text never takes an outline under a
+            -- game look: dark ink with a black rim read as a blob
+            local parchment = objName:find("^Quest") and ns.Look and ns.Look.For
+                and (function() local ok, lk = pcall(ns.Look.For, "blizzard") return ok and lk and lk.id ~= "zacui" end)()
+            if parchment then
+                newFlags = base.flags
+            elseif cfg.outline == "OUTLINE" then
                 newFlags = "OUTLINE"
             elseif cfg.outline == "NONE" then
                 newFlags = ""

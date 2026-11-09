@@ -1412,7 +1412,9 @@ end
 
 function NP.UpdateHover(f)
     local d = DB()
-    local hovered = d.target.hover and f.unit
+    -- (2026-11-09) under a game look no white wash on mouseover either:
+    -- the stock plates keep their colours
+    local hovered = d.target.hover and f.unit and not NP.StockLook()
         and UnitIsUnit(f.unit, "mouseover")
     NP.SetHoverGlow(f, hovered and d.target.hoverAlpha or 0)
 end
