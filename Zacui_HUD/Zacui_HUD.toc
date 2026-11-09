@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Class HUDs|r
 ## Notes: ZacUI class HUDs for every class, and the Drink Ticker. Native ports of the class-pack WeakAuras.
 ## Author: Zac
-## Version: 3.0.3
+## Version: 3.0.4
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

@@ -249,6 +249,9 @@ function NP.LayoutFrame(f)
     f.health:SetAllPoints(f)
     f.health:SetStatusBarTexture(NP.BarTexture("healthTexture"))
     NP.BarChrome(f.health.bg, f.health)
+    -- (2026-11-08, Zac) the game looks' plates have nothing behind the
+    -- health: the missing part shows the world, as the stock plates do
+    if f.health.bg then f.health.bg:SetAlpha((NP.StockLook and NP.StockLook()) and 0 or 1) end
     local hc = d.target.hoverColor
     if hc then f.health.hover:SetColorTexture(hc[1] or 1, hc[2] or 1, hc[3] or 1, 1) end
     -- the target marks' host follows the bar (at rest: a playing target

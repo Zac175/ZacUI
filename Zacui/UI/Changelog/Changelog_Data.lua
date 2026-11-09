@@ -14,6 +14,34 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.4",
+        date = "2026-11-08",
+        title = "Party frames and a new buy window",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "Scroll the mouse wheel over a settings preview to zoom it in and out.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "Party frames wear the game's own small party frame under the Classic, WoW Forever and Blizzard styles.",
+                    "The auction house buy window is redesigned: the item with its icon, what you've bought and spent, and one clear price button.",
+                    "The key ring is a square slot with its own icon, like the bags beside it.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "Nameplates under the game styles have nothing behind the health bar, and no white wash on your target.",
+                    "Party power bars (rage, energy, mana) show under the game styles instead of a white bar.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.3",
         date = "2026-11-08",
         title = "Sharper buttons and a Twitch link",

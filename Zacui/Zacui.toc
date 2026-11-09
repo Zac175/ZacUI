@@ -2,7 +2,7 @@
 ## Title: ZacUI
 ## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
 ## Author: Zac
-## Version: 3.0.3
+## Version: 3.0.4
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB

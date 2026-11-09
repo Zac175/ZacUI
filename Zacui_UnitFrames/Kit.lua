@@ -161,6 +161,7 @@ do
 end
 
 K.KITS = { classic = CLASSIC, blizzard = BLIZZARD, forever = FOREVER }
+K._ns = ns   -- (tests: the unit frames' save)
 -- the Style page's look cards draw their miniature player frame from these
 -- (Core_Look's Look.Preview), so a card shows the kit the frames will wear
 do
@@ -219,13 +220,31 @@ local function KeyOf(frame)
 end
 
 -- the kit and the geometry for this frame, or nil
+-- a party slot (not raid): its cfg is ns.db.party, or a preview proxy over it
+local function IsParty(frame)
+    local cfg, party = frame.cfg, ns.db and ns.db.party
+    if not (cfg and party) then return false end
+    if cfg == party then return true end
+    local mt = getmetatable(cfg)
+    return (mt and mt.__index == party) and true or false
+end
+
 function K.For(frame)
-    if not frame or frame.isGroupUnit then return nil end
+    if not frame then return nil end
     local kit, look = K.Active()
     if not kit then return nil end
-    local key = KeyOf(frame)
-    if not key and frame.unit then key = frame.unit end
-    local own = key and KIND[key]
+    local own
+    if frame.isGroupUnit then
+        -- (2026-11-08) the party wears the game's small party frame: the
+        -- classic kit's small frame art (UI-SmallTargetingFrame, the party
+        -- frame's own layout), a modern kit's small frame. Raid stays bars.
+        if not IsParty(frame) then return nil end
+        own = "pet"
+    else
+        local key = KeyOf(frame)
+        if not key and frame.unit then key = frame.unit end
+        own = key and KIND[key]
+    end
     if not own then return nil end
     -- (a kit without pet art draws the pet on its small frame)
     local kind = (own == "pet" and not kit.pet) and "mini" or own

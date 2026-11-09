@@ -714,7 +714,9 @@ function ns.RegisterFrameEvents(frame)
     frame:RegisterUnitEvent("UNIT_MAXHEALTH", unit)
     frame:RegisterUnitEvent("UNIT_CONNECTION", unit)
 
-    if cfg.power then
+    -- (a game look's kit draws the power bar on its art: it runs whatever
+    -- the frame's own power switch says)
+    if cfg.power or frame._zKitKind then
         frame:RegisterUnitEvent("UNIT_POWER_UPDATE", unit)
         frame:RegisterUnitEvent("UNIT_MAXPOWER", unit)
         frame:RegisterUnitEvent("UNIT_DISPLAYPOWER", unit)
@@ -1985,7 +1987,7 @@ function ns.PowerColor(ptoken, ptype)
 end
 
 function ns.UpdatePower(frame)
-    if not frame.Power or (frame.cfg and not frame.cfg.power) then return end
+    if not frame.Power or (frame.cfg and not frame.cfg.power and not frame._zKitKind) then return end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return end
     local ptype, ptoken = UnitPowerType(unit)

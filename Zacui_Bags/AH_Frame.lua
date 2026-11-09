@@ -226,41 +226,75 @@ end
 local buyWindow
 
 local function BuildBuyWindow()
-    -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup), laid out from
-    -- top to bottom by what is showing. The old fixed spots put the Buy
-    -- button over the last line of text as soon as the shell's taller
-    -- header pushed the lines down, and the finished window still drew a
-    -- dead Buy over "Search again to look for more."
-    local W = 320
+    -- (2026-11-08, redesign - Zac: "just redesign the fucking thing") A
+    -- receipt, not a stack of centred sentences: the item as a card (its
+    -- icon in a fine frame, the name in gold, what one auction holds under
+    -- it), a hairline, three label / value rows (bought, spent, left), the
+    -- stack warning when there is one, then ONE full-width price button.
+    -- The footer's two buttons split the same width, so every edge lines
+    -- up. Built on the popup shell (UIF_Dialogs UI.Popup).
+    local W = 300
     local win = UI.Popup("ZacUIAuctionBuy", W, 228, "Buying")
     win._zMapOwn = true
     local POP = UI.POP
     local IW = W - 2 * win.pad
-    local LINE_GAP, BLOCK_GAP = 6, 14
+    local ICON, ROW_H, GAP = 38, 16, 10
+    local fallbackIcon = "Interface\\Icons\\INV_Misc_QuestionMark"
 
-    local function Line(kind, alpha)
-        local fs = UI.PopupText(win, kind, { justify = "CENTER", width = IW, alpha = alpha })
-        fs:SetJustifyH("CENTER")
-        return fs
+    local function Hair()
+        local t = win:CreateTexture(nil, "ARTWORK")
+        t._zui_own = true
+        t:SetColorTexture(1, 1, 1, POP.RULE_A * 1.5)
+        t:SetHeight(1)
+        return t
     end
-    win.item = Line("title")
-    -- the item's name keeps its gold
+
+    -- the card: icon, name, what one auction holds
+    win.iconHost = CreateFrame("Frame", nil, win)
+    win.iconHost:SetSize(ICON, ICON)
+    win.icon = win.iconHost:CreateTexture(nil, "ARTWORK")
+    win.icon._zui_own = true
+    win.icon:SetPoint("TOPLEFT", 1, -1)
+    win.icon:SetPoint("BOTTOMRIGHT", -1, 1)
+    win.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    UI.Border(win.iconHost, "ui", "border", 0.9)
+    local NW = IW - ICON - 10
+    win.item = UI.PopupText(win, "title", { width = NW })
+    win.item:SetJustifyH("LEFT")
+    if win.item.SetWordWrap then win.item:SetWordWrap(true) end
+    if win.item.SetMaxLines then win.item:SetMaxLines(2) end
     win.item._zPaint = function(self)
         local c = GetColor("text", "gold")
         self:SetTextColor(c.r, c.g, c.b, 1)
     end
     win.item:_zPaint()
-    win.progress = Line("body")
-    win.spent = Line("hint")
+    win.sub = UI.PopupText(win, "hint", { width = NW })
+    win.sub:SetJustifyH("LEFT")
+    win.rule1 = Hair()
+
+    -- the rows: a dim label left, the value right
+    local function Row(label)
+        local l = UI.PopupText(win, "hint")
+        l:SetJustifyH("LEFT")
+        l:SetText(label)
+        local v = UI.PopupText(win, "body", { alpha = 1, width = IW - 70 })
+        v:SetJustifyH("RIGHT")
+        return l, v
+    end
+    win.progressLabel, win.progress = Row("Bought")
+    win.spentLabel, win.spent = Row("Spent")
+    win.leftLabel, win.left = Row("Left")
+    win.rule2 = Hair()
+
     -- The stack callout. "Bought 5 thinking it was 1" happened because
     -- the only place the quantity appeared was inside the button label -
     -- this line exists to make a multi-item purchase impossible to miss.
     -- It also carries "search again" when the page is empty, and the
     -- reason a click was refused. Full white, so its colour codes read.
-    win.stackNote = Line("body", 1)
-    win.lines = { win.item, win.progress, win.spent, win.stackNote }
+    win.stackNote = UI.PopupText(win, "body", { width = IW, alpha = 1 })
+    win.stackNote:SetJustifyH("CENTER")
 
-    -- The button is the engine: as wide as the text, under it.
+    -- The button is the engine: the window's full inner width.
     win.buy = UI.PopupButton(win, "waiting for the auction house...", {
         kind = "primary", width = IW, onClick = function()
             -- THE HARDWARE EVENT. This click is the only thing the client
@@ -276,26 +310,22 @@ local function BuildBuyWindow()
         end })
     win.buy:SetFrameLevel(win:GetFrameLevel() + 20)
     -- NEVER an enabled, unlabeled Buy: until the first Refresh names an
-    -- exact quantity and price, this button does nothing. (Its label is
-    -- the button's own string, set by SetLabel - Button:SetText never
-    -- reached it, which is how the window came to say a bare "Buy".)
+    -- exact quantity and price, this button does nothing.
     win.buy:SetDisabled(true)
 
-    -- "Done" rather than "Stop": the window no longer ends itself when a
-    -- plan runs out, so closing it is what ends a run. "Search again"
-    -- restocks without leaving: re-runs the search that opened this
-    -- window, and the next Buy click refills from the fresh page.
+    -- "Done" ends the run; "Search again" restocks without leaving. The
+    -- two share the Buy button's width.
+    local half = math.floor((IW - POP.BTN_GAP) / 2)
     local row = win:SetButtons({
-        { text = "Done", onClick = function() AH.CancelPurchase() end },
-        { text = "Search again", onClick = function()
+        { text = "Done", width = half, onClick = function() AH.CancelPurchase() end },
+        { text = "Search again", width = IW - POP.BTN_GAP - half, onClick = function()
             win._zErr = nil
             if win._onSearchAgain then win._onSearchAgain() end
         end },
     })
     win.stop, win.searchAgain = row[1], row[2]
 
-    -- Closing the window IS ending the run - by X, by Escape, or by the
-    -- Done button (whose cancel also closes it via the finish callback).
+    -- Closing the window IS ending the run - by X, by Escape, or by Done.
     win:HookScript("OnHide", function()
         win._zErr = nil
         if AH.PurchaseInProgress and AH.PurchaseInProgress() then
@@ -303,31 +333,72 @@ local function BuildBuyWindow()
         end
     end)
 
-    -- Top to bottom: the lines that have words, the Buy button when there
-    -- is something to buy, then the button row. The window is as tall as
-    -- that and, while it is up, keeps its top where it is.
+    local function TextH(fs, min)
+        local ok, h = pcall(fs.GetStringHeight, fs)
+        h = (ok and type(h) == "number" and h > 0) and h or (min or POP.BODY)
+        return math.ceil(h)
+    end
+
+    -- Top to bottom, measured; the window is as tall as what shows and
+    -- keeps its top where it is while it is up.
     function win:Layout()
-        local hh = self.headerHeight
-        local y = 0
-        for _, fs in ipairs(self.lines) do
-            local t = fs:GetText()
-            if t and t ~= "" then
-                fs:ClearAllPoints()
-                fs:SetPoint("TOP", self, "TOP", 0, -(hh + y))
-                fs:Show()
-                local ok, h = pcall(fs.GetStringHeight, fs)
-                h = (ok and type(h) == "number" and h > 0) and h or POP.BODY
-                y = y + math.ceil(h) + LINE_GAP
-            else
-                fs:Hide()
+        local hh, pad = self.headerHeight, self.pad
+        local function Y(y) return -(hh + y) end
+        -- the card
+        self.iconHost:ClearAllPoints()
+        self.iconHost:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(0))
+        local tx = pad + ICON + 10
+        local nameH = (self.item:GetText() or "") ~= "" and TextH(self.item) or 0
+        local subH = (self.sub:GetText() or "") ~= "" and TextH(self.sub, POP.HINT) or 0
+        local textH = nameH + (subH > 0 and (3 + subH) or 0)
+        local cardH = math.max(ICON, textH)
+        local ty = math.floor((cardH - textH) / 2)
+        self.item:ClearAllPoints()
+        self.item:SetPoint("TOPLEFT", self, "TOPLEFT", tx, Y(ty))
+        self.item:SetShown(nameH > 0)
+        self.sub:ClearAllPoints()
+        self.sub:SetPoint("TOPLEFT", self, "TOPLEFT", tx, Y(ty + nameH + 3))
+        self.sub:SetShown(subH > 0)
+        local y = cardH + GAP
+        self.rule1:ClearAllPoints()
+        self.rule1:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(y))
+        self.rule1:SetWidth(IW)
+        y = y + 1 + GAP - 2
+        -- the rows
+        for _, r in ipairs({ { self.progressLabel, self.progress }, { self.spentLabel, self.spent },
+                             { self.leftLabel, self.left } }) do
+            local l, v = r[1], r[2]
+            local on = (v:GetText() or "") ~= ""
+            l:SetShown(on) v:SetShown(on)
+            if on then
+                l:ClearAllPoints()
+                l:SetPoint("LEFT", self, "TOPLEFT", pad, Y(y + ROW_H / 2))
+                v:ClearAllPoints()
+                v:SetPoint("RIGHT", self, "TOPRIGHT", -pad, Y(y + ROW_H / 2))
+                y = y + ROW_H + 2
             end
         end
-        y = math.max(0, y - LINE_GAP)
+        y = y - 2 + GAP - 2
+        self.rule2:ClearAllPoints()
+        self.rule2:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(y))
+        self.rule2:SetWidth(IW)
+        y = y + 1 + GAP
+        -- the note, then the button
+        local note = self.stackNote:GetText()
+        if note and note ~= "" then
+            self.stackNote:ClearAllPoints()
+            self.stackNote:SetPoint("TOP", self, "TOP", 0, Y(y))
+            self.stackNote:Show()
+            y = y + TextH(self.stackNote) + GAP
+        else
+            self.stackNote:Hide()
+        end
         if self.buy:IsShown() then
-            if y > 0 then y = y + BLOCK_GAP end
             self.buy:ClearAllPoints()
-            self.buy:SetPoint("TOP", self, "TOP", 0, -(hh + y))
+            self.buy:SetPoint("TOP", self, "TOP", 0, Y(y))
             y = y + (self.buy:GetHeight() or POP.BTN_H)
+        else
+            y = y - GAP
         end
         local top, left = self:GetTop(), self:GetLeft()
         self:FitHeight(y)
@@ -337,23 +408,38 @@ local function BuildBuyWindow()
         end
     end
 
+    local function IconOf(name)
+        if not name or name == "" then return nil end
+        local ok, _, _, _, _, _, _, _, _, _, tex = pcall(GetItemInfo, name)
+        return ok and tex or nil
+    end
+
     function win:Refresh()
         local st = AH.PurchaseState()
         if not st then
             UI.CloseWindow(self)
             return
         end
-        self.item:SetText(st.nextName or self._zLastName or "")
+        local name = st.nextName or self._zLastName or ""
         if st.nextName then self._zLastName = st.nextName end
+        self.item:SetText(name)
+        self.icon:SetTexture(IconOf(name) or self._zLastIcon or fallbackIcon)
+        self._zLastIcon = IconOf(name) or self._zLastIcon
+        local n = st.nextCount or 1
+        if st.nextPrice then
+            self.sub:SetText(n > 1 and ("Stack of " .. n .. " per auction") or "1 item per auction")
+        else
+            self.sub:SetText("")
+        end
         -- Items as well as auctions: one auction of a 20-stack is 20 of
         -- the thing, and "1 bought" read as one potion.
         local units = st.units or st.bought
-        self.progress:SetText(units .. (units == 1 and " item" or " items") .. " bought"
-            .. (units ~= st.bought and (" (" .. st.bought .. " auction"
-                .. (st.bought == 1 and "" or "s") .. ")") or "")
-            .. ", " .. st.remaining .. " more available")
-        self.spent:SetText("spent " .. Money(st.spent, true)
-            .. (st.missed > 0 and ("   " .. st.missed .. " already gone") or ""))
+        self.progress:SetText(units .. (units == 1 and " item" or " items")
+            .. (units ~= st.bought and ("  (" .. st.bought .. " auction"
+                .. (st.bought == 1 and "" or "s") .. ")") or ""))
+        self.spent:SetText(Money(st.spent, true)
+            .. (st.missed > 0 and ("  |cff888888(" .. st.missed .. " gone)|r") or ""))
+        self.left:SetText(st.remaining .. (st.remaining == 1 and " auction" or " auctions"))
         local note = ""
         local primary = "buy"
         if st.waiting then
@@ -361,24 +447,17 @@ local function BuildBuyWindow()
             self.buy:SetLabel("waiting for the auction house...")
             self.buy:SetDisabled(true)
         elseif st.nextPrice then
-            local n = st.nextCount or 1
             self.buy:Show()
             if n > 1 then
-                self.buy:SetLabel("Buy STACK of " .. n .. " - "
-                    .. Money(st.nextPrice, true))
-                note = "|cffff9900One auction = " .. n
-                    .. " items, bought whole - not 1.|r"
+                self.buy:SetLabel("Buy STACK of " .. n .. " - " .. Money(st.nextPrice, true))
+                note = "|cffff9900One auction = " .. n .. " items, bought whole - not 1.|r"
             else
-                self.buy:SetLabel("Buy 1 item for "
-                    .. Money(st.nextPrice, true))
+                self.buy:SetLabel("Buy 1 item for " .. Money(st.nextPrice, true))
             end
             self.buy:SetDisabled(false)
         else
-            -- Nothing left of this item at a price you can afford. The
-            -- window stays put and says so rather than vanishing -
-            -- vanishing right after a purchase is indistinguishable from
-            -- a crash. Nothing to click, so no Buy: the answer is the
-            -- Search again button.
+            -- Nothing left at a price you can afford: the window stays and
+            -- says so (vanishing after a purchase reads as a crash).
             self.buy:SetDisabled(true)
             self.buy:Hide()
             note = "|cffaaaaaaSearch again to look for more.|r"
@@ -391,9 +470,8 @@ local function BuildBuyWindow()
         end
         self.stackNote:SetText(note)
         self.searchAgain:SetKind(primary == "again" and "primary" or nil)
-        -- as wide as the text above it; a label longer than that wraps
-        -- onto two lines (the button grows taller) instead of running past
-        -- the window's edge
+        -- a label longer than the button wraps onto two lines (the button
+        -- grows) instead of running past the window's edge
         local b = self.buy
         if b._zWrapped and b._zUnfit then
             b:_zUnfit()

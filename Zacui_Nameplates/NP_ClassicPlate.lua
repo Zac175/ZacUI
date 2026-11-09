@@ -233,6 +233,9 @@ function NP.StockTargetWash(f, on)
     local hb = f and f.health
     if not hb then return end
     local w = rawget(hb, "_zStockWash")
+    -- (2026-11-08, Zac: the white wash read as a light background over the
+    -- bar; the stock plates keep their own colours on the target) never on
+    on = false
     if not on then
         if w then w:Hide() end
         return

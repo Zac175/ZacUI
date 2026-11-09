@@ -385,7 +385,32 @@ local function ApplyBagBar(profile)
     end
     SmallBarCommon(bagbar, cfg, bagbar.buttons, 37, #bagbar.buttons, cfg.initial)
     if KeyRingButton and cfg.keyring and not cfg.onebag then
-        KeyRingButton:SetSize(18, 37)
+        local kb = KeyRingButton
+        if AB.Kit and AB.Kit() == "zacui" then
+            -- (2026-11-08, Zac: "key ring in tbc is still wrong ... icon looks
+            -- bad") ZacUI's look: a square slot like the bags beside it,
+            -- wearing the key ring's own bag icon, cropped like every icon
+            local first = bagbar.buttons[1] ~= kb and bagbar.buttons[1] or bagbar.buttons[2]
+            local s = first and first.GetHeight and first:GetHeight() or 37
+            if type(s) ~= "number" or s <= 0 then s = 37 end
+            kb:SetSize(s, s)
+            for _, get in ipairs({ "GetNormalTexture", "GetPushedTexture" }) do
+                local t = kb[get] and kb[get](kb)
+                if t and t.SetTexture then
+                    t:SetTexture("Interface\\ContainerFrame\\KeyRing-Bag-Icon")
+                    t:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                    t:ClearAllPoints()
+                    t:SetPoint("TOPLEFT", kb, "TOPLEFT", 1, -1)
+                    t:SetPoint("BOTTOMRIGHT", kb, "BOTTOMRIGHT", -1, 1)
+                    t:SetAlpha(1)
+                    if t.SetVertexColor then
+                        if get == "GetPushedTexture" then t:SetVertexColor(0.75, 0.75, 0.75, 1) else t:SetVertexColor(1, 1, 1, 1) end
+                    end
+                end
+            end
+        else
+            kb:SetSize(18, 37)
+        end
     end
     -- a game look: each bag slot at the client's own size (the backpack
     -- bigger than the bag slots, the slot art never stretched); the row

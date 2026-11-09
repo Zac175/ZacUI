@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Meter|r
 ## Notes: ZacUI damage meter and threat windows. Replaces Details!.
 ## Author: Zac
-## Version: 3.0.3
+## Version: 3.0.4
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

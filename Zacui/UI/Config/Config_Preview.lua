@@ -87,6 +87,9 @@ local UI = ns.UI
 local M, F = UI.M, UI.F
 
 local Preview = {}
+-- the mouse wheel over the sample zooms it (Zac, 2026-11-08): a factor on
+-- the fitted scale, for this session; back to 100% by wheeling back
+Preview.zoom = 1
 Preview.stats = { updates = 0, builds = 0, replays = 0 }
 
 -- THE STRIP GROWS TO FIT ITS SAMPLE, up to a cap: a share of the
@@ -706,7 +709,7 @@ local function Fit(e, w, capH)
     end
     local clip = ov == "clip"
     local fit = clip and fitW or math.min(fitW, fitH)
-    return Clamp(fit, 0.05, 1), h, R, (clip and fitH < fitW - 1e-6) or false
+    return Clamp(fit, 0.05, 1) * Preview.zoom, h, R, (clip and fitH < fitW - 1e-6) or false
 end
 
 local function StripHeight(e, w)
@@ -719,6 +722,10 @@ end
 -- "Scaled to 72%" when the sample had to shrink to fit.
 local function NoteText(e)
     if not e or not e.P then return nil end
+    -- (the wheel's zoom over the sample, 2026-11-08)
+    if math.abs(Preview.zoom - 1) > 0.001 then
+        return "Zoom " .. math.floor(Preview.zoom * 100 + 0.5) .. "%"
+    end
     local pct = math.floor((e.P.fit or 1) * 100 + 0.5)
     local scaled = pct < 100
     if e.P.clipped then return scaled and ("Scaled to " .. pct .. "%, top part") or "Top part shown" end
@@ -1034,6 +1041,15 @@ local function EnsureDock()
         end
     end
     if view.SetClipsChildren then view:SetClipsChildren(true) end
+    if view.EnableMouseWheel then view:EnableMouseWheel(true) end
+    view:SetScript("OnMouseWheel", function(_, delta)
+        local z = Preview.zoom * ((delta or 0) > 0 and 1.15 or 1 / 1.15)
+        z = Clamp(z, 0.5, 3)
+        if math.abs(z - 1) < 0.05 then z = 1 end
+        if z == Preview.zoom then return end
+        Preview.zoom = z
+        Layout()
+    end)
 
     -- FOLDED: the whole slim bar opens it again, lit on hover.
     slim = CreateFrame("Button", nil, dock)
