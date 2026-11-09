@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Windows|r
 ## Notes: ZacUI rebuilt game windows: merchant, spellbook, talents, character, quest log, mail, social, loot, macros, gossip, trade, taxi and more.
 ## Author: Zac
-## Version: 3.0.5
+## Version: 3.0.6
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

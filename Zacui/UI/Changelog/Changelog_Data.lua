@@ -14,6 +14,25 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.6",
+        date = "2026-11-09",
+        title = "Move the previews around",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "Drag a settings preview to move it around while you're zoomed in.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "Releases reach CurseForge again: 3.0.3 to 3.0.5 never made it there, and everything in them is in this version.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.5",
         date = "2026-11-08",
         title = "Clear nameplate bars",

@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Raid tools|r
 ## Notes: The raid helpers ZacUI's boss mods lean on: /pull, /break and /range in every boss mod's language, the raid sync between raiders, and the raid callouts' speech settings.
 ## Author: Zac
-## Version: 3.0.5
+## Version: 3.0.6
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

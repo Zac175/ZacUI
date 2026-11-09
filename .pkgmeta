@@ -14,22 +14,22 @@ ignore:
   - __deltest
 
 move-folders:
-  ZacUI/Zacui: Zacui
-  ZacUI/Zacui_Auras: Zacui_Auras
-  ZacUI/Zacui_Bags: Zacui_Bags
-  ZacUI/Zacui_Bars: Zacui_Bars
-  ZacUI/Zacui_Blessings: Zacui_Blessings
-  ZacUI/Zacui_BuffReminders: Zacui_BuffReminders
-  ZacUI/Zacui_Clicks: Zacui_Clicks
-  ZacUI/Zacui_Consumables: Zacui_Consumables
-  ZacUI/Zacui_HUD: Zacui_HUD
-  ZacUI/Zacui_Maps: Zacui_Maps
-  ZacUI/Zacui_Meter: Zacui_Meter
-  ZacUI/Zacui_Nameplates: Zacui_Nameplates
-  ZacUI/Zacui_QoL: Zacui_QoL
-  ZacUI/Zacui_RaidMods: Zacui_RaidMods
-  ZacUI/Zacui_RaidTools: Zacui_RaidTools
-  ZacUI/Zacui_SBT: Zacui_SBT
-  ZacUI/Zacui_UnitFrames: Zacui_UnitFrames
-  ZacUI/Zacui_Windows: Zacui_Windows
-  ZacUI/Zacui_WorldMap: Zacui_WorldMap
+  Zacui/Zacui: Zacui
+  Zacui/Zacui_Auras: Zacui_Auras
+  Zacui/Zacui_Bags: Zacui_Bags
+  Zacui/Zacui_Bars: Zacui_Bars
+  Zacui/Zacui_Blessings: Zacui_Blessings
+  Zacui/Zacui_BuffReminders: Zacui_BuffReminders
+  Zacui/Zacui_Clicks: Zacui_Clicks
+  Zacui/Zacui_Consumables: Zacui_Consumables
+  Zacui/Zacui_HUD: Zacui_HUD
+  Zacui/Zacui_Maps: Zacui_Maps
+  Zacui/Zacui_Meter: Zacui_Meter
+  Zacui/Zacui_Nameplates: Zacui_Nameplates
+  Zacui/Zacui_QoL: Zacui_QoL
+  Zacui/Zacui_RaidMods: Zacui_RaidMods
+  Zacui/Zacui_RaidTools: Zacui_RaidTools
+  Zacui/Zacui_SBT: Zacui_SBT
+  Zacui/Zacui_UnitFrames: Zacui_UnitFrames
+  Zacui/Zacui_Windows: Zacui_Windows
+  Zacui/Zacui_WorldMap: Zacui_WorldMap

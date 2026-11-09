@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Nameplates|r
 ## Notes: ZacUI nameplates, plate scripts, soft targeting and the crosshair. Replaces Plater.
 ## Author: Zac
-## Version: 3.0.5
+## Version: 3.0.6
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
