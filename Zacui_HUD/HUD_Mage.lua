@@ -6,6 +6,7 @@
 
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 local ARMORS = { "iceArmor", "frostArmor", "mageArmor", "moltenArmor" }
 
@@ -45,7 +46,8 @@ ns.HUD.DefineClass({
         { key = "fireWard",     kind = "spell", spell = "fireWard",     label = "Fire Ward", noRange = true },
         { key = "frostWard",    kind = "spell", spell = "frostWard",    label = "Frost Ward", noRange = true },
         { key = "gem",          kind = "item", label = "Mana Gem",
-          items = { { id = 8008 }, { id = 8007 }, { id = 5513 }, { id = 5514 } } },
+          -- (22044: TBC's Mana Emerald; the item does not exist on Era)
+          items = { { id = 22044 }, { id = 8008 }, { id = 8007 }, { id = 5513 }, { id = 5514 } } },
         { key = "potion",       kind = "itemPotion", label = "Potion" },
         { key = "rune",         kind = "itemRune",   label = "Rune" },
     },
@@ -111,9 +113,12 @@ ns.HUD.DefineClass({
     -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
     -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
     -- section 13: Icy Veins' Classic mage guide, its TBC Arcane / Fire /
-    -- Frost guides, Warcraft Tavern's Classic Fire guide). The base lists
-    -- are Classic Era's (WoW Forever plays them too); a spec's tbc block
-    -- replaces the rows it names on TBC.
+    -- Frost guides, Warcraft Tavern's Classic Fire guide; WoW Forever:
+    -- wowtbc.gg's and Warcraft Tavern's Forever mage guides). The base lists are
+    -- Classic Era's; a spec's tbc / forever block replaces the rows it
+    -- names on that game. WoW Forever (1.60) reworked the trees: Arcane
+    -- Blast stacks into Arcane Wrath / Missile Barrage, Fire's Heating Up
+    -- into Pyroblast, Frost's Ice Lance on Fingers of Frost.
     roles = {
         { key = "arcane", label = "Arcane", tab = 1, aux = true, res = { regen = true }, show = {
             main = { "arcanePower", "pom", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
@@ -128,6 +133,13 @@ ns.HUD.DefineClass({
               buffs = { "arcanePower", "icyVeinsBuff", "pom", "clearcasting", "evocation", "zhc" } },
             glows = { arcanePower = { { when = "ready", style = "edge", combatOnly = true } },
                       icyVeins = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } },
+          forever = { show = {
+              main = { "arcanePower", "pom", "arcaneWrath", "fireBlast", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
+              buffs = { "arcaneBlastBuff", "missileBarrage", "heatingUp", "arcanePower", "pom", "clearcasting", "evocation", "mqg", "zhc" } },
+            glows = { arcanePower = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["buffs:missileBarrage"] = { { when = "active", style = "shine" } },
+                      ["buffs:heatingUp"] = { { when = "stacks", stacksOp = ">=", stacksN = 3, style = "shine" } },
                       ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
         { key = "fire", label = "Fire", tab = 2, aux = true, res = { regen = true }, show = {
             main = { "combustion", "fireBlast", "evocation", "counterspell", "blink", "iceBlock", "gem", "potion", "rune" },
@@ -143,7 +155,13 @@ ns.HUD.DefineClass({
               buffs = { "combustion", "icyVeinsBuff", "clearcasting", "evocation", "zhc" } },
             glows = { combustion = { { when = "ready", style = "edge", combatOnly = true } },
                       icyVeins = { { when = "ready", style = "edge", combatOnly = true } },
-                      ["debuffs:fireVuln"] = { { when = "expiring", style = "pulse" } } } } },
+                      ["debuffs:fireVuln"] = { { when = "expiring", style = "pulse" } } } },
+          forever = { show = {
+              buffs = { "heatingUp", "combustion", "missileBarrage", "clearcasting", "evocation", "mqg", "zhc" } },
+            glows = { combustion = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["debuffs:fireVuln"] = { { when = "expiring", style = "pulse" } },
+                      ["buffs:heatingUp"] = { { when = "stacks", stacksOp = ">=", stacksN = 3, style = "shine" } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
         { key = "frost", label = "Frost", tab = 3, aux = true, res = { regen = true }, show = {
             main = { "coldSnap", "iceBlock", "evocation", "counterspell", "blink", "gem", "potion", "rune" },
             utility = { "blizzard", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem" },
@@ -155,11 +173,17 @@ ns.HUD.DefineClass({
               utility = { "blizzard", "removeCurse", "arcaneIntellect", "arcaneBrilliance", "conjureGem", "spellsteal", "invisibility" },
               buffs = { "icyVeinsBuff", "clearcasting", "evocation", "zhc" } },
             glows = { icyVeins = { { when = "ready", style = "edge", combatOnly = true } },
-                      waterElemental = { { when = "ready", style = "edge", combatOnly = true } } } } },
+                      waterElemental = { { when = "ready", style = "edge", combatOnly = true } } } },
+          forever = { show = {
+              main = { "coldSnap", "iceLance", "coneOfCold", "iceBarrier", "iceBlock", "evocation", "counterspell", "blink", "gem", "potion", "rune" },
+              buffs = { "fingersOfFrost", "iceBarrier", "clearcasting", "evocation", "mqg", "zhc" } },
+            glows = { ["buffs:fingersOfFrost"] = { { when = "active", style = "shine" } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
     },
     flavors = {
         tbc = {
-            spells = { coldSnap = 11958, iceBlock = 45438, moltenArmor = 30482 },
+            -- (27101: Conjure Mana Emerald)
+            spells = { coldSnap = 11958, iceBlock = 45438, moltenArmor = 30482, conjureGem = 27101 },
             add = {
                 { key = "icyVeins",       kind = "spell", spell = "icyVeins",       spellId = 12472, label = "Icy Veins", noRange = true },
                 { key = "dragonsBreath",  kind = "spell", spell = "dragonsBreath",  spellId = 31661, label = "Dragon's Breath", noRange = true },
@@ -167,6 +191,19 @@ ns.HUD.DefineClass({
                 { key = "spellsteal",     kind = "spell", spell = "spellsteal",     spellId = 30449, label = "Spellsteal", row = "utility" },
                 { key = "invisibility",   kind = "spell", spell = "invisibility",   spellId = 66,    label = "Invisibility", noRange = true, row = "utility" },
                 { key = "icyVeinsBuff",   id = 12472, label = "Icy Veins", row = "buffs" },
+            },
+        },
+        -- WoW Forever's own talents (ids: warcraft.wiki.gg's Forever pages).
+        -- The Arcane Blast stack is matched by its name; its id only
+        -- finds the icon.
+        forever = {
+            add = {
+                { key = "arcaneWrath",     kind = "spell", spell = "arcaneWrath", spellId = 1326082, label = "Arcane Wrath" },
+                { key = "iceLance",        kind = "spell", spell = "iceLance",    spellId = 1240047, label = "Ice Lance" },
+                { key = "arcaneBlastBuff", id = 400574, name = "Arcane Blast", label = "Arcane Blast", row = "buffs" },
+                { key = "missileBarrage",  id = 400589, label = "Missile Barrage", row = "buffs" },
+                { key = "heatingUp",       id = 400624, label = "Heating Up", row = "buffs" },
+                { key = "fingersOfFrost",  id = 400647, label = "Fingers of Frost", row = "buffs" },
             },
         },
     },

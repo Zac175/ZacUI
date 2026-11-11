@@ -9,6 +9,7 @@ local ADDON_NAME = ...
 local ns = _G.ZacUI
 if not ns then return end
 if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 -- a value WoW Forever hands back hidden (a secret value: no maths on it)
 local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
@@ -34,6 +35,12 @@ function D:SetPreview(on)
     D.preview = on and true or false
     if D.InvalidateLayout then D:InvalidateLayout() end
     if WH.Wake then WH.Wake() end
+end
+-- Edit Mode shows the HUD itself while its boxes are placed
+if HUD.EditPreview then
+    HUD.EditPreview(function() local c = WH.Store and WH.Store() return c and c.enabled and true or false end,
+        function() return D.preview end,
+        function(v) D:SetPreview(v) end)
 end
 
 local function PreviewNameIcon(name)
@@ -105,7 +112,7 @@ end
 local IS_WARRIOR = select(2, UnitClass("player")) == "WARRIOR"
 
 local mainAnchor, auraAnchor, stanceAnchor, execAnchor,
-      rageAnchor, swingAnchor, groupHandle
+      rageAnchor, swingAnchor, groupHandle, debuffAnchor
 if IS_WARRIOR then
     mainAnchor   = MakeAnchor("Main", 26, 26)
     auraAnchor   = MakeAnchor("AuraRow", 30, 30)
@@ -116,6 +123,8 @@ if IS_WARRIOR then
     swingAnchor  = MakeAnchor("Swing", 229, 8)
     -- Invisible handle: dragging it in the UI mover moves the WHOLE HUD.
     groupHandle  = MakeAnchor("GroupHandle", 170, 24)
+    -- (2026-11-09) the target debuff row
+    debuffAnchor = MakeAnchor("DebuffRow", 26, 26)
 end
 
 local function ApplyAnchorPositions()
@@ -129,6 +138,8 @@ local function ApplyAnchorPositions()
     HUD.PlaceAnchor("whExecute", holders.Execute, r.execute)
     HUD.PlaceAnchor("whRageBar", holders.RageBar, r.rage)
     HUD.PlaceAnchor("whSwing", holders.Swing, r.swing)
+    HUD.PlaceAnchor("whDebuffRow", holders.DebuffRow, cfg.debuffRow)
+    debuffAnchor:SetScale(cfg.debuffRow.scale or 1)
     if cfg.group then HUD.PlaceAnchor("whGroup", holders.GroupHandle, cfg.group) end
     -- Scales for icon groups; explicit bar sizes go via ApplyBarSizes.
     mainAnchor:SetScale(cfg.mainRow.scale or 1)
@@ -154,6 +165,7 @@ local function RegisterMovers()
     HUD.RegisterMover("whExecute", "Warrior HUD Execute Helper", holders.Execute, cfg.resources.execute)
     HUD.RegisterMover("whRageBar", "Warrior HUD Rage Bar", holders.RageBar, cfg.resources.rage)
     HUD.RegisterMover("whSwing", "Warrior HUD Swing Timers", holders.Swing, cfg.resources.swing)
+    HUD.RegisterMover("whDebuffRow", "Warrior HUD Target Debuffs", holders.DebuffRow, cfg.debuffRow)
 
     -- Whole-HUD mover: dragging the handle shifts every member anchor by
     -- the same delta (HUD_Shared carries the delta to the members).
@@ -167,6 +179,7 @@ local function RegisterMovers()
         { key = "whExecute", holder = holders.Execute },
         { key = "whRageBar", holder = holders.RageBar },
         { key = "whSwing",   holder = holders.Swing },
+        { key = "whDebuffRow", holder = holders.DebuffRow },
     })
     HUD.Debug("WarriorHUD anchors registered with the mover registry")
 end
@@ -181,6 +194,14 @@ end)
 -- usableDesat = desaturate when IsUsableSpell false; usableGlow = glow
 -- while usable; meleeGlow = glow in melee; softRed = BT/WW tint +
 -- <2s text hide + <3s yellow text. kind "item*": consumable icons.
+-- (2026-11-09) add = true: an entry newer than the pack - off unless your
+-- spec's defaults or your own tick turn it on (WH.IsOff), its icon made
+-- the first time it is on. stance may be a set ({ [1] = true, [2] = true });
+-- oldStance = the stance rule a save from before the spec defaults keeps
+-- (a frozen save, WH.Store); whenUsable = shown only while the game says
+-- it can be pressed (Victory Rush after a kill).
+local FLAVOR = WH.FLAVOR or "era"
+local TBC, FOREVER = FLAVOR == "tbc", FLAVOR == "forever"
 local MAIN_DEFS = {
     { key = "mortalStrike", kind = "spell", spell = "mortalStrike" },
     { key = "deathWish",    kind = "spell", spell = "deathWish" },
@@ -193,23 +214,49 @@ local MAIN_DEFS = {
       softRed = true, actionSwipe = true },
     { key = "ww",           kind = "spell", spell = "whirlwind", usableDesat = true,
       softRed = true, actionSwipe = true },
+    -- (TBC: only after a critical strike)
+    TBC and { key = "rampage", kind = "spell", spell = "rampage", usableDesat = true, noRange = true,
+      add = true, label = "Rampage" } or false,
+    FOREVER and { key = "spearingStrike", kind = "spell", spell = "spearingStrike",
+      add = true, label = "Spearing Strike" } or false,
+    FOREVER and { key = "recklessSwings", kind = "spell", spell = "recklessSwings", noRange = true,
+      add = true, label = "Reckless Swings" } or false,
     { key = "overpower",    kind = "spell", spell = "overpower", usableDesat = true,
       noRange = true },
     -- only while the target is under 20%
     { key = "execute",      kind = "spell", spell = "execute", usableDesat = true, execOnly = true },
+    (TBC or FOREVER) and { key = "victoryRush", kind = "spell", spell = "victoryRush", whenUsable = true,
+      add = true, label = "Victory Rush (after a kill)" } or false,
     { key = "revenge",      kind = "spell", spell = "revenge", stance = 2,
       usableDesat = true, usableGlow = true },
+    -- (greyed without a shield: the game calls it unusable)
+    { key = "shieldSlam",   kind = "spell", spell = "shieldSlam", usableDesat = true,
+      add = true, label = "Shield Slam" },
+    TBC and { key = "devastate", kind = "spell", spell = "devastate", usableDesat = true,
+      add = true, label = "Devastate" } or false,
+    { key = "concussionBlow", kind = "spell", spell = "concussionBlow",
+      add = true, label = "Concussion Blow" },
     { key = "charge",       kind = "spell", spell = "charge" },
     { key = "intercept",    kind = "spell", spell = "intercept", stance = 3, noGCD = true },
+    TBC and { key = "intervene", kind = "spell", spell = "intervene", stance = 2, noRange = true,
+      add = true, label = "Intervene" } or false,
     { key = "bloodrage",    kind = "spell", spell = "bloodrage" },
     { key = "berserkerRage", kind = "spell", spell = "berserkerRage", stance = 3 },
     { key = "taunt",        kind = "spell", spell = "taunt", stance = 2 },
-    { key = "lastStand",    kind = "spell", spell = "lastStand", stance = 2 },
+    -- (no stance rule in the game: the WA's Defensive-only stays on a
+    -- save from before the spec defaults)
+    { key = "lastStand",    kind = "spell", spell = "lastStand", oldStance = 2 },
     { key = "challShout",   kind = "spell", spell = "challShout" },
     { key = "shieldBlock",  kind = "spell", spell = "shieldBlock", stance = 2 },
+    TBC and { key = "spellReflect", kind = "spell", spell = "spellReflect", stance = { [1] = true, [2] = true },
+      usableDesat = true, noRange = true, add = true, label = "Spell Reflection" } or false,
     -- Defensive only (user pref; the WA showed it in every stance).
     { key = "shieldBash",   kind = "spell", spell = "shieldBash", stance = 2 },
-    { key = "thunderClap",  kind = "spell", spell = "thunderClap", stance = 1 },
+    -- (TBC and WoW Forever: Battle and Defensive Stance; Classic Era:
+    -- Battle Stance only)
+    (TBC or FOREVER) and { key = "thunderClap", kind = "spell", spell = "thunderClap",
+      stance = { [1] = true, [2] = true }, oldStance = 1 }
+      or { key = "thunderClap",  kind = "spell", spell = "thunderClap", stance = 1 },
     { key = "sweeping",     kind = "spell", spell = "sweeping" },
     { key = "pummel",       kind = "spell", spell = "pummel", stance = 3 },
     { key = "mockingBlow",  kind = "spell", spell = "mockingBlow", stance = 1 },
@@ -220,6 +267,33 @@ local MAIN_DEFS = {
     { key = "dense",        kind = "itemDense" },
     { key = "dummy",        kind = "itemDummy" },
 }
+-- (entries of another game version were left as false: closed up here)
+local function Compact(list)
+    local out = {}
+    for i = 1, table.maxn(list) do
+        if list[i] then out[#out + 1] = list[i] end
+    end
+    return out
+end
+MAIN_DEFS = Compact(MAIN_DEFS)
+
+-- Is the stance right for this entry (frozen: a save from before the
+-- spec defaults keeps the stance rules it had).
+local function StanceOK(def, frozen)
+    local st = def.stance
+    if frozen and def.oldStance then st = def.oldStance end
+    if not st then return true end
+    if type(st) == "table" then return st[S.stance] and true or false end
+    return S.stance == st
+end
+
+-- The page's lists follow the definitions: an entry newer than the pack
+-- joins its list where it sits in the row.
+local function JoinList(list, defs)
+    for i, def in ipairs(defs) do
+        if def.add then table.insert(list, i, { key = def.key, label = def.label, add = true }) end
+    end
+end
 
 local mainIcons = {}      -- key -> icon frame
 
@@ -255,6 +329,7 @@ D.MainIconList = {
     { key = "dense",        label = "Dynamite/Grenade" },
     { key = "dummy",        label = "Target Dummy" },
 }
+JoinList(D.MainIconList, MAIN_DEFS)
 
 -- One grid icon for one def, on `parent` (the grid anchor, or the
 -- settings preview's canvas: the sample is built by this same function).
@@ -308,7 +383,8 @@ D.MakeMainIcon = MakeMainIcon
 
 local function BuildMainIcons()
     for _, def in ipairs(MAIN_DEFS) do
-        mainIcons[def.key] = MakeMainIcon(mainAnchor, def)
+        -- (a later entry's icon is made the first time it is on)
+        if not def.add then mainIcons[def.key] = MakeMainIcon(mainAnchor, def) end
     end
 end
 
@@ -637,10 +713,18 @@ local mainLast = {}
 
 -- one grid icon per call (a file-level function: the 0.2s refresh used to
 -- build this closure on every tick)
-local function MainHandle(def, hidden)
+local function MainHandle(def, cfg, frozen)
+    local off = WH.IsOff("main", def, cfg)
     local icon = mainIcons[def.key]
+    if not icon then
+        if off then return end
+        icon = MakeMainIcon(mainAnchor, def)
+        mainIcons[def.key] = icon
+        D.StyleIcon(icon, cfg)
+        D._styleSerial = nil      -- the shared look with the rest on the next pass
+    end
     local visible = false
-    if D.preview and not hidden[def.key] then
+    if D.preview and not off then
         icon:SetIconTexture(D.MainDefPreviewTex(def) or QUESTION_ICON)
         icon:ClearSwipe()
         icon:SetDesat(false)
@@ -653,15 +737,20 @@ local function MainHandle(def, hidden)
         if icon.texts.mobs then icon:SetText("mobs", "") end
         if icon.texts.short then icon:SetText("short", "") end
         visible = true
-    elseif not hidden[def.key]
-       and not (def.stance and S.stance ~= def.stance) then
+    elseif not off and StanceOK(def, frozen) then
         if def.kind == "spell" then
             local sp = S.spells[def.spell]
             visible = sp and sp.known or false
-            if visible and def.execOnly then
+            local ghost = (not visible) and cfg.showUnlearned and sp and sp.name and true or false
+            if ghost then visible = HUD.Ghost(icon, sp) end
+            if visible and not ghost and def.whenUsable then
+                local us = S.usable[def.spell]
+                visible = (us and us.usable) and true or false
+            end
+            if visible and not ghost and def.execOnly then
                 visible = S.targetAttackable and HUD.TargetHealthFrac() <= 0.20 or false
             end
-            if visible then UpdateSpellIcon(icon, def) end
+            if visible and not ghost then UpdateSpellIcon(icon, def) end
         elseif def.kind == "customBuff" then
             local b = def.name and (S.buffs[def.name:lower()]
                 or S.selfDebuffs[def.name:lower()])
@@ -695,9 +784,9 @@ local function RefreshMainRow(cfg)
     wipe(mainActive)
     if show then
         EnsureCustomMainIcons(cfg)
-        local hidden = cfg.mainRow.hidden or {}
-        for _, def in ipairs(MAIN_DEFS) do MainHandle(def, hidden) end
-        for _, def in ipairs(customMainDefs) do MainHandle(def, hidden) end
+        local frozen = cfg.specFrozen
+        for _, def in ipairs(MAIN_DEFS) do MainHandle(def, cfg, frozen) end
+        for _, def in ipairs(customMainDefs) do MainHandle(def, cfg, frozen) end
     else
         for _, icon in pairs(mainIcons) do icon:Hide() end
     end
@@ -1255,6 +1344,11 @@ local AURA_DEFS = {
     { key = "sbBuff",     kind = "buff", buff = "shieldBlock" },
     { key = "enrage",     kind = "buff", buff = "enrage" },
     { key = "flurry",     kind = "buff", buff = "flurry" },
+    -- (2026-11-09) the game version's own (add = true: as in the grid)
+    TBC and { key = "rampageBuff", kind = "buff", buff = "rampage", add = true, label = "Rampage" } or false,
+    FOREVER and { key = "rsBuff", kind = "buff", buff = "recklessSwings", add = true, label = "Reckless Swings" } or false,
+    TBC and { key = "commShout", kind = "buff", buff = "commShout", add = true, label = "Commanding Shout" } or false,
+    TBC and { key = "srBuff", kind = "buff", buff = "spellReflect", add = true, label = "Spell Reflection" } or false,
     { key = "reckBuff",   kind = "buff", buff = "reck" },
     { key = "retalBuff",  kind = "buff", buff = "retaliation" },
     { key = "swBuff",     kind = "buff", buff = "shieldWall" },
@@ -1271,6 +1365,7 @@ local AURA_DEFS = {
     { key = "lsBuff",     kind = "buff", buff = "lastStand" },
     { key = "ssBuff",     kind = "buff", buff = "sweeping" },
 }
+AURA_DEFS = Compact(AURA_DEFS)
 
 local auraIcons = {}
 local BS_REM_ICON = (GetSpellTexture and GetSpellTexture(6673)) or 132333
@@ -1341,6 +1436,7 @@ D.AuraIconList = {
     { key = "lsBuff",     label = "Last Stand" },
     { key = "ssBuff",     label = "Sweeping Strikes" },
 }
+JoinList(D.AuraIconList, AURA_DEFS)
 
 -- One buff-row icon for one def (the live row and the preview's sample).
 local function MakeAuraIcon(parent, def)
@@ -1396,7 +1492,8 @@ local function BuildAuraIcons()
     for _, def in ipairs(AURA_DEFS) do
         -- (the Battle Shout reminder's slot is made the first time it is
         -- set to live here)
-        if def.kind ~= "shoutRem" then auraIcons[def.key] = MakeAuraIcon(auraAnchor, def) end
+        -- (and a later entry's the first time it is on)
+        if def.kind ~= "shoutRem" and not def.add then auraIcons[def.key] = MakeAuraIcon(auraAnchor, def) end
     end
 end
 
@@ -1747,14 +1844,22 @@ local function placeIcon(icon, key)
     auraActive[#auraActive + 1] = icon
     W.SetShownAnimated(icon, true)
 end
-local function AuraHandle(def, hidden)
+local function AuraHandle(def, cfg)
+    local off = WH.IsOff("buffs", def, cfg)
     local icon = auraIcons[def.key]
+    if not icon then
+        if off then return end
+        icon = MakeAuraIcon(auraAnchor, def)
+        auraIcons[def.key] = icon
+        D.StyleIcon(icon, cfg)
+        D._styleSerial = nil      -- the shared look with the rest on the next pass
+    end
     if D.preview then
         if def.splitApps then
             HideAppClones(def, 1)
             SetIconBorderColor(icon, false)
         end
-        if hidden[def.key] then
+        if off then
             icon:Hide()
             if def.kind == "trinket" then HideTrinketClones(1) end
             return
@@ -1771,7 +1876,7 @@ local function AuraHandle(def, hidden)
     end
     if def.kind == "trinket" then
         local clonesUsed = 0
-        if hidden[def.key] then
+        if off then
             icon:Hide()
         else
             local buffs = TrinketBuffs()
@@ -1791,7 +1896,7 @@ local function AuraHandle(def, hidden)
         HideTrinketClones(clonesUsed + 1)
         return
     end
-    local visible = (not hidden[def.key])
+    local visible = (not off)
         and not (def.stance and S.stance ~= def.stance)
         and UpdateAuraIcon(icon, def)
     if def.splitApps then
@@ -1829,7 +1934,6 @@ local function RefreshAuraRow(cfg)
     wipe(auraActive)
     if show then
         EnsureCustomAuraIcons(cfg)
-        local hidden = cfg.auraRow.hidden or {}
         -- the Battle Shout reminder's slot only when it is set to live here
         local docked = ns.BuffRem and ns.BuffRem.Opt and ns.BuffRem.Opt("battleshout", "hudDock") == true
         for _, def in ipairs(AURA_DEFS) do
@@ -1838,12 +1942,12 @@ local function RefreshAuraRow(cfg)
                 D._styleSerial = nil      -- styled with the rest on the next pass
             end
             if def.kind ~= "shoutRem" or docked then
-                AuraHandle(def, hidden)
+                AuraHandle(def, cfg)
             elseif auraIcons[def.key] then
                 auraIcons[def.key]:Hide()
             end
         end
-        for _, def in ipairs(customAuraDefs) do AuraHandle(def, hidden) end
+        for _, def in ipairs(customAuraDefs) do AuraHandle(def, cfg) end
     else
         for _, icon in pairs(auraIcons) do icon:Hide() end
     end
@@ -1851,6 +1955,167 @@ local function RefreshAuraRow(cfg)
         RememberList(auraActive, auraLast)
         W.LayoutHRow(auraAnchor, auraActive,
             cfg.auraRow.iconW, cfg.auraRow.iconH, cfg.auraRow.spacing)
+    end
+end
+
+-- ============================================================
+-- THE TARGET DEBUFF ROW (2026-11-09)
+-- ============================================================
+-- Sunder Armor (its stacks top-right, always), Demoralizing Shout and
+-- Thunder Clap from anyone, your own Rend and Hamstring, Blood Frenzy on
+-- TBC: an icon while it is on your target, the time left under it. Every
+-- entry starts off (add = true) and is turned on by your spec's defaults
+-- or your own tick; you can add any debuff by name or spell ID. The core
+-- reads the target's debuffs only while one of these is on.
+local DEBUFF_DEFS = Compact({
+    { key = "dSunder",    kind = "debuff", debuff = "sunder", stacks = true, add = true, label = "Sunder Armor" },
+    { key = "dDemo",      kind = "debuff", debuff = "demoShout", add = true, label = "Demoralizing Shout" },
+    { key = "dTclap",     kind = "debuff", debuff = "thunderClap", add = true, label = "Thunder Clap" },
+    TBC and { key = "dBloodFrenzy", kind = "debuff", debuff = "bloodFrenzy", add = true, label = "Blood Frenzy" } or false,
+    { key = "dRend",      kind = "debuff", debuff = "rend", mine = true, add = true, label = "Rend (yours)" },
+    { key = "dHamstring", kind = "debuff", debuff = "hamstring", mine = true, add = true, label = "Hamstring (yours)" },
+})
+D.DebuffIconList = {}
+JoinList(D.DebuffIconList, DEBUFF_DEFS)
+
+local debuffIcons = {}
+local customDebuffDefs, customDebuffSrc = {}, {}
+
+function D.DebuffDefPreviewTex(def)
+    if def.debuff then return S.debuffIcons and S.debuffIcons[def.debuff] end
+    return PreviewNameIcon(def.name)
+end
+
+-- One debuff-row icon for one def (the live row and the preview's sample).
+local function MakeDebuffIcon(parent, def)
+    local icon = W.CreateIcon(parent, { width = 26, height = 26, zoom = W.ICON_ZOOM,
+        keepAspect = true, inverse = true })
+    icon:SetFrameStrata(HUD_STRATA)
+    icon:Hide()
+    icon.def = def
+    icon._hudSpot = def.key      -- its own text spots (HUD.IconSpotSpec)
+    icon:AddText("p", "BELOW", 14, { 1, 1, 1, 1 }, 0, 0)
+    icon:AddText("s", "INNER_TOPRIGHT", 14, { 1, 1, 1, 1 }, 0, 0)
+    return icon
+end
+D.MakeDebuffIcon = MakeDebuffIcon
+
+-- User-added debuffs ("dcust<i>"): found on the target by name; kind
+-- "mine" = only your own.
+local function EnsureCustomDebuffDefs(cfg)
+    local list = cfg.debuffRow.custom or {}
+    if customDebuffSrc.built and CustomListSame(list, customDebuffSrc) then return end
+    RememberCustomList(list, customDebuffSrc)
+    customDebuffSrc.built = true
+    wipe(customDebuffDefs)
+    for i = 1, #list do
+        local entry = list[i]
+        local id = tonumber(entry.input)
+        local name = entry.input
+        if id and GetSpellInfoC then name = GetSpellInfoC(id) or entry.input end
+        customDebuffDefs[i] = { key = "dcust" .. i, kind = "debuff", name = name,
+            mine = entry.kind == "mine", stance = (entry.stance and entry.stance > 0) and entry.stance or nil }
+        local icon = debuffIcons["dcust" .. i]
+        if icon then icon.def = customDebuffDefs[i] end
+    end
+    local i = #list + 1        -- hide frames past the shrunken list
+    while debuffIcons["dcust" .. i] do
+        debuffIcons["dcust" .. i]:Hide()
+        i = i + 1
+    end
+end
+
+-- every debuff entry, the built-in ones then yours: fn(def)
+function D.EachDebuffDef(cfg, fn)
+    EnsureCustomDebuffDefs(cfg)
+    for _, def in ipairs(DEBUFF_DEFS) do fn(def) end
+    for _, def in ipairs(customDebuffDefs) do fn(def) end
+end
+
+local function UpdateDebuffIcon(icon, def)
+    local name = def.name or S.debuffNames[def.debuff]
+    local e = name and S.targetDebuffs[name:lower()]
+    if not e or (def.mine and not e.mine) then return false end
+    icon:SetIconTexture(e.icon or D.DebuffDefPreviewTex(def) or QUESTION_ICON)
+    if e.hidden then
+        icon:SetHiddenSwipe("target", e.hidden)   -- (WoW Forever: a hidden timer, as it is)
+    elseif (e.duration or 0) > 0 then
+        icon:SetSwipe(e.expirationTime - e.duration, e.duration)
+    else
+        icon:ClearSwipe()
+    end
+    icon:SetDesat(false)
+    icon.buffRef = e
+    return true
+end
+
+local debuffActive = {}
+local debuffLast = {}
+
+-- one debuff icon per call; answers whether the entry is on (so the core
+-- knows to read the target)
+local function DebuffHandle(def, cfg)
+    local off = WH.IsOff("debuffs", def, cfg)
+    local icon = debuffIcons[def.key]
+    if not icon then
+        if off then return false end
+        icon = MakeDebuffIcon(debuffAnchor, def)
+        debuffIcons[def.key] = icon
+        D.StyleIcon(icon, cfg)
+        D._styleSerial = nil      -- the shared look with the rest on the next pass
+    end
+    local visible = false
+    if off then
+        visible = false
+    elseif D.preview then
+        icon:SetIconTexture(D.DebuffDefPreviewTex(def) or QUESTION_ICON)
+        icon:ClearSwipe()
+        icon:SetDesat(false)
+        icon:SetText("p", "")
+        icon:SetText("s", "")
+        icon.buffRef = nil
+        visible = true
+    elseif not (def.stance and S.stance ~= def.stance) then
+        visible = UpdateDebuffIcon(icon, def)
+    end
+    if visible then
+        debuffActive[#debuffActive + 1] = icon
+        W.SetShownAnimated(icon, true)
+    else
+        W.SetShownAnimated(icon, false)
+    end
+    return not off
+end
+
+local function RefreshDebuffRow(cfg)
+    local row = cfg.debuffRow
+    wipe(debuffActive)
+    local want = false
+    if row and row.enabled and debuffAnchor then
+        EnsureCustomDebuffDefs(cfg)
+        for _, def in ipairs(DEBUFF_DEFS) do
+            if DebuffHandle(def, cfg) then want = true end
+        end
+        for _, def in ipairs(customDebuffDefs) do
+            if DebuffHandle(def, cfg) then want = true end
+        end
+    else
+        for _, icon in pairs(debuffIcons) do icon:Hide() end
+    end
+    WH.WantDebuffs(want and not D.preview)
+    if ListMoved(debuffActive, debuffLast) then
+        RememberList(debuffActive, debuffLast)
+        if row then W.LayoutHRow(debuffAnchor, debuffActive, row.iconW or 26, row.iconH or 26, row.spacing) end
+    end
+end
+
+-- the time left under a debuff icon; Sunder Armor's stacks from the first
+local function UpdateDebuffIconText(icon, def)
+    UpdateAuraIconText(icon, def)
+    local e = icon.buffRef
+    if def.stacks and e and not e.hidden then
+        local c = e.count or 0
+        icon:SetText("s", c >= 1 and tostring(c) or "")
     end
 end
 
@@ -1878,6 +2143,11 @@ local function TextTick()
     end
     for _, icon in ipairs(auraActive) do
         UpdateAuraIconText(icon, icon.def)
+    end
+    if not D.preview then
+        for _, icon in ipairs(debuffActive) do
+            UpdateDebuffIconText(icon, icon.def)
+        end
     end
     UpdateExecuteHelper()
 end
@@ -1909,6 +2179,7 @@ function D:Refresh()
     RefreshMainRow(cfg)
     RefreshResources(cfg)
     RefreshAuraRow(cfg)
+    RefreshDebuffRow(cfg)
     EnsureTextTicker()
 end
 
@@ -1922,33 +2193,37 @@ function D:GetPreviewTextures(cfg)
         stance = STANCE_ICONS[S.stance] or STANCE_ICONS[1],
         exec = EXEC_ICON }
     out.gridDefs = {}
-    local hidden = cfg.mainRow.hidden or {}
-    for _, def in ipairs(MAIN_DEFS) do
-        if not hidden[def.key] then
-            out.grid[#out.grid + 1] = D.MainDefPreviewTex(def) or QUESTION_ICON
-            out.gridDefs[#out.grid] = def
-        end
-    end
-    for _, def in ipairs(customMainDefs) do
-        if not hidden[def.key] then
-            out.grid[#out.grid + 1] = D.MainDefPreviewTex(def) or QUESTION_ICON
-            out.gridDefs[#out.grid] = def
+    for _, list in ipairs({ MAIN_DEFS, customMainDefs }) do
+        for _, def in ipairs(list) do
+            if not WH.IsOff("main", def, cfg) then
+                out.grid[#out.grid + 1] = D.MainDefPreviewTex(def) or QUESTION_ICON
+                out.gridDefs[#out.grid] = def
+            end
         end
     end
     out.buffDefs = {}
-    local ah = cfg.auraRow.hidden or {}
     local docked = ns.BuffRem and ns.BuffRem.Opt and ns.BuffRem.Opt("battleshout", "hudDock") == true
     for _, def in ipairs(AURA_DEFS) do
-        if not ah[def.key] and (def.kind ~= "shoutRem" or docked) then
+        if not WH.IsOff("buffs", def, cfg) and (def.kind ~= "shoutRem" or docked) then
             out.buffs[#out.buffs + 1] = D.AuraDefPreviewTex(def) or QUESTION_ICON
             out.buffDefs[#out.buffs] = def
         end
     end
     for _, def in ipairs(customAuraDefs) do
-        if not ah[def.key] then
+        if not WH.IsOff("buffs", def, cfg) then
             out.buffs[#out.buffs + 1] = D.AuraDefPreviewTex(def) or QUESTION_ICON
             out.buffDefs[#out.buffs] = def
         end
+    end
+    -- the target debuff row (nothing when the row is off)
+    out.debuffs, out.debuffDefs = {}, {}
+    if cfg.debuffRow and cfg.debuffRow.enabled then
+        D.EachDebuffDef(cfg, function(def)
+            if not WH.IsOff("debuffs", def, cfg) then
+                out.debuffs[#out.debuffs + 1] = D.DebuffDefPreviewTex(def) or QUESTION_ICON
+                out.debuffDefs[#out.debuffs] = def
+            end
+        end)
     end
     return out
 end
@@ -1979,6 +2254,7 @@ function D:ApplyAppearance(cfg)
     local function apply(icon) D.StyleIcon(icon, cfg) end
     for _, icon in pairs(mainIcons) do apply(icon) end
     for _, icon in pairs(auraIcons) do apply(icon) end
+    for _, icon in pairs(debuffIcons) do apply(icon) end
     if execIcon then apply(execIcon) end
     if stanceIcon and stanceIcon.SetBorderSize then
         stanceIcon:SetBorderSize(cfg.borderSize or 1)
@@ -1987,7 +2263,7 @@ end
 
 -- Settings UI hook: relayout after sizing changes + re-apply anchors.
 function D:InvalidateLayout()
-    mainLast.n, auraLast.n = nil, nil     -- forces the next layout
+    mainLast.n, auraLast.n, debuffLast.n = nil, nil, nil     -- forces the next layout
     ApplyAnchorPositions()
     D:ApplyAppearance()
     if WH.Wake then WH.Wake() end
@@ -1999,13 +2275,16 @@ function D:HideAll()
     if not built then return end
     for _, icon in pairs(mainIcons) do icon:Hide() end
     for _, icon in pairs(auraIcons) do icon:Hide() end
+    for _, icon in pairs(debuffIcons) do icon:Hide() end
     if stanceIcon then stanceIcon:Hide() end
     if execIcon then execIcon:Hide() end
     if rageBar then rageBar:Hide() end
     D.swingAllowMH, D.swingAllowOH = false, false
     if swingMH then swingMH:Hide() end
     if swingOH then swingOH:Hide() end
-    mainLast.n, auraLast.n = nil, nil     -- forces the next layout
+    mainLast.n, auraLast.n, debuffLast.n = nil, nil, nil     -- forces the next layout
     wipe(mainActive)
     wipe(auraActive)
+    wipe(debuffActive)
+    WH.WantDebuffs(false)
 end

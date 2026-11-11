@@ -716,6 +716,20 @@ end
 -- ============================================================
 -- TAB: GENERAL
 -- ============================================================
+-- (options audit 2026-11-09) Lines that are only ever read from the combat
+-- log (SCT_Events' OnCombatLog, SCT_Alerts' A.OnCombatLog). WoW Forever and
+-- Retail give addons no combat log (S.FOREVER), so there these can never
+-- show: their rows are not offered. Saved choices stay as they are.
+local LOG_ONLY = {
+    in_spell = true, in_dot = true, in_env = true, in_hot = true,
+    out_hit = true, out_spell = true, out_dot = true, out_miss = true, out_heal = true, out_hot = true,
+    out_interrupt = true, out_dispel = true,
+    pet_hit = true, pet_miss = true, pet_in = true, pet_heal = true,
+    n_kb = true, n_buff = true, n_buff_fade = true, n_debuff = true, n_debuff_fade = true, n_extra = true,
+    overpower = true, revenge = true,
+}
+local function Offered(key) return not (S.FOREVER and LOG_ONLY[key]) end
+
 local function Tab_general(L)
     local c = Cfg()
     TextPreview(L)
@@ -747,9 +761,12 @@ local function Tab_general(L)
     W.Check(L, "The ability's name", c.names and true or false, function(v) Cfg().names = v end)
     W.Check(L, "Names as initials (Heroic Strike: HS)", c.shortNames ~= false, function(v) Cfg().shortNames = v end)
     W.Check(L, "Thousands with a comma (12,345)", c.groupDigits ~= false, function(v) Cfg().groupDigits = v end)
+    -- (both are read off combat log lines: not offered where there is none)
+    if not S.FOREVER then
     W.Check(L, "What was resisted, blocked or absorbed", c.partials ~= false, function(v) Cfg().partials = v end)
     W.Check(L, "One line for an ability that hits several at once", c.merge ~= false, function(v) Cfg().merge = v end,
         "Whirlwind on four mobs is one number with x4 after it.")
+    end
     W.Check(L, "Crits pop in place instead of moving", c.stickyCrits and true or false, function(v) Cfg().stickyCrits = v end,
         "How they pop is on the Animation tab.")
     L:EndCard()
@@ -760,8 +777,11 @@ local function Tab_general(L)
         value = tonumber(c.damageMin) or 0, set = function(v) Cfg().damageMin = v end })
     SliderAt(mins, 230, 0, { label = "Hide heals under", min = 0, max = 3000, step = 10, width = 200,
         value = tonumber(c.healMin) or 0, set = function(v) Cfg().healMin = v end })
+    -- (overhealing is only in the combat log)
+    if not S.FOREVER then
     W.Check(L, "Count overhealing in a heal", c.overheal and true or false, function(v) Cfg().overheal = v end,
         "Off: a heal shows only the part that landed.")
+    end
     L:EndCard()
 
     local PT = S.PlateText
@@ -1017,9 +1037,14 @@ local function Tab_events(L)
     L:EndCard()
 
     for _, cat in ipairs(S.EVENT_CATS) do
+        local any = false
+        for _, def in ipairs(S.EVENTS) do
+            if def.cat == cat.key and Offered(def.key) then any = true break end
+        end
+        if any then
         L:Card(cat.label)
         for _, def in ipairs(S.EVENTS) do
-            if def.cat == cat.key then
+            if def.cat == cat.key and Offered(def.key) then
                 local key = def.key
                 -- (the label wraps before the area column; the row grows to fit)
                 local cb = UI.Checkbox(L.current, def.label, S.EventOn(key), function(v)
@@ -1042,6 +1067,7 @@ local function Tab_events(L)
             end
         end
         L:EndCard()
+        end
     end
 
     -- crits and pops over every event's own colour (sct.states, ZacUI's
@@ -1072,7 +1098,7 @@ local function Tab_alerts(L)
     W.Check(L, "Play alert sounds", c.sounds ~= false, function(v) Cfg().sounds = v end)
     for _, def in ipairs(S.ALERTS) do
         local key = def.key
-        if not def.class or def.class == select(2, UnitClass("player")) then
+        if (not def.class or def.class == select(2, UnitClass("player"))) and Offered(key) then
             L:Gap(4)
             local cb = UI.Checkbox(L.current, def.label, S.AlertOn(key), function(v)
                 S.SetAlert(key, "off", not v)
@@ -1113,8 +1139,12 @@ local function Tab_alerts(L)
         L:Card("Sound for each line")
         local function Items()
             local out = {}
-            for _, d in ipairs(S.ALERTS) do out[#out + 1] = { text = "Alert: " .. d.label, value = d.key } end
-            for _, d in ipairs(S.EVENTS) do out[#out + 1] = { text = d.label, value = d.key } end
+            for _, d in ipairs(S.ALERTS) do
+                if Offered(d.key) then out[#out + 1] = { text = "Alert: " .. d.label, value = d.key } end
+            end
+            for _, d in ipairs(S.EVENTS) do
+                if Offered(d.key) then out[#out + 1] = { text = d.label, value = d.key } end
+            end
             return out
         end
         local function Which()
@@ -1143,6 +1173,10 @@ local function Tab_alerts(L)
         L:EndCard()
     end
 
+    -- (they are read from the combat log, which WoW Forever and Retail do
+    -- not give addons: where no alert can ever fire the card is not shown;
+    -- the saved alerts stay as they are)
+    if S.FOREVER then return end
     L:Card("Your own alerts")
     L:Desc("A line when a buff or debuff goes up on you or your target, by its name.")
     for i, al in ipairs(S.AuraAlerts()) do

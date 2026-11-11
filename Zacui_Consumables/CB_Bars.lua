@@ -59,7 +59,7 @@ function Live.Place(key)
     local h = st.holder
     if not h or InCombatLockdown() then return end
     local pos = ZacUIDB and ZacUIDB.movers and ZacUIDB.movers[CB.MoverKey(key)]
-    local d = CB.DEFAULT_SPOT[key]
+    local d = CB.DefaultSpot(key)
     h:ClearAllPoints()
     if type(pos) == "table" then
         h:SetPoint(pos.point or "CENTER", UIParent, pos.point or "CENTER", pos.x or 0, pos.y or 0)
@@ -176,7 +176,7 @@ local function Build(key)
     end)
     h:SetScript("OnLeave", function() Hovered(key, false) GameTooltip:Hide() end)
     if ns.RegisterMover then
-        local d = CB.DEFAULT_SPOT[key]
+        local d = CB.DefaultSpot(key)
         -- secure: the bar holds the item buttons, so its box locks in a fight
         ns.RegisterMover(CB.MoverKey(key), CB.LABELS[key], function() return h end, d.point, d.x, d.y, nil,
             { secure = true, reset = function() Live.Place(key) end })

@@ -375,6 +375,11 @@ function A.Apply()
         ev = CreateFrame("Frame")
         ev:SetScript("OnEvent", OnEvent)
     end
+    -- (2026-11-10) switched on = there is a frame, even while nothing
+    -- calls for it: Edit Mode places what exists and reads a missing
+    -- frame as "switched off".
+    -- (the screenshot switch only hides a text: it shows nothing here)
+    if combat or deaths or reset then Anchor() end
     Want("PLAYER_REGEN_DISABLED", combat)
     Want("PLAYER_REGEN_ENABLED", combat)
     Want("GROUP_ROSTER_UPDATE", deaths)

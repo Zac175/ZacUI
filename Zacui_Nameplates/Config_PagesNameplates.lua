@@ -913,6 +913,8 @@ RegisterPage("Nameplates", function(L)
 
     local NPD = NP.Debuffs
     local dc = NPD and NPD.Cfg and NPD.Cfg()
+    -- (2026-11-09) not on this game version: none of its cards show
+    if ns.FeatureOn and not ns.FeatureOn("np_debuffs") then dc = nil end
     local DApply = NPD and NPD.Apply or NPRefresh
 
     -- ============================================================
@@ -1081,11 +1083,15 @@ RegisterPage("Nameplates", function(L)
                     for _, key in ipairs(g.members or {}) do
                         local entry = NPD.CATALOG[key]
                         local label = entry and entry.name or key
+                        -- (a debuff this game version does not have is not
+                        -- listed; its saved tick is kept)
+                        if not (entry and entry.missing) then
                         local w = UI.Checkbox(L.current, label, NPD.MemberEnabled(g, key), function(v)
                             if v then g.memberOn[key] = nil else g.memberOn[key] = false end
                             DApply()
                         end)
                         L:Row(w, 17)
+                        end
                     end
                 end
                 L:EndCard()
@@ -1097,10 +1103,12 @@ RegisterPage("Nameplates", function(L)
             .. "off while debuffs on enemy plates are on, or a mob shows its "
             .. "debuffs twice.")
         BindCheck(L, d.auras, "enabled", "Show the simple aura row")
-        BindCheck(L, d.auras, "mineOnly", "Mine only",
-            "Only auras you applied. Off shows everyone's.")
-        BindSlider(L, d.auras, "max", "Most icons", { min = 1, max = 12 })
+        L:Desc("What it shows is the filter below: the same filter panel every list of buffs and debuffs uses.")
         L:EndCard()
+        -- (2026-11-10) the filter: Show, Always show, Never show, Advanced, Sharing
+        if ns.AuraFilter and ns.AuraFilter.Panel then
+            ns.AuraFilter.Panel(L, "np_strip", { title = "Simple aura row: what shows" })
+        end
     end
 
     -- ============================================================
@@ -1787,8 +1795,8 @@ RegisterPage("Nameplates", function(L)
 
         if dc then
             L:Card("Custom debuffs")
-            L:Desc("Any debuff by spell id; it joins the \"Under the bar\" row, "
-                .. "muted until ticked there (General tab).")
+            L:Desc("Any debuff by spell id, or by name for a spell in your own spellbook; "
+                .. "it joins the \"Under the bar\" row, muted until ticked there (General tab).")
             for key, def in pairs(dc.custom) do
                 local entry = NPD.CATALOG[key]
                 local crow = UI.Holder(L.current)
@@ -1801,10 +1809,22 @@ RegisterPage("Nameplates", function(L)
             end
             local add = UI.Holder(L.current)
             add:SetSize(400, 24)
-            local eb = UI.EditBox(add, { width = 120, hint = "spell id" })
+            local eb = UI.EditBox(add, { width = 160, hint = "spell id or name" })
             eb:SetPoint("LEFT")
             local addBtn = UI.Button(add, "Add", { width = 70, onClick = function()
-                local id = tonumber(eb.GetText and eb:GetText() or "")
+                local txt = ((eb.GetText and eb:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+                local id = tonumber(txt)
+                -- a name: the client only looks up by name what your own
+                -- spellbook holds (the debuff is still matched by name on
+                -- every caster once it is in)
+                if not id and txt ~= "" and GetSpellInfo then
+                    local okN, _, _, _, _, _, _, sid = pcall(GetSpellInfo, txt)
+                    if okN and type(sid) == "number" then id = sid end
+                    if not id then
+                        Print("nameplate debuffs: \"" .. txt .. "\" is not a spell of yours; add it by its spell id.")
+                        return
+                    end
+                end
                 local key, name = NPD.AddCustom(id)
                 if not key then Print("nameplate debuffs: " .. tostring(name) .. " spell id") return end
                 for _, g in ipairs(dc.groups) do

@@ -3,12 +3,15 @@
 -- that forces every enabled icon visible on screen, and the HUD drawn in
 -- the preview dock (built by the HUD's own constructors, placed where the
 -- pieces sit on screen, from made-up cooldowns, buffs, rage and swings).
+-- (2026-11-09) Spec defaults: the General tab's spec picker and "Reset to
+-- spec defaults", every row's ticks three-state, and the Debuffs tab.
 -- Part of ZacUI; load order is set by the TOC.
 local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
 if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 local HUD = ns.HUD
 local UI = ns.UI
 local Print = ns.Print
@@ -94,6 +97,12 @@ local KIND_ITEMS = {
     { text = "Buff", value = "buff" },
 }
 local KIND_LABELS = { cd = "Cooldown", buff = "Buff" }
+-- (the debuff row's own two kinds)
+local DEBUFF_KIND_ITEMS = {
+    { text = "Anyone's", value = "any" },
+    { text = "Only mine", value = "mine" },
+}
+local DEBUFF_KIND_LABELS = { any = "Anyone's", mine = "Only mine" }
 
 local function PotionItems()
     local items = { { text = "Automatic Icon", value = 1 } }
@@ -110,14 +119,16 @@ local function PotionLabel(idx)
     return e and e.label or "Automatic Icon"
 end
 
--- 3-column checkbox grid; hidden[key] = true removes, checkboxes show "shown".
+-- 3-column checkbox grid; checkboxes show "shown". hidden[key] is
+-- three-state: your tick is kept as true (off) / false (on), an entry you
+-- never touched (nil) follows your spec's defaults (WH.IsOff).
 -- (up to three across, as many as the longest label fits; L:Grid)
-local function IconGrid(L, list, hidden)
+local function IconGrid(L, list, row, cfg, hidden)
     local card = L.current
     local boxes = {}
     for _, entry in ipairs(list) do
-        boxes[#boxes + 1] = UI.Checkbox(card, entry.label, not hidden[entry.key], function(shown)
-            hidden[entry.key] = (not shown) or nil
+        boxes[#boxes + 1] = UI.Checkbox(card, entry.label, not WH.IsOff(row, entry, cfg), function(shown)
+            hidden[entry.key] = not shown
         end)
     end
     L:Grid(boxes, 3, M.ROW)
@@ -146,9 +157,9 @@ end
 -- the canvas is on screen. Nothing here registers events or joins a mover.
 local SAMPLE_PAD = 8
 
-local PIECES = { "Main", "AuraRow", "Stance", "Execute", "RageBar", "Swing" }
+local PIECES = { "Main", "AuraRow", "Stance", "Execute", "RageBar", "Swing", "DebuffRow" }
 local MOVER_OF = { Main = "whMainRow", AuraRow = "whAuraRow", Stance = "whStance",
-    Execute = "whExecute", RageBar = "whRageBar", Swing = "whSwing" }
+    Execute = "whExecute", RageBar = "whRageBar", Swing = "whSwing", DebuffRow = "whDebuffRow" }
 
 local function StoreOf(cfg, key)
     local r = cfg.resources
@@ -156,8 +167,21 @@ local function StoreOf(cfg, key)
     elseif key == "AuraRow" then return cfg.auraRow
     elseif key == "Stance" then return r.stance
     elseif key == "Execute" then return r.execute
-    elseif key == "RageBar" then return r.rage end
+    elseif key == "RageBar" then return r.rage
+    elseif key == "DebuffRow" then return cfg.debuffRow end
     return r.swing
+end
+
+-- how many target debuff icons are on (the row off: none)
+local function DebuffCount(cfg)
+    local D = WH.Display
+    local n = 0
+    if cfg.debuffRow and cfg.debuffRow.enabled and D and D.EachDebuffDef then
+        D.EachDebuffDef(cfg, function(def)
+            if not WH.IsOff("debuffs", def, cfg) then n = n + 1 end
+        end)
+    end
+    return n
 end
 
 -- Which pieces the sample draws: the ones switched on, or every one of
@@ -172,10 +196,16 @@ local function Shown(cfg)
         RageBar = (r.enabled and r.rageBar) and true or false,
         Swing = (r.enabled and r.swingTimer) and true or false,
     }
+    -- (the debuff row only with an entry on, the stand-in set included)
+    local debuffs = DebuffCount(cfg) > 0
     for _, v in pairs(on) do
-        if v then return on, false end
+        if v then
+            on.DebuffRow = debuffs
+            return on, false
+        end
     end
     for k in pairs(on) do on[k] = true end
+    on.DebuffRow = debuffs
     return on, true
 end
 
@@ -213,6 +243,11 @@ local function PieceSizes(cfg, nGrid)
     out.RageBar = { w = r.rage.w or 229, h = r.rage.h or 4, dy = 0 }
     local mhH, ohH = WH.Display.SwingHeights(r.swing.h or 3)
     out.Swing = { w = r.swing.w or 229, h = mhH + 2 * ohH + 2, dy = ohH }
+    local d = cfg.debuffRow or {}
+    local ds = d.scale or 1
+    local dn = math.max(1, math.min(6, DebuffCount(cfg)))
+    out.DebuffRow = { w = (dn * (d.iconW or 26) + (dn - 1) * (d.spacing or 4)) * ds,
+        h = ((d.iconH or 26) + 8) * ds, dy = -4 * ds }
     return out
 end
 
@@ -309,10 +344,11 @@ local function BuildWarriorSample(canvas, P)
     local W = WH.Widgets
     local st = P.store
     st.anchors = {}
-    for _, k in ipairs({ "Main", "AuraRow", "Stance", "Execute", "RageBar", "Swing" }) do
+    for _, k in ipairs(PIECES) do
         st.anchors[k] = HUD.SampleAnchor(canvas, 26, 26)
     end
     st.grid, st.aura, st.gridList, st.auraList = {}, {}, {}, {}
+    st.debuff, st.debuffList = {}, {}
     st.stance = D.MakeStanceIcon(st.anchors.Stance)
     st.exec = D.MakeExecIcon(st.anchors.Execute)
     st.rage = D.MakeRageBar(st.anchors.RageBar)
@@ -337,7 +373,7 @@ local function BuildWarriorSample(canvas, P)
         f._acc = f._acc + (el or 0)
         if f._acc < 0.1 then return end
         f._acc = 0
-        for _, list in ipairs({ st.gridList, st.auraList }) do
+        for _, list in ipairs({ st.gridList, st.auraList, st.debuffList }) do
             for _, icon in ipairs(list) do
                 if icon.texts.p and icon._fakeEnd ~= nil then
                     local rem = icon._fakeEnd - now
@@ -383,6 +419,10 @@ local function UpdateWarriorSample(canvas, P)
     place("Execute", r.execute.scale)
     place("RageBar")
     place("Swing")
+    -- (the debuff row's anchor only while it draws: a row with nothing on
+    -- takes no room in the sample)
+    st.anchors.DebuffRow:SetShown(show.DebuffRow and true or false)
+    if show.DebuffRow then place("DebuffRow", cfg.debuffRow.scale) end
 
     local tex = D:GetPreviewTextures(cfg) or { grid = {}, buffs = {}, gridDefs = {}, buffDefs = {} }
     -- every icon hidden: the sample shows the usual set rather than nothing
@@ -491,6 +531,34 @@ local function UpdateWarriorSample(canvas, P)
     for _, icon in pairs(st.aura) do if not aseen[icon] then icon:Hide() end end
     W.LayoutHRow(st.anchors.AuraRow, alist, cfg.auraRow.iconW, cfg.auraRow.iconH, cfg.auraRow.spacing)
 
+    -- the target debuff row: the entries that are on, in a fight (a
+    -- target), Sunder Armor at five
+    local dlist, dseen = st.debuffList, {}
+    wipe(dlist)
+    if show.DebuffRow and combat then
+        for i, def in ipairs(tex.debuffDefs or {}) do
+            if #dlist >= 6 then break end
+            local icon = st.debuff[def.key]
+            if not icon then
+                icon = D.MakeDebuffIcon(st.anchors.DebuffRow, def)
+                st.debuff[def.key] = icon
+            end
+            icon.def = def
+            dseen[icon] = true
+            icon:SetIconTexture(tex.debuffs[i])
+            D.StyleIcon(icon, cfg)
+            local k = #dlist + 1
+            local dur = 30
+            icon:SetSwipe(now - 5 * k, dur)
+            icon._fakeEnd = now - 5 * k + dur
+            icon:SetText("s", def.stacks and "5" or "")
+            dlist[#dlist + 1] = icon
+            W.SetShownAnimated(icon, true)
+        end
+    end
+    for _, icon in pairs(st.debuff) do if not dseen[icon] then icon:Hide() end end
+    W.LayoutHRow(st.anchors.DebuffRow, dlist, cfg.debuffRow.iconW, cfg.debuffRow.iconH, cfg.debuffRow.spacing)
+
     -- resources
     st.stance:SetShown(show.Stance)
     st.stance:SetIconTexture(tex.stance or D.STANCE_ICONS[3])
@@ -559,7 +627,7 @@ local function WarriorPreview(cfg)
         replay = function(canvas, P)
             local st = P.store
             if not st.grid then return end
-            HUD.ReplayIcons({ st.gridList, st.auraList }, true)
+            HUD.ReplayIcons({ st.gridList, st.auraList, st.debuffList }, true)
         end,
     }, function(canvas, P)
         -- the layout's own box (the pieces are centred on it) for when the
@@ -651,7 +719,9 @@ end
 
 -- Add-entry editbox + kind/stance dropdowns + current entries with
 -- remove buttons. Re-renders the page (tab is remembered) after changes.
-local function CustomEditor(L, customList, placeholder, defaultKind)
+-- (kindItems / kindLabels: the debuff row's own kinds; nil = Cooldown / Buff)
+local function CustomEditor(L, customList, placeholder, defaultKind, kindItems, kindLabels)
+    kindItems, kindLabels = kindItems or KIND_ITEMS, kindLabels or KIND_LABELS
     local card = L.current
     local y = card._y
     local lbl = UI.Font(card, F.LABEL, { text = placeholder, cat = "text", key = "normal" })
@@ -664,8 +734,8 @@ local function CustomEditor(L, customList, placeholder, defaultKind)
     local selKind, selStance = defaultKind, 0
     local kindDd = UI.Dropdown(card, {
         width = 95,
-        items = function() return KIND_ITEMS end,
-        selected = function() return KIND_LABELS[selKind] end,
+        items = function() return kindItems end,
+        selected = function() return kindLabels[selKind] end,
         selectedValue = function() return selKind end,
         onSelect = function(value) selKind = value end,
     })
@@ -703,7 +773,7 @@ local function CustomEditor(L, customList, placeholder, defaultKind)
         local fs = UI.Font(card, F.LABEL, {
             text = string.format("%s  |cff999999(%s, %s)|r",
                 tostring(entry.input),
-                KIND_LABELS[entry.kind or defaultKind] or "?",
+                kindLabels[entry.kind or defaultKind] or "?",
                 STANCE_LABELS[entry.stance or 0] or "Any stance"),
             cat = "text", key = "normal",
             width = math.max(60, L:Room() - (M.DESC_X - M.CONTROL_X) - (rmBtn:GetWidth() or 60) - 8),
@@ -735,6 +805,9 @@ local function TabGeneral(L, cfg)
     Check(L, "Active buff row", cfg.auraRow.enabled, function(v)
         cfg.auraRow.enabled = v
     end)
+    Check(L, "Target debuff row", cfg.debuffRow.enabled, function(v)
+        cfg.debuffRow.enabled = v
+    end)
     Check(L, "Resources group", cfg.resources.enabled, function(v)
         cfg.resources.enabled = v
     end)
@@ -757,6 +830,51 @@ local function TabGeneral(L, cfg)
     Check(L, "Swing timer bars (in combat)", cfg.resources.swingTimer, function(v)
         cfg.resources.swingTimer = v
     end, 20)
+    L:EndCard()
+
+    -- Spec defaults: which icons start on follows the spec
+    L:Card("Spec defaults")
+    L:Desc("Which icons start on follows your spec: its own cooldowns, buffs and target debuffs, "
+        .. "without the buttons that spec never presses. An icon you ticked or unticked yourself "
+        .. "stays as you set it under every spec.")
+    do
+        local card = L.current
+        local lbl = UI.Font(card, F.LABEL, { text = "Spec", cat = "text", key = "normal" })
+        lbl:SetPoint("TOPLEFT", card, "TOPLEFT", M.CONTROL_X, card._y - 6)
+        local function Text()
+            local cur = cfg.spec or "auto"
+            for _, it in ipairs(WH.SpecItems()) do if it.value == cur then return it.text end end
+            return "Automatic"
+        end
+        local dd = UI.Dropdown(card, {
+            width = 220,
+            items = function() return WH.SpecItems() end,
+            selected = Text,
+            selectedValue = function() return cfg.spec or "auto" end,
+            onSelect = function(value)
+                cfg.spec = (value ~= "auto") and value or nil
+                AfterSizing()
+            end,
+        })
+        UI.Tooltip(dd, "Spec", "Automatic reads your talents (the tree with the most points). Pick a spec to use "
+            .. "its defaults whatever your talents say, or Class baseline for the full list the HUD always had.")
+        dd:SetPoint("TOPLEFT", card, "TOPLEFT", M.CONTROL_X + math.max(90, math.ceil(lbl:GetStringWidth() or 0) + 10), card._y)
+        card._y = card._y - (M.DROPDOWN_H + 10)
+    end
+    if cfg.specFrozen then
+        L:Desc("This character's HUD was set up before spec defaults existed, so every icon stays exactly "
+            .. "as it was and the newer icons stay off until you tick them. Reset to spec defaults "
+            .. "starts it over from your spec's list.")
+    end
+    HUD.Check(L, HUD.UNLEARNED_LABEL, cfg.showUnlearned, function(v)
+        cfg.showUnlearned = v or nil
+        HUD.RefreshPage()
+    end, HUD.UNLEARNED_DESC)
+    HUD.Button(L, "Reset to spec defaults", 170, function()
+        WH.ResetToSpec()
+        HUD.RefreshPage()
+    end, "Clears every tick you made on the grid, the buff row and the debuff row, so your spec decides "
+        .. "them again. Icons you added yourself and every other setting stay.")
     L:EndCard()
 
     L:Card("Consumables")
@@ -807,7 +925,7 @@ local function TabGrid(L, cfg)
         .. "countdown) or a Buff (shows while active), optionally limited to "
         .. "one stance.")
     if D and D.MainIconList then
-        IconGrid(L, D.MainIconList, cfg.mainRow.hidden)
+        IconGrid(L, D.MainIconList, "main", cfg, cfg.mainRow.hidden)
     end
     MacroBindEditor(L, cfg)
     CustomEditor(L, cfg.mainRow.custom, "Add:", "cd")
@@ -821,9 +939,25 @@ local function TabBuffRow(L, cfg)
         .. "buff/self-debuff (shows while active with swipe + timer) or a "
         .. "Cooldown icon, optionally limited to one stance.")
     if D and D.AuraIconList then
-        IconGrid(L, D.AuraIconList, cfg.auraRow.hidden)
+        IconGrid(L, D.AuraIconList, "buffs", cfg, cfg.auraRow.hidden)
     end
     CustomEditor(L, cfg.auraRow.custom, "Add:", "buff")
+    L:EndCard()
+end
+
+local function TabDebuffs(L, cfg)
+    local D = WH.Display
+    L:Card("Target debuff icons")
+    L:Desc("An icon while the debuff is on your target, with the time left and Sunder Armor's stacks. "
+        .. "Tick the ones you want; your spec's defaults tick the ones its guide tracks. Add any other "
+        .. "debuff by name or spell ID, anyone's or only your own, optionally limited to one stance.")
+    Check(L, "Show the target debuff row", cfg.debuffRow.enabled, function(v)
+        cfg.debuffRow.enabled = v
+    end)
+    if D and D.DebuffIconList then
+        IconGrid(L, D.DebuffIconList, "debuffs", cfg, cfg.debuffRow.hidden)
+    end
+    CustomEditor(L, cfg.debuffRow.custom, "Add:", "any", DEBUFF_KIND_ITEMS, DEBUFF_KIND_LABELS)
     L:EndCard()
 end
 
@@ -872,6 +1006,17 @@ local function TabLook(L, cfg)
           function(v) cfg.auraRow.spacing = v end, Px })
     L:EndCard()
 
+    L:Card("Target debuff row")
+    SliderPair(L,
+        { "Debuff row icon width", 16, 64, cfg.debuffRow.iconW or 26,
+          function(v) cfg.debuffRow.iconW = v end, Px },
+        { "Debuff row icon height", 16, 64, cfg.debuffRow.iconH or 26,
+          function(v) cfg.debuffRow.iconH = v end, Px })
+    SliderPair(L,
+        { "Debuff row spacing", 0, 12, cfg.debuffRow.spacing or 4,
+          function(v) cfg.debuffRow.spacing = v end, Px })
+    L:EndCard()
+
     L:Card("Bars and icons")
     SliderPair(L,
         { "Rage bar width", 100, 400, r.rage.w or 229, function(v) r.rage.w = v end, Px },
@@ -916,7 +1061,7 @@ local function TabText(L, cfg)
     -- the grid's and the buff row's icons can each keep their own spots
     local D = WH.Display
     local icons = {}
-    for _, list in ipairs({ D and D.MainIconList or {}, D and D.AuraIconList or {} }) do
+    for _, list in ipairs({ D and D.MainIconList or {}, D and D.AuraIconList or {}, D and D.DebuffIconList or {} }) do
         for _, ic in ipairs(list) do icons[#icons + 1] = ic end
     end
     HUD.SharedTextCards(L, nil, { icons = icons })
@@ -943,6 +1088,10 @@ local function TabPosition(L, cfg)
         { "Execute helper scale", 50, 200,
           math.floor((r.execute.scale or 1) * 100 + 0.5),
           function(v) r.execute.scale = v / 100 end, Pct })
+    SliderPair(L,
+        { "Target debuffs scale", 50, 200,
+          math.floor((cfg.debuffRow.scale or 1) * 100 + 0.5),
+          function(v) cfg.debuffRow.scale = v / 100 end, Pct })
     L:EndCard()
 end
 
@@ -975,6 +1124,7 @@ local function BuildPage(L)
         { id = "general", label = "General",    build = function(L2) TabGeneral(L2, cfg) end },
         { id = "grid",    label = "Grid icons", build = function(L2) TabGrid(L2, cfg) end },
         { id = "buffrow", label = "Buff row",   build = function(L2) TabBuffRow(L2, cfg) end },
+        { id = "debuffs", label = "Debuffs",    build = function(L2) TabDebuffs(L2, cfg) end },
         { id = "look",    label = "Look",       build = function(L2) TabLook(L2, cfg) end },
         { id = "text",    label = "Text",       build = function(L2) TabText(L2, cfg) end },
         { id = "anim",    label = "Animation",  build = function(L2) HUD.SharedAnimCards(L2) end },
@@ -987,6 +1137,7 @@ HUD.RegisterPage("warrior", "Warrior HUD",
     "warrior hud weakaura class pack cooldowns swing timer rage bar execute "
     .. "overpower sapper potion stance active buffs salv sizing scale spacing "
     .. "add spell add buff hide icon custom icon grid icons buff row preview "
-    .. "smart macro " .. HUD.PAGE_KEYWORDS,
+    .. "smart macro spec defaults arms fury protection target debuffs sunder armor "
+    .. "demoralizing shout thunder clap rend " .. HUD.PAGE_KEYWORDS,
     { WARRIOR = true },
     BuildPage)

@@ -465,14 +465,17 @@ local function UpdateMapPreview(canvas, P)
     if not SampleBusy(st) then st.win:SetAlpha(SampleAlpha(db, mode)) end
 
     -- the unexplored corner
-    local revealOn = db.reveal and not openMap
+    -- (a game version where the map's data does not run - Retail: no
+    -- unexplored-area drawing and no pins there, so none in the sample)
+    local dataOn = not (Maps.DataOn and not Maps.DataOn())
+    local revealOn = db.reveal and not openMap and dataOn
     if revealOn then
         st.fog:SetTexture(ART .. 1)
         local r, g, b, a = 1, 1, 1, 1
         if R and R.TintOf then r, g, b, a = R.TintOf() end
         st.fog:SetVertexColor(r, g, b, a)
         st.fog:Show()
-    elseif openMap then
+    elseif openMap or not dataOn then
         st.fog:Hide()
     else
         st.fog:SetTexture(ns.FLAT or "Interface\\Buttons\\WHITE8X8")
@@ -485,7 +488,7 @@ local function UpdateMapPreview(canvas, P)
     for _, pin in ipairs(st.pins) do
         local kind, rot = pin.rec[1], pin.rec[4]
         local info = I and I.KINDS and I.KINDS[kind]
-        local want = info and I.Wanted and I.Wanted(kind, faction)
+        local want = dataOn and info and I.Wanted and I.Wanted(kind, faction)
         if want then
             local atlas = Maps.Atlas and Maps.Atlas(unpack(info.atlas))
             if atlas and pin.Texture.SetAtlas then
@@ -643,6 +646,11 @@ RegisterPage("Maps", function(L)
 
     local db = Maps.DB()
     local openMap = ns.Maps.OpenMapLoaded and ns.Maps.OpenMapLoaded()
+    -- (options audit 2026-11-09) the pins, the unexplored areas, the zone
+    -- and fishing levels, the sharper map and your own arrow are Classic
+    -- Era's Azeroth data (Core_Flavor's "maps_data" row): where that does
+    -- not run (Retail) their options are not shown; saved values stay
+    local dataOn = not (Maps.DataOn and not Maps.DataOn())
 
     -- a strip text picked in the preview: its group on the Text tab
     if ns.CustomPick then
@@ -717,6 +725,7 @@ RegisterPage("Maps", function(L)
             L:EndCard()
         end
 
+        if dataOn then
         L:Card("What to show on the map")
         L:Desc("Spirit healers, zone-crossing arrows and flight paths are on "
             .. "by default - they are most of the reason to run a map addon "
@@ -742,17 +751,21 @@ RegisterPage("Maps", function(L)
             .. "handle Blizzard gives - so if a patch changes that art, this "
             .. "option quietly stops working rather than breaking anything.")
         L:EndCard()
+        end
 
         L:Card("Readouts")
         Bind(L, "check", "coords", "Coordinates",
             "Your position and the cursor's, along the bottom of the map.")
+        if dataOn then
         Bind(L, "check", "zoneLevels", "Zone level ranges",
             "Shown in the same strip. Hover a zone on a continent map to read "
             .. "its range without opening it.")
         Bind(L, "check", "fishingLevels", "Fishing skill required",
             "A second number in brackets is the skill for the deep water.")
+        end
         L:EndCard()
 
+        if dataOn then
         L:Card("Unexplored areas")
         Bind(L, "check", "reveal", "Draw the parts you have not explored")
         Bind(L, "check", "revealTint", "Tint them",
@@ -760,10 +773,13 @@ RegisterPage("Maps", function(L)
             .. "have actually walked, which quietly turns the map into a lie. "
             .. "The colour and strength are on the Look tab.")
         L:EndCard()
+        end
 
         L:Card("You and your group")
+        if dataOn then
         Bind(L, "check", "bigArrow", "Enlarge your own arrow",
             "Blizzard's is 16 pixels, which on a full-screen map is a speck.")
+        end
         Bind(L, "check", "classIcons", "Show your group as class-coloured dots",
             "ZacUI draws these itself and pushes Blizzard's own group blips "
             .. "out of the way - otherwise each teammate is drawn twice, in "
@@ -803,6 +819,7 @@ RegisterPage("Maps", function(L)
             .. "have gone to look at somewhere else, it leaves you there.")
         L:EndCard()
 
+        if dataOn then
         L:Card("Sharper map")
         Bind(L, "check", "hdMap", "Draw zone maps from the game's minimap tiles",
             "Three times the detail of the painted map art, which an addon cannot "
@@ -815,6 +832,7 @@ RegisterPage("Maps", function(L)
             "A whole continent is over a thousand tiles; untick this if opening "
             .. "the continent map stutters on your machine.")
         L:EndCard()
+        end
     end
 
     -- ================================================================
@@ -842,6 +860,7 @@ RegisterPage("Maps", function(L)
         L:Desc("Unchanged, each follows the theme on the Colours page. Advanced > Reset puts them back.")
         L:EndCard()
 
+        if dataOn then
         L:Card("Pins")
         Bind(L, "slider", "pinSize", "Icon size", nil,
             { min = 8, max = 28, step = 1, look = true })
@@ -876,6 +895,7 @@ RegisterPage("Maps", function(L)
             { min = 16, max = 64, step = 1, enabled = db.bigArrow and true or false })
         L:Desc("Used when \"Enlarge your own arrow\" is on (General).")
         L:EndCard()
+        end
 
         L:Card("Group dots")
         Bind(L, "slider", "classIconSize", "Dot size", nil,
@@ -901,6 +921,7 @@ RegisterPage("Maps", function(L)
             With(Pct(1), { min = 20, max = 100, step = 5, look = true }))
         L:EndCard()
 
+        if dataOn then
         L:Card("Unexplored areas")
         local swatchRow = UI.Holder(L.current)
         swatchRow:SetSize(300, 22)
@@ -929,6 +950,7 @@ RegisterPage("Maps", function(L)
         L:Desc("Below 100% the painted map shows through, which keeps its zone "
             .. "names and borders readable.")
         L:EndCard()
+        end
     end
 
     -- ================================================================

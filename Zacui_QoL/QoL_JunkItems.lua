@@ -392,6 +392,14 @@ function J.Apply()
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
     pcall(ev.RegisterEvent, ev, "GET_ITEM_INFO_RECEIVED")
     pcall(ev.RegisterEvent, ev, "ITEM_DATA_LOAD_RESULT")
+    -- (2026-11-10) switched on = there is a frame, even while nothing
+    -- calls for it: Edit Mode places what exists and reads a missing
+    -- frame as "switched off".
+    if not win then
+        Window()
+        win:SetSize(150, TITLE_H + ICON + 2 + PRICE_H + PAD)
+        win:Hide()
+    end
     Schedule()
 end
 function J.Armed() return ev ~= nil and ev:IsEventRegistered("BAG_UPDATE_DELAYED") or false end

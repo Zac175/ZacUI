@@ -239,6 +239,9 @@ local function ResolveCatalog()
     wipe(byName)
     for key, entry in pairs(CATALOG) do
         local nm, _, icon = GetSpellInfo(entry.spellID)
+        -- (a spell this game version does not have: the settings list
+        -- leaves it out; one you added yourself stays listed)
+        entry.missing = (nm == nil and not entry.custom) or nil
         entry.name = nm or entry.name or key
         entry.icon = icon or entry.icon or "Interface\\Icons\\INV_Misc_QuestionMark"
         byName[entry.name] = key
@@ -980,7 +983,7 @@ function D.ClearPreview(f)
 end
 
 function D.PreviewPlate(f)
-    if not Cfg().enabled then
+    if not Cfg().enabled or (ns.FeatureOn and not ns.FeatureOn("np_debuffs")) then
         if f.dbGroups then HideAll(f) end
         return
     end
@@ -1015,7 +1018,8 @@ ev:SetScript("OnEvent", function(_, event, a1)
 end)
 
 function D.Start()
-    if not Cfg().enabled then D.Stop() return end
+    -- (2026-11-09) off on a game version whose debuffs are not listed yet
+    if not Cfg().enabled or (ns.FeatureOn and not ns.FeatureOn("np_debuffs")) then D.Stop() return end
     running = true
     ResolveCatalog()
     -- plates come and go through NP_Core (D.OnAdded / D.OnRemoved)

@@ -353,7 +353,8 @@ local function Tab_look(L)
     L:Card("Status")
     local D0 = BL.BAR_DEFAULTS
     local function Fixed(key) return function() return D0[key] end end
-    Colour(L, "colorHave", "Has it", Fixed("colorHave"), "The fill: how much of the 15 minutes is left.")
+    Colour(L, "colorHave", "Has it", Fixed("colorHave"), "The fill: how much of the blessing's "
+        .. ((ns.Flavor and ns.Flavor() == "tbc") and "30" or "15") .. " minutes is left.")
     Colour(L, "colorLow", "Running low", Fixed("colorLow"))
     Slider(L, "lowAt", "Running low below", 5, 60, { format = function(v) return format("%d%% of 15 min", v) end,
         desc = "Player buttons only." })

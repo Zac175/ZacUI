@@ -76,6 +76,19 @@ CB.DEFAULT_SPOT = {
     potions = { point = "TOPRIGHT", x = -10, y = -400 },
     weapons = { point = "BOTTOMLEFT", x = 300, y = 100 },
 }
+-- (2026-11-10) an install made from now on (ns.NewDefaults): the bars
+-- start where Zac has them on his Classic Era screen - two rows on the
+-- left edge over the chat, the weapons beside the chat. The old spots sat
+-- on Blizzard's quest tracker and right action bars, and inside the chat.
+CB.DEFAULT_SPOT_NEW = {
+    main = { point = "TOPLEFT", x = 25, y = -636 },
+    potions = { point = "TOPLEFT", x = 25, y = -604 },
+    weapons = { point = "TOPLEFT", x = 450, y = -721 },
+}
+function CB.DefaultSpot(key)
+    if ns.NewDefaults and ns.NewDefaults() then return CB.DEFAULT_SPOT_NEW[key] or CB.DEFAULT_SPOT[key] end
+    return CB.DEFAULT_SPOT[key]
+end
 -- Not in DEFAULTS on purpose (an empty table there would land in every
 -- save): hiddenItems, hiddenWeapons, itemOrder, customItems,
 -- conflictGroupPreferences, conflictGroupQuickUse, clickActions,
@@ -126,6 +139,8 @@ local function Faction()
     if f == "Horde" or f == "Alliance" then return f end
 end
 function CB.HordeMode(cfg)
+    -- (2026-11-09) not on TBC: both factions have Windfury Totem there
+    if ns.Flavor and ns.Flavor() == "tbc" then return false end
     local f = Faction()
     local set = T(cfg, "hordeByFaction")
     local v = set and f and set[f]

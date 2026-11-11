@@ -68,6 +68,11 @@ local confirm, input
 local POP = {
     -- (2026-11-08, Zac: "way to big ... huge x button") a small popup is
     -- compact: a 16 title, tighter margins
+    -- (2026-11-10, Zac on the auction buy window: "this window is still
+    -- just too big") a tiny popup for a window that sits beside another
+    -- while you work in it: a 13 title, 12 margins, 24 px footer buttons.
+    -- Asked for by name (opts.size = "tiny"); no width picks it.
+    tiny   = { PAD = 12, TOP = 9, T = 13, D = 11, GAP = 8, LINE = 3, BTN_H = 24, FOOT_GAP = 10 },
     small  = { PAD = 18, TOP = 16, T = 16, D = 12, GAP = 10, LINE = 4 },
     medium = { PAD = 30, TOP = 24, T = 24, D = 14, GAP = 18, LINE = 8 },
     big    = { PAD = 45, TOP = 35, T = 36, D = 14, GAP = 24, LINE = 12 },
@@ -143,7 +148,7 @@ end
 local function PopupButton(parent, text, opts)
     opts = opts or {}
     local b = UI.SettingsBuild(UI.Button, parent, text or "", { width = opts.width or POP.BTN_MIN,
-        height = POP.BTN_H, tooltip = opts.tooltip, onClick = opts.onClick })
+        height = opts.height or POP.BTN_H, tooltip = opts.tooltip, onClick = opts.onClick })
     b._zPaint = PaintPopupButton
     function b:SetKind(kind)
         self._zStyle = (kind == "primary" or kind == "destructive") and "close" or nil
@@ -269,7 +274,7 @@ function UI.Popup(name, width, height, title, opts)
         return false
     end
     function f:FooterHeight()
-        if ButtonsShown() then return POP.BTN_H + (P.PAD - 4) + POP.FOOT_GAP end
+        if ButtonsShown() then return (P.BTN_H or POP.BTN_H) + (P.PAD - 4) + (P.FOOT_GAP or POP.FOOT_GAP) end
         return P.PAD
     end
     local function PlaceBody()
@@ -322,6 +327,7 @@ function UI.Popup(name, width, height, title, opts)
         for i, s in ipairs(specs) do
             local b = self.buttons[i]
             if not b then
+                if P.BTN_H and not s.height then s.height = P.BTN_H end
                 b = PopupButton(self, s.text, s)
                 b:SetFrameLevel(self:GetFrameLevel() + 20)
                 self.buttons[i] = b

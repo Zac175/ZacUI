@@ -269,7 +269,14 @@ function Engine:ResolveSpells()
     end
     for _, list in ipairs({ self.def.buffRow or {}, self.def.debuffRow or {} }) do
         for _, e in ipairs(list) do
-            local name, _, icon = GetSpellInfo and GetSpellInfo(e.id)
+            -- (2026-11-10: "GetSpellInfo and GetSpellInfo(id)" keeps only the
+            -- first value, so the spell's icon never arrived here and the
+            -- settings preview drew question marks)
+            local name, icon
+            if GetSpellInfo then
+                local n, _, tex = GetSpellInfo(e.id)
+                name, icon = n, tex
+            end
             S.auraNames[e.key] = e.name or name
             S.auraIcons[e.key] = e.icon or icon
         end
@@ -897,7 +904,11 @@ function Engine:UpdateMainIcon(icon, def, cfg)
     local S = self.S
     if def.kind == "spell" then
         local sp = S.spells[def.spell]
-        if not (sp and sp.known) then return false end
+        if not (sp and sp.known) then
+            local st = sp and sp.name and self:Store()
+            if st and st.showUnlearned then return HUD.Ghost(icon, sp) end
+            return false
+        end
         if def.when and not def.when(S) then return false end
         local cd = S.cds[def.spell]
         local us = S.usable[def.spell] or {}
@@ -1240,7 +1251,10 @@ function Engine:HideAll()
     for _, set in ipairs({ self.mainIcons, self.auraIcons, self.debuffIcons, self.remindIcons, self.auxIcons }) do
         for _, icon in pairs(set) do icon:Hide() end
     end
-    for _, b in ipairs({ self.swingBar, self.rangedBar, self.manaBar, self.fsrBar, self.powerBar, self.tickBar, self.comboFrame, self.wandBar }) do
+    -- (2026-11-10: by name, not ipairs over a list - a HUD without one of
+    -- these left a hole in the list and every bar after it stayed up)
+    for _, k in ipairs({ "swingBar", "rangedBar", "manaBar", "fsrBar", "powerBar", "tickBar", "comboFrame", "wandBar" }) do
+        local b = self[k]
         if b then b:Hide() end
     end
     for _, fs in pairs(self.textFS or {}) do fs:Hide() end
@@ -2015,6 +2029,13 @@ function HUD.DefineClass(def)
             self:ApplyAnchorPositions()
             self:RegisterMovers()
         end)
+        -- Edit Mode shows the HUD itself while its boxes are placed
+        if HUD.EditPreview then
+            local eng = self
+            HUD.EditPreview(function() local c = eng:Store() return c and c.enabled and true or false end,
+                function() return eng.preview end,
+                function(v) eng.preview = v and true or false eng:Refresh() end)
+        end
     end
 
     self.ev = CreateFrame("Frame")

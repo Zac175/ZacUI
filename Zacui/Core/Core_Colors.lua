@@ -28,11 +28,17 @@ local Print = ns.Print
 -- ============================================================
 local PALETTE = {
     -- Window furniture
+    -- (2026-11-10, Zac: "these 2 windows the ah in zui and then
+    -- consumables checker in readycheck are still like pitch black") Every
+    -- window outside the /zui window paints from this table, and it was
+    -- still the old near-black (0.08 / 0.10 / 0.12) after the /zui window
+    -- went to #1C1C1C. The same family now: window 0.110, cards 0.150,
+    -- controls 0.160 or so. A colour picked on the Colours page still wins.
     ui = {
-        windowBg    = { r = 0.08, g = 0.08, b = 0.08, a = 0.95 },
-        elementBg   = { r = 0.12, g = 0.12, b = 0.12, a = 1.00 },
-        cardBg      = { r = 0.10, g = 0.10, b = 0.10, a = 1.00 },
-        headerBg    = { r = 0.12, g = 0.12, b = 0.12, a = 1.00 },
+        windowBg    = { r = 0.110, g = 0.110, b = 0.110, a = 0.97 },
+        elementBg   = { r = 0.160, g = 0.160, b = 0.160, a = 1.00 },
+        cardBg      = { r = 0.150, g = 0.150, b = 0.150, a = 1.00 },
+        headerBg    = { r = 0.140, g = 0.140, b = 0.140, a = 1.00 },
         -- The right-hand end of a title bar's fill. Until you set it, it
         -- is derived from headerBg and the accent (UIF_Controls); the value
         -- here is only what the editor shows as the default swatch.
@@ -48,25 +54,25 @@ local PALETTE = {
     },
     -- Pressable things
     button = {
-        bg          = { r = 0.12, g = 0.12, b = 0.12, a = 1.00 },
-        hover       = { r = 0.18, g = 0.18, b = 0.18, a = 1.00 },
-        pressed     = { r = 0.06, g = 0.06, b = 0.06, a = 1.00 },
-        disabled    = { r = 0.08, g = 0.08, b = 0.08, a = 0.60 },
-        active      = { r = 0.12, g = 0.16, b = 0.12, a = 1.00 },
-        activeHover = { r = 0.15, g = 0.20, b = 0.15, a = 1.00 },
+        bg          = { r = 0.165, g = 0.165, b = 0.165, a = 1.00 },
+        hover       = { r = 0.215, g = 0.215, b = 0.215, a = 1.00 },
+        pressed     = { r = 0.090, g = 0.090, b = 0.090, a = 1.00 },
+        disabled    = { r = 0.120, g = 0.120, b = 0.120, a = 0.60 },
+        active      = { r = 0.150, g = 0.210, b = 0.150, a = 1.00 },
+        activeHover = { r = 0.180, g = 0.250, b = 0.180, a = 1.00 },
         xNormal     = { r = 0.70, g = 0.70, b = 0.70, a = 1.00 },
         xHover      = { r = 0.90, g = 0.30, b = 0.30, a = 1.00 },
     },
     -- The config window's left nav
     sidebar = {
-        bg          = { r = 0.07, g = 0.07, b = 0.07, a = 1.00 },
-        rowNormal   = { r = 0.12, g = 0.12, b = 0.12, a = 1.00 },
-        rowHover    = { r = 0.18, g = 0.18, b = 0.18, a = 1.00 },
-        rowSelected = { r = 0.12, g = 0.16, b = 0.12, a = 1.00 },
+        bg          = { r = 0.095, g = 0.095, b = 0.095, a = 1.00 },
+        rowNormal   = { r = 0.150, g = 0.150, b = 0.150, a = 1.00 },
+        rowHover    = { r = 0.215, g = 0.215, b = 0.215, a = 1.00 },
+        rowSelected = { r = 0.150, g = 0.210, b = 0.150, a = 1.00 },
         indicator   = { r = 0.85, g = 0.65, b = 0.25, a = 1.00 },
     },
     checkbox = {
-        bg          = { r = 0.10, g = 0.10, b = 0.10, a = 1.00 },
+        bg          = { r = 0.160, g = 0.160, b = 0.160, a = 1.00 },
         border      = { r = 0.00, g = 0.00, b = 0.00, a = 1.00 },
         -- gold like the rest of the UI (Zac 2026-11-02). Unpicked, the tick
         -- is the gold Checkmark art as drawn (UIF_Controls PaintCheck).
@@ -74,8 +80,8 @@ local PALETTE = {
         hoverBorder = { r = 0.85, g = 0.65, b = 0.25, a = 1.00 },
     },
     dropdown = {
-        bg          = { r = 0.12, g = 0.12, b = 0.12, a = 0.98 },
-        itemHover   = { r = 0.20, g = 0.18, b = 0.12, a = 1.00 },
+        bg          = { r = 0.150, g = 0.150, b = 0.150, a = 0.98 },
+        itemHover   = { r = 0.240, g = 0.210, b = 0.140, a = 1.00 },
         itemText    = { r = 0.90, g = 0.90, b = 0.90, a = 1.00 },
         arrow       = { r = 0.80, g = 0.65, b = 0.35, a = 1.00 },
         selected    = { r = 0.85, g = 0.65, b = 0.25, a = 1.00 },
@@ -103,7 +109,7 @@ local PALETTE = {
         copper      = { r = 0.85, g = 0.55, b = 0.30, a = 1.00 },
     },
     tooltip = {
-        bg          = { r = 0.08, g = 0.08, b = 0.08, a = 0.95 },
+        bg          = { r = 0.105, g = 0.105, b = 0.105, a = 0.95 },
         border      = { r = 0.00, g = 0.00, b = 0.00, a = 1.00 },
         title       = { r = 1.00, g = 0.82, b = 0.00, a = 1.00 },
         body        = { r = 0.90, g = 0.90, b = 0.90, a = 1.00 },

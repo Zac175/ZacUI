@@ -434,6 +434,17 @@ RegisterPage("Modules", function(L, item)
         return tostring(a.label):lower() < tostring(b.label):lower()
     end)
     local Modules, MODULE_ADDON = ns.Modules, ns.MODULE_ADDON or {}
+    -- a module whose part IS loaded but brought no code stood down for
+    -- this game version (Retail has no Classic character sheet, quest log,
+    -- battlemaster ...): its switch could do nothing, so it is not listed
+    local Loaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    local function StoodDown(m)
+        local part = MODULE_ADDON[m.key]
+        return (not Modules[m.key]) and part and Loaded and Loaded(part) and true or false
+    end
+    for i = #listed, 1, -1 do
+        if StoodDown(listed[i]) then table.remove(listed, i) end
+    end
     for _, m in ipairs(listed) do
         local cb = UI.Checkbox(L.current, m.label,
             ZacUIDB.modules[m.key] and true or false,
@@ -477,7 +488,7 @@ end)
 -- ============================================================
 RegisterPage("Movers", function(L)
     L:Header("Movers",
-        "Drag a placeholder to reposition the element behind it, then click "
+        "Drag a placeholder to reposition the frame behind it, then click "
         .. "the button again to lock it.")
 
     if ns.Bars then
@@ -996,6 +1007,12 @@ RegisterPage("Buffs", function(L)
         Kit.Check(L, "Show stack counts", BuffCfg, "showCount",
             "The number on an aura that stacks.", { defaultOn = true })
         L:EndCard()
+        -- which of them show: the aura filter (off until it is changed)
+        local AF = ns.AuraFilter
+        if AF and AF.PanelFor and AF.Def("player_buffs") then
+            ns._afBuffPick = ns._afBuffPick or {}
+            AF.PanelFor(L, { "player_buffs", "player_debuffs" }, ns._afBuffPick)
+        end
     end
 
     local function Tab_look(L)
@@ -1428,6 +1445,17 @@ RegisterPage("Bags", function(L)
         Kit.Color(L, "Border colour", BagCfgOf, "borderColor", Kit.Palette("ui", "border"), { alpha = true })
         Kit.Check(L, "Quality colours on the border", BagCfgOf, "qualityBorders",
             "Green, blue, purple and orange edges for uncommon items and up.", { defaultOn = true })
+        -- (2026-11-10, the bags mock)
+        Kit.Check(L, "Gold edge on new items", BagCfgOf, "newItemRing",
+            "An item you just picked up wears the accent colour on its edge until the mouse has been over it.",
+            { defaultOn = true })
+        Kit.Check(L, "Search and Sort in the title bar", BagCfgOf, "titleTools",
+            "Search, Groups and Sort sit on the title bar beside the X and the row they had goes, so the bag is "
+            .. "one row shorter. ZacUI's own bag window only. Takes a /reload.",
+            { after = function() if ns.AskReload then ns.AskReload("The bag's title bar changes after a reload.") end end })
+        Kit.Check(L, "A bar for how full the bags are", BagCfgOf, "fillBar",
+            "Beside the free slot count at the bottom of the window. It turns red when nothing is free.",
+            { defaultOn = true })
         Kit.Color(L, "Quest item border", BagCfgOf, "questColor", function() return 1, 0.82, 0, 1 end,
             { desc = "Quest items win over quality - a quest item you cannot spot is a corpse run." })
         Kit.Slider(L, "Items that do not match a search", BagCfgOf, "fadedAlpha",
@@ -1497,7 +1525,7 @@ RegisterPage("Bags", function(L)
         Kit.Buttons(L, { { "Reset the look", 130, function()
             local t = ZacUIDB.bags or {}
             for _, k in ipairs({ "slotSize", "spacing", "emptyAlpha", "filledAlpha", "fadedAlpha",
-                                 "qualityBorders", "slotColor", "borderColor", "questColor", "countFont",
+                                 "qualityBorders", "newItemRing", "fillBar", "titleTools", "slotColor", "borderColor", "questColor", "countFont",
                                  "countColor", "footerFont", "bgColor", "frameBorderColor",
                                  "openAnim", "closeAnim" }) do t[k] = nil end
             ns.SettingsChanged("reset")
@@ -1907,6 +1935,27 @@ RegisterPage("Auction", function(L)
         end, { width = 160 })
         L:Add(dd, 6)
         L:Desc("How long new auctions run. Longer costs a larger deposit.")
+        L:EndCard()
+
+        -- (2026-11-09, Zac: both mock ideas, "give users the option to choose")
+        L:Card("Buy window")
+        local layouts = { card = "Card", list = "List" }
+        local lay = UI.Field(L.current, "Layout", function(h)
+            return UI.Dropdown(h, { width = 160,
+                items = function()
+                    return { { text = "Card", value = "card" }, { text = "List", value = "list" } }
+                end,
+                selected = function()
+                    return layouts[(ZacUIDB.bags and ZacUIDB.bags.ahBuyLayout) or "card"] or "Card"
+                end,
+                onSelect = function(v)
+                    ZacUIDB.bags = ZacUIDB.bags or {}
+                    ZacUIDB.bags.ahBuyLayout = (v ~= "card") and v or nil
+                end })
+        end, { width = 160 })
+        L:Add(lay, 6)
+        L:Desc("The window that buys what you clicked. Card: the item, a bar of how far along it is, and the "
+            .. "totals. List: each auction it will buy - seller, stack and price each - ticking off as you go.")
         L:EndCard()
     end
 

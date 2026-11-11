@@ -7,6 +7,7 @@
 
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 local SOUL_SHARD = 6265
 
@@ -41,11 +42,13 @@ ns.HUD.DefineClass({
         { key = "shadowWard",  kind = "spell", spell = "shadowWard",  label = "Shadow Ward", noRange = true },
         { key = "inferno",     kind = "spell", spell = "inferno",     label = "Inferno", noRange = true },
         { key = "soulFire",    kind = "spell", spell = "soulFire",    label = "Soul Fire" },
+        -- (22105 / 22104 / 22103 and 22116: TBC's Master stones; not on Era)
         { key = "healthstone", kind = "item", label = "Healthstone", items = {
+            { id = 22105 }, { id = 22104 }, { id = 22103 },
             { id = 19013 }, { id = 19012 }, { id = 9421 }, { id = 19011 }, { id = 19010 }, { id = 5510 },
             { id = 19008 }, { id = 19007 }, { id = 5509 }, { id = 19006 }, { id = 19005 }, { id = 5512 } } },
         { key = "soulstone",   kind = "item", label = "Soulstone", items = {
-            { id = 16896 }, { id = 16895 }, { id = 16893 }, { id = 16892 }, { id = 5232 } } },
+            { id = 22116 }, { id = 16896 }, { id = 16895 }, { id = 16893 }, { id = 16892 }, { id = 5232 } } },
         { key = "potion",      kind = "itemPotion", label = "Potion" },
         { key = "rune",        kind = "itemRune",   label = "Rune" },
     },
@@ -138,27 +141,39 @@ ns.HUD.DefineClass({
     -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
     -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
     -- section 13: Icy Veins' Classic warlock guide and its TBC Affliction /
-    -- Destruction guides). The base lists are Classic Era's (WoW Forever
-    -- plays them too: in raids only Corruption and the assigned curse fit
-    -- the debuff slots); a spec's tbc block replaces the rows it names.
+    -- Destruction guides; WoW Forever: wowtbc.gg's Forever warlock guides
+    -- and warcraft.wiki.gg's Forever ability list). The base lists are
+    -- Classic Era's (in raids only Corruption and the assigned curse fit
+    -- the debuff slots); a spec's tbc / forever block replaces the rows it
+    -- names on that game. WoW Forever (1.60): Curse of Agony and Curse of
+    -- Doom are Banes (same ids; one Bane and one Curse each on a target),
+    -- Curse of Shadow and Dark Pact are gone, Affliction fills with Wrack,
+    -- Demonology uses Soul Fire under Decimation, Destruction presses
+    -- Conflagrate (it no longer eats Immolate) and Shadowburn.
     roles = {
         { key = "affliction", label = "Affliction", tab = 1, aux = true, res = { regen = true }, show = {
-            main = { "amplify", "healthstone", "soulstone", "potion", "rune" },
+            main = { "amplify", "shadowburn", "healthstone", "soulstone", "potion", "rune" },
             utility = { "lifeTap", "darkPact", "curseElements", "curseShadow", "curseReck", "fear", "banish", "createHealthstone", "createSoulstone" },
             buffs = { "shadowTrance", "amplify", "touchOfShadow", "zhc" },
             debuffs = { "corruption", "elements", "curseShadow", "recklessness", "agony", "shadowVuln" } },
           glows = { ["buffs:shadowTrance"] = { { when = "active", style = "shine" } },
                     ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } } },
           tbc = { show = {
-              main = { "curseDoom", "soulshatter", "healthstone", "soulstone", "potion", "rune" },
-              buffs = { "shadowTrance", "felArmorBuff", "zhc" },
+              main = { "curseDoom", "amplify", "soulshatter", "healthstone", "soulstone", "potion", "rune" },
+              buffs = { "shadowTrance", "amplify", "felArmorBuff", "zhc" },
               debuffs = { "corruption", "unstableAffliction", "siphon", "elements", "doom", "agony", "shadowVuln" } },
             glows = { ["buffs:shadowTrance"] = { { when = "active", style = "shine" } },
                       ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } },
                       ["debuffs:unstableAffliction"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:siphon"] = { { when = "anticlip", style = "solid" } } } },
+          forever = { show = {
+              main = { "amplify", "curseDoom", "shadowburn", "healthstone", "soulstone", "potion", "rune" },
+              debuffs = { "corruption", "siphon", "agony", "doom", "wrack", "elements", "recklessness", "shadowVuln" } },
+            glows = { ["buffs:shadowTrance"] = { { when = "active", style = "shine" } },
+                      ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } },
                       ["debuffs:siphon"] = { { when = "anticlip", style = "solid" } } } } },
         { key = "demonology", label = "Demonology", tab = 2, aux = true, res = { regen = true }, show = {
-            main = { "felDom", "healthstone", "soulstone", "potion", "rune" },
+            main = { "felDom", "shadowburn", "healthstone", "soulstone", "potion", "rune" },
             utility = { "lifeTap", "curseElements", "curseShadow", "curseReck", "fear", "banish", "summonImp", "summonVoid", "summonSucc", "summonFel", "createHealthstone", "createSoulstone" },
             buffs = { "touchOfShadow", "burningWish", "felDom", "zhc" },
             debuffs = { "corruption", "elements", "curseShadow", "recklessness", "agony", "shadowVuln" } },
@@ -168,7 +183,14 @@ ns.HUD.DefineClass({
               buffs = { "felArmorBuff", "touchOfShadow", "burningWish", "zhc" },
               debuffs = { "corruption", "immolate", "elements", "doom", "agony", "shadowVuln" } },
             glows = { ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } },
-                      ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } } } } },
+                      ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } } } },
+          forever = { show = {
+              main = { "felDom", "soulFire", "curseDoom", "healthstone", "soulstone", "potion", "rune" },
+              buffs = { "decimation", "touchOfShadow", "burningWish", "felDom", "zhc" },
+              debuffs = { "immolate", "corruption", "agony", "doom", "elements", "recklessness", "shadowVuln" } },
+            glows = { ["buffs:decimation"] = { { when = "active", style = "shine" } },
+                      ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } } } } },
         { key = "destruction", label = "Destruction", tab = 3, aux = true, res = { regen = true }, show = {
             main = { "shadowburn", "healthstone", "soulstone", "potion", "rune" },
             utility = { "lifeTap", "searingPain", "rainOfFire", "hellfire", "curseElements", "curseShadow", "curseReck", "fear", "banish", "createHealthstone", "createSoulstone" },
@@ -179,7 +201,13 @@ ns.HUD.DefineClass({
               main = { "shadowburn", "curseDoom", "soulshatter", "healthstone", "soulstone", "potion", "rune" },
               buffs = { "felArmorBuff", "touchOfShadow", "burningWish", "zhc" },
               debuffs = { "immolate", "corruption", "doom", "elements", "shadowVuln" } },
-            glows = { ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } } } } },
+            glows = { ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } } } },
+          forever = { show = {
+              main = { "conflagrate", "shadowburn", "curseDoom", "healthstone", "soulstone", "potion", "rune" },
+              debuffs = { "immolate", "corruption", "agony", "doom", "elements", "recklessness", "shadowVuln" } },
+            glows = { conflagrate = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["debuffs:immolate"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:corruption"] = { { when = "anticlip", style = "solid" } } } } },
     },
     flavors = {
         tbc = { add = {
@@ -189,6 +217,12 @@ ns.HUD.DefineClass({
             { key = "unstableAffliction", id = 30108, label = "Unstable Affliction", row = "debuffs", castsDot = true },
             { key = "seedOfCorruption",   id = 27243, label = "Seed of Corruption", row = "debuffs" },
         }, spells = { felArmor = 28176 } },
+        -- WoW Forever's own talents (ids: warcraft.wiki.gg's Forever pages)
+        forever = { add = {
+            { key = "wrack",       id = 1316697, label = "Wrack", row = "debuffs" },
+            { key = "baneOfHavoc", id = 1225228, label = "Bane of Havoc", row = "debuffs" },
+            { key = "decimation",  id = 440870,  label = "Decimation", row = "buffs" },
+        } },
     },
     buffBars = { "shadowTrance", "amplify" },
     bars = { "mana", "fsr", "wand" },

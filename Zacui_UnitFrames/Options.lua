@@ -476,7 +476,9 @@ local function spellTexture(q)
 end
 
 -- one aura filter list: the entries with a remove X, then a box to add one
-local function AuraList(L, title, list)
+-- (attach: called with the list after an add, for a list that is only
+-- saved once it holds something)
+local function AuraList(L, title, list, attach)
     local hdr = UI.Font(L.current, F.SMALL, { text = title, cat = "text", key = "gray" })
     L:Row(hdr, 16)
     for idx, e in ipairs(list) do
@@ -509,6 +511,7 @@ local function AuraList(L, title, list)
             if (entry.id and e.id == entry.id) or (entry.name and e.name == entry.name) then return end
         end
         list[#list + 1] = entry
+        if attach then attach(list) end
         Apply()
         Refresh()
     end
@@ -790,10 +793,9 @@ local function TabGeneral(L)
     ac.debuffList = ac.debuffList or {}
     L:Card("Auras (all frames)")
     L:Desc("Turn buffs and debuffs on per frame above.")
-    Checks(L, {
-        { "Only my debuffs", function() return ac.onlyMine end, function(v) ac.onlyMine = v end },
-        { "Only debuffs I can remove", function() return ac.dispellableOnly end, function(v) ac.dispellableOnly = v end },
-    }, 2)
+    -- (2026-11-10: "only my debuffs", "only debuffs I can remove", the show
+    -- lists and the never-show lists are the aura filter's now - the Filter
+    -- cards at the foot of this tab)
     Checks(L, { { "Colour the border by debuff type when I can remove it",
         function() return ac.dispelHighlight end, function(v) ac.dispelHighlight = v end } }, 1)
     L:Desc("The preview shows the border colour whatever your class can remove.")
@@ -815,13 +817,33 @@ local function TabGeneral(L)
         L:EndCard()
     end
 
-    L:Card("Aura filter")
-    Checks(L, { { "Only show the buffs and debuffs listed below",
-        function() return ac.filterEnabled end, function(v) ac.filterEnabled = v end } }, 1)
-    AuraList(L, "Buffs to show", ac.buffList)
-    L:Gap(6)
-    AuraList(L, "Debuffs to show", ac.debuffList)
-    L:EndCard()
+    -- (2026-11-10) the aura filter: one for the debuffs, one for the buffs
+    do
+        local Zf = ns.ZUI or _G.ZacUI
+        local AF = Zf and Zf.AuraFilter
+        if AF and AF.PanelFor then
+            ns._afPick = ns._afPick or {}
+            local ac = db.auras
+            L:Card("Aura filters")
+            Checks(L, {
+                { "Party and raid frames have filters of their own", function() return ac.groupFilter end,
+                  function(v)
+                      ac.groupFilter = v and true or false
+                      if ns.RefreshConfig then ns.RefreshConfig() elseif Zf.RefreshConfig then Zf.RefreshConfig() end
+                  end,
+                  "Off, every frame uses the same two filters. On, party and raid frames get a pair of their own, "
+                  .. "which start as copies - so nothing changes until you set them up (only what you can dispel "
+                  .. "on the raid, everything on your target, say)." },
+            }, 1)
+            L:EndCard()
+            local list = { "uf_debuffs", "uf_buffs" }
+            if ac.groupFilter then
+                list[#list + 1] = "uf_group_debuffs"
+                list[#list + 1] = "uf_group_buffs"
+            end
+            AF.PanelFor(L, list, ns._afPick)
+        end
+    end
 
     L:Card("Shout alert")
     Checks(L, {
@@ -942,7 +964,18 @@ local function TabLook(L)
     L:Card("Aura icons (all frames)")
     Sliders(L,
         { label = "Icon size", min = 10, max = 36, format = PX, get = function() return ac.size end, set = function(v) ac.size = v end },
-        { label = "Most icons", min = 1, max = 12, get = function() return ac.max end, set = function(v) ac.max = v end })
+        { label = "Most icons", min = 1, max = 12, get = function() return ac.max end, set = function(v)
+            ac.max = v
+            -- (the limit lives in the aura filters: both rows take it)
+            local Zf = ns.ZUI or _G.ZacUI
+            local AF = Zf and Zf.AuraFilter
+            if AF then
+                AF.Get("uf_debuffs").adv.max = v
+                AF.Get("uf_buffs").adv.max = v
+                AF.Changed("uf_debuffs")
+                AF.Changed("uf_buffs")
+            end
+        end })
     Sliders(L,
         { label = "Icons per row", min = 1, max = 12, get = function() return ac.perRow end, set = function(v) ac.perRow = v end },
         { label = "Gap between icons", min = 0, max = 10, format = PX, get = function() return ac.spacing or 2 end, set = function(v) ac.spacing = v end })
@@ -1294,12 +1327,19 @@ local function TabHeals(L)
         { "Show heals over time", function() return cfg.hot.show end, function(v) cfg.hot.show = v end },
         { "One colour for every heal over time", function() return cfg.hot.uniform end, function(v) cfg.hot.uniform = v end },
     }, 2)
-    Checks(L, { { "Precise heal-over-time timing (reads the combat log)",
-        function() return cfg.preciseHots end, function(v) cfg.preciseHots = v end } }, 1)
+    -- (options audit 2026-11-09) precise timing reads the combat log, which
+    -- Forever and Retail do not give addons: not offered there (saved value kept)
+    local Z = ZUI()
+    local hasLog = not (Z and Z.NoCombatLog and Z.NoCombatLog())
+    if hasLog then
+        Checks(L, { { "Precise heal-over-time timing (reads the combat log)",
+            function() return cfg.preciseHots end, function(v) cfg.preciseHots = v end } }, 1)
+    end
     local og, oset = Arr(cfg.ownHeal, "color")
     local hg, hs = Arr(cfg.hot, "color")
     Colours(L, { { "My heal colour", og, oset, false }, { "Heal over time colour", hg, hs, false } })
-    L:Desc("Heals over time are dimmed against direct heals either way. Precise timing takes tick times from the combat log instead of aura refreshes - more accurate, a little more work per event.")
+    L:Desc(hasLog and "Heals over time are dimmed against direct heals either way. Precise timing takes tick times from the combat log instead of aura refreshes - more accurate, a little more work per event."
+        or "Heals over time are dimmed against direct heals either way.")
     L:EndCard()
 
     L:Card("Chip appearance")
@@ -1357,6 +1397,13 @@ local function TabHeals(L)
     })
     L:EndCard()
 
+    -- (2026-11-09, Zac: "yes hide it") other healers' heals never show
+    -- where addons get no combat log, so the healer dot and the healer
+    -- colours have nothing to mark there
+    do
+        local Z = ZUI()
+        if Z and Z.NoCombatLog and Z.NoCombatLog() then return end
+    end
     L:Card("Healer legend dot")
     Checks(L, {
         { "Show the legend dot", function() return cfg.dot.enabled end, function(v) cfg.dot.enabled = v ns.RefreshHealerDots() end },

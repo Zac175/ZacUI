@@ -243,6 +243,7 @@ end
 -- Typing waits a beat before searching, so a fast word is one search,
 -- not six half-word redraws.
 local function OnChanged()
+    if Search.NoteKey then Search.NoteKey() end
     serial = serial + 1
     local mine = serial
     C_Timer.After(DEBOUNCE, function()

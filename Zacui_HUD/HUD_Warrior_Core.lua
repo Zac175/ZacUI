@@ -18,6 +18,7 @@ local Print = ns.Print
 
 ns.WarriorHUD = ns.WarriorHUD or {}
 local WH = ns.WarriorHUD
+if HUD.RETAIL then return end   -- (Retail: only the table above, for the widget factory every class HUD draws with)
 
 -- API compatibility (Interface 11509 / 20506): HUD_Shared carries the
 -- shims every HUD used to duplicate privately.
@@ -72,6 +73,14 @@ local DEFAULTS = {
     auraRow   = { enabled = true, x = 7.44, y = -146, scale = 1,
                   iconW = 30, iconH = 30, spacing = 4,
                   hidden = {}, custom = {} },
+    -- (2026-11-09) the target debuff row: Sunder Armor stacks and time,
+    -- the shouts, Thunder Clap, your Rend and Hamstring. No x / y here: a
+    -- save that has none gets a spot just above its own buff row
+    -- (WH.Store). custom = { { input = "name or spellId", kind = "any" |
+    -- "mine", stance = 0 (any)|1|2|3 } }.
+    debuffRow = { enabled = true, scale = 1,
+                  iconW = 26, iconH = 26, spacing = 4,
+                  hidden = {}, custom = {} },
 
     -- WA custom options (the pack's config); defaults = exported aura values.
     potionChoice   = 16,    -- Mighty Rage Potion (dropdown index)
@@ -98,9 +107,64 @@ local DEFAULTS = {
 }
 WH.COLOR_DEFAULTS = DEFAULTS.colors
 
+-- ============================================================
+-- THE SPEC DEFAULTS' MARKER AND THE ONE-TIME FREEZE (2026-11-09)
+-- ============================================================
+-- hidden[key] on the three rows is three-state from here on: true = you
+-- took it off, false = you put it on, nil = it follows your spec's
+-- defaults (WH.IsOff below). A save from before that only ever held
+-- `true`, and everything else showed. So the first time such a save is
+-- read with the HUD in use, what it shows today is written down as the
+-- player's own choices (every icon the pack had: true / false) and the
+-- save is marked frozen: entries that came later stay off and the old
+-- stance rules stand, whatever the spec, until "Reset to spec defaults".
+-- A save that never existed, or one whose HUD was never switched on
+-- (nothing on screen to keep), starts on the spec defaults; what such a
+-- save had unticked stays unticked.
+local SPEC_VER = 1
+-- every icon the pack had before the spec defaults, per row
+local OLD_KEYS = {
+    mainRow = { "mortalStrike", "deathWish", "reck", "retaliation", "shieldWall", "bt", "ww", "overpower",
+        "execute", "revenge", "charge", "intercept", "bloodrage", "berserkerRage", "taunt", "lastStand",
+        "challShout", "shieldBlock", "shieldBash", "thunderClap", "sweeping", "pummel", "mockingBlow",
+        "intimShout", "disarm", "potion", "sapper", "dense", "dummy" },
+    auraRow = { "bsRem", "salv", "salvDef", "trinket1", "hs", "cleave", "opProc", "sbBuff", "enrage", "flurry",
+        "reckBuff", "retalBuff", "swBuff", "squawk", "dwBuff", "crusader", "mightyRage", "stoneshield", "fap",
+        "lip", "oil", "brBuff", "hamstring", "lsBuff", "ssBuff" },
+}
+WH.OLD_KEYS = OLD_KEYS
+
+local function MarkStore(cfg, existed)
+    if existed and cfg.enabled then
+        for rowName, keys in pairs(OLD_KEYS) do
+            local row = cfg[rowName]
+            if type(row) == "table" then
+                if type(row.hidden) ~= "table" then row.hidden = {} end
+                for _, k in ipairs(keys) do row.hidden[k] = row.hidden[k] and true or false end
+            end
+        end
+        cfg.specFrozen = true
+    end
+    cfg.specVer = SPEC_VER
+end
+
 function WH.Store()
+    -- (was there a save before this read made one)
+    local db = ZacUIDB
+    local existed = type(db) == "table" and type(db.hud) == "table" and type(db.hud.warrior) == "table"
     local cfg = HUD.Store("warrior", DEFAULTS)
     if not cfg then return nil end
+    if cfg.specVer ~= SPEC_VER then MarkStore(cfg, existed) end
+    -- the debuff row's spot the first time: just above the buff row,
+    -- wherever this save has that
+    local d = cfg.debuffRow
+    if d and d.x == nil then
+        local a = cfg.auraRow or {}
+        local pos = HUD.MoverPos and HUD.MoverPos("whAuraRow")
+        local ax, ay = a.x or 0, a.y or 0
+        if pos and (pos.point == nil or pos.point == "CENTER") then ax, ay = pos.x or ax, pos.y or ay end
+        d.x, d.y = ax, ay + 40 * (a.scale or 1)
+    end
     -- Migration: monolithic resources x/y replaced by per-element offsets.
     local r = cfg.resources
     if r then r.x, r.y = nil, nil end
@@ -247,6 +311,21 @@ local SPELL_IDS = {
     battleShout   = 6673,
 }
 
+-- (2026-11-09) What the specs' guides press that the pack never had.
+-- Shield Slam and Concussion Blow are in every game version; the rest are
+-- the game version's own (ids: Wowhead's classic / tbc tooltips, WoW
+-- Forever's from warcraft.wiki.gg's ability pages).
+local FLAVOR = (ns.Flavor and ns.Flavor()) or "era"
+WH.FLAVOR = FLAVOR
+SPELL_IDS.shieldSlam, SPELL_IDS.concussionBlow = 23922, 12809
+do
+    local MORE = {
+        tbc = { rampage = 29801, devastate = 20243, intervene = 3411, spellReflect = 23920, victoryRush = 34428 },
+        forever = { victoryRush = 402927, spearingStrike = 1310222, recklessSwings = 1329555 },
+    }
+    for key, id in pairs(MORE[FLAVOR] or {}) do SPELL_IDS[key] = id end
+end
+
 -- Player buff names resolved from the WA aura ids ("Active" row).
 local BUFF_IDS = {
     shieldBlock = 2565,  enrage     = 13046, flurry     = 12970,
@@ -257,6 +336,18 @@ local BUFF_IDS = {
     sweeping    = 12292, hamstring  = 1715,  squawk     = 23060,
     salv        = 1038,  greaterSalv = 25895,
 }
+do
+    -- (the buff carries its spell's name)
+    local MORE = {
+        tbc = { rampage = 29801, commShout = 469, spellReflect = 23920 },
+        forever = { recklessSwings = 1329555 },
+    }
+    for key, id in pairs(MORE[FLAVOR] or {}) do BUFF_IDS[key] = id end
+end
+
+-- The target debuff row's names (found by name, so any rank counts).
+local DEBUFF_IDS = { sunder = 7386, demoShout = 1160, thunderClap = 6343, rend = 772, hamstring = 1715 }
+if FLAVOR == "tbc" then DEBUFF_IDS.bloodFrenzy = 30070 end
 
 -- Live state (read by the display layer every refresh)
 WH.State = {
@@ -273,6 +364,10 @@ WH.State = {
     buffs       = {},         -- player HELPFUL by lower(name)
     selfDebuffs = {},         -- player HARMFUL by lower(name)
     hamstring   = nil,        -- my Hamstring on target { duration, expirationTime }
+    debuffNames = {},         -- key -> resolved localized name (the debuff row)
+    debuffIcons = {},         -- key -> spell icon (for the settings preview)
+    targetDebuffs = {},       -- target HARMFUL by lower(name), read only while the debuff row asks
+    spec        = nil,        -- the spec your talents point at ("arms" / "fury" / "prot"), nil = none read
     targetAttackable = false,
     targetHPpct = 100,
     ap          = 0,
@@ -286,6 +381,155 @@ WH.State = {
     plateCount  = 0,          -- attackable nameplates near the player (sapper)
 }
 local S = WH.State
+
+-- ============================================================
+-- THE SPEC DEFAULTS (2026-11-09)
+-- ============================================================
+-- What each spec has on by default, per game version, from the spec
+-- guides (zui_tests/agent_notes/AUDIT_WPP_1109.md; Class HUD v2's own
+-- rule: your tick wins, an entry you never touched follows the spec).
+-- The class baseline (no talents, under level 10, or "Class baseline"
+-- picked) is the pack as it always was: every icon it had on, every
+-- later one off. A spec then says what it takes OFF that baseline (the
+-- buttons its guide never presses) and what it turns ON (the later
+-- entries its guide tracks); a spec's tbc / forever block adds to both
+-- on that game version. A spell the character does not know never shows,
+-- so a list may name another tree's talents. Rows: main (the cooldown
+-- grid), buffs (the active buff row), debuffs (the target debuff row).
+-- Classic Era keeps Rend and Hamstring off the debuff row (16 debuff
+-- slots: nobody keeps them up on a boss).
+local DPS_NOISE = { "taunt", "mockingBlow", "challShout", "disarm", "intimShout", "retaliation", "dummy" }
+local ROLES = {
+    { key = "arms", label = "Arms", tab = 1,
+      off = { main = DPS_NOISE },
+      on = { debuffs = { "dSunder", "dDemo" } },
+      tbc = { on = { main = { "victoryRush" },
+                     debuffs = { "dBloodFrenzy", "dRend", "dTclap" } } },
+      forever = { on = { main = { "spearingStrike", "victoryRush" },
+                         debuffs = { "dRend" } } } },
+    { key = "fury", label = "Fury", tab = 2,
+      off = { main = DPS_NOISE },
+      on = { debuffs = { "dSunder", "dDemo" } },
+      tbc = { on = { main = { "rampage", "victoryRush" },
+                     buffs = { "rampageBuff", "commShout" } } },
+      forever = { on = { main = { "recklessSwings", "spearingStrike", "victoryRush" },
+                         buffs = { "rsBuff" },
+                         debuffs = { "dRend" } } } },
+    { key = "prot", label = "Protection", tab = 3,
+      off = { main = { "intimShout", "retaliation", "sweeping", "dummy" } },
+      on = { main = { "shieldSlam", "concussionBlow" },
+             debuffs = { "dSunder", "dDemo", "dTclap" } },
+      tbc = { on = { main = { "devastate", "intervene", "spellReflect" },
+                     buffs = { "commShout", "srBuff" } } },
+      forever = { on = { main = { "victoryRush" } } } },
+}
+-- the lists as sets, this game version's block folded in
+do
+    local function Sets(dst, src)
+        for row, keys in pairs(src or {}) do
+            dst[row] = dst[row] or {}
+            for _, k in ipairs(keys) do dst[row][k] = true end
+        end
+    end
+    local roles = {}
+    for i, r in ipairs(ROLES) do
+        local role = { key = r.key, label = r.label, tab = r.tab, on = {}, off = {} }
+        Sets(role.on, r.on)
+        Sets(role.off, r.off)
+        local fl = r[FLAVOR]
+        if fl then
+            Sets(role.on, fl.on)
+            Sets(role.off, fl.off)
+        end
+        roles[i] = role
+    end
+    -- (the shape Class HUD v2's talent read takes: roles with key and tab)
+    WH.SpecDef = { roles = roles }
+end
+
+local function RoleByKey(key)
+    for _, r in ipairs(WH.SpecDef.roles) do if r.key == key then return r end end
+    return nil
+end
+
+-- The spec the talents point at: Class HUD v2's read (the tree with most
+-- points; WoW Forever: the trait group with most ranks; nil under level
+-- 10 or with no points). Talent events only note the time; the core
+-- ticker reads half a second after the last one and never in combat.
+local specAt = 0
+local function ReadSpec()
+    local V2 = HUD.V2
+    local new = V2 and V2.GuessRole and V2.GuessRole(WH.SpecDef) or nil
+    S.specRead = true
+    if new ~= S.spec then
+        S.spec = new
+        if WH.Display and WH.Display.InvalidateLayout then WH.Display:InvalidateLayout() end
+    end
+end
+function WH.DetectedSpec()
+    if not S.specRead and S.isWarrior then ReadSpec() end
+    return S.spec
+end
+
+-- your pick on the page (cfg.spec: a spec's key, "baseline" = none), else
+-- the talents'; nil = the class baseline
+function WH.ActiveSpec(cfg)
+    cfg = cfg or WH.Store()
+    local pick = cfg and cfg.spec
+    if pick == "baseline" then return nil end
+    if pick and RoleByKey(pick) then return pick end
+    return S.spec
+end
+
+-- Is this entry off its row (row: "main" | "buffs" | "debuffs"; def: the
+-- entry, with key and add = true on the ones newer than the pack)? Your
+-- tick first, then the spec's lists, then the entry's own default. A
+-- frozen save (WH.Store) never asks the spec.
+local ROW_STORE = { main = "mainRow", buffs = "auraRow", debuffs = "debuffRow" }
+function WH.IsOff(row, def, cfg)
+    cfg = cfg or WH.Store()
+    if not cfg then return true end
+    local store = cfg[ROW_STORE[row]]
+    local hidden = store and store.hidden
+    local v = hidden and hidden[def.key]
+    if v ~= nil then return v and true or false end
+    if not cfg.specFrozen then
+        local key = WH.ActiveSpec(cfg)
+        local role = key and RoleByKey(key)
+        if role then
+            local on, off = role.on[row], role.off[row]
+            if on and on[def.key] then return false end
+            if off and off[def.key] then return true end
+        end
+    end
+    return def.add and true or false
+end
+
+-- "Reset to spec defaults": every tick you made on the three rows goes
+-- (and a frozen save's hold with them), so the spec in force decides
+-- again. The spec pick, your own added icons and every other setting stay.
+function WH.ResetToSpec()
+    local cfg = WH.Store()
+    if not cfg then return false end
+    for _, name in pairs(ROW_STORE) do
+        local row = cfg[name]
+        if type(row) == "table" and type(row.hidden) == "table" then wipe(row.hidden) end
+    end
+    cfg.specFrozen = nil
+    if WH.Display and WH.Display.InvalidateLayout then WH.Display:InvalidateLayout() end
+    if ns.SettingsChanged then ns.SettingsChanged("hud.role") end
+    return true
+end
+
+-- the spec picker's rows (the page)
+function WH.SpecItems()
+    local d = WH.DetectedSpec()
+    local r = d and RoleByKey(d)
+    local items = { { value = "auto", text = r and ("Automatic (" .. r.label .. ")") or "Automatic (class baseline)" } }
+    for _, role in ipairs(WH.SpecDef.roles) do items[#items + 1] = { value = role.key, text = role.label } end
+    items[#items + 1] = { value = "baseline", text = "Class baseline" }
+    return items
+end
 
 -- Dirty flags (set by events, consumed by the core ticker)
 local dirty = {
@@ -315,6 +559,13 @@ local function ResolveSpells()
             local name, _, icon = GetSpellInfo(id)
             S.buffNames[key] = name
             S.buffIcons[key] = icon
+        end
+    end
+    for key, id in pairs(DEBUFF_IDS) do
+        if GetSpellInfo then
+            local name, _, icon = GetSpellInfo(id)
+            S.debuffNames[key] = name
+            S.debuffIcons[key] = icon
         end
     end
     -- Name fallbacks for item-granted auras (WA matched by name string).
@@ -466,6 +717,57 @@ local function ScanTargetHamstring()
             S.hamstring = hamstringEntry
             return
         end
+    end
+end
+
+-- The target's debuffs for the debuff row, by lower(name): anyone's (a
+-- Sunder Armor is the raid's) with `mine` set on your own; the same name
+-- twice keeps yours, else the one that lasts longer. Entries are kept
+-- between scans and rewritten, like the player's. WoW Forever: only your
+-- own can be read there (HUD.EachMyTargetDebuff), a hidden timer shown as
+-- it is. Runs only while the row has something to show (S.wantDebuffs,
+-- set by the display), on the same dirty flag as Hamstring.
+local tdPass = 0
+local function PutTargetDebuff(name, icon, count, duration, expirationTime, mine, hiddenAura)
+    local out = S.targetDebuffs
+    local key = name:lower()
+    local e = out[key]
+    if e and e.pass == tdPass then
+        if e.mine and not mine then return end
+        if (mine and true or false) == (e.mine and true or false)
+            and (expirationTime or 0) <= (e.expirationTime or 0) then return end
+    elseif not e then
+        e = {}
+        out[key] = e
+    end
+    e.pass = tdPass
+    e.name, e.icon, e.count = name, icon, count or 0
+    e.duration, e.expirationTime = duration or 0, expirationTime or 0
+    e.mine, e.hidden = mine and true or false, hiddenAura
+end
+local function ScanTargetDebuffs()
+    tdPass = tdPass + 1
+    local out = S.targetDebuffs
+    if S.wantDebuffs and UnitExists("target") then
+        if HUD.HIDDEN_AURAS then
+            HUD.EachMyTargetDebuff(function(name, a)
+                if not name then return end
+                if ns.AuraFieldsHidden(a) then
+                    PutTargetDebuff(name, a.icon, nil, nil, nil, true, a)
+                else
+                    PutTargetDebuff(name, a.icon, a.applications, a.duration, a.expirationTime, true)
+                end
+            end)
+        else
+            for i = 1, 40 do
+                local name, icon, count, _, duration, expirationTime, source = CompatUnitAura("target", i, "HARMFUL")
+                if not name then break end
+                PutTargetDebuff(name, icon, count, duration, expirationTime, source == "player" or source == nil)
+            end
+        end
+    end
+    for key, e in pairs(out) do
+        if e.pass ~= tdPass then out[key] = nil end
     end
 end
 
@@ -811,6 +1113,11 @@ local function CoreTick()
     local cfg = WH.Store()
     if not cfg or not cfg.enabled or not S.isWarrior then return end
     local now = GetTime()
+    -- the spec: half a second after the last talent event, out of combat
+    if specAt and not S.inCombat and now - specAt >= 0.5 then
+        specAt = nil
+        ReadSpec()
+    end
     if not (wake or S.inCombat or S.targetAttackable or dirty.spells or dirty.bags
             or dirty.auras or dirty.targetAuras or (WH.Display and WH.Display.preview))
         and now - lastWork < IDLE_EVERY then
@@ -827,7 +1134,11 @@ local function CoreTick()
         ScanAuraList(A.Debuffs(), S.selfDebuffs)
     end
     UpdateTargetSnapshot()
-    if dirty.targetAuras then dirty.targetAuras = false ScanTargetHamstring() end
+    if dirty.targetAuras then
+        dirty.targetAuras = false
+        ScanTargetHamstring()
+        if S.wantDebuffs or next(S.targetDebuffs) then ScanTargetDebuffs() end
+    end
     UpdateMisc()
     UpdateSpellSnapshot()
 
@@ -865,6 +1176,10 @@ local function StartTicker()
     -- The world moved on while the HUD was off; rescan everything.
     dirty.auras, dirty.targetAuras, dirty.bags, dirty.spells =
         true, true, true, true
+    -- (the spec, when it was never read: the HUD starts on its defaults
+    -- even when switched on in a fight; last, so a read that fails takes
+    -- nothing else with it)
+    if not S.specRead then pcall(ReadSpec) end
 end
 
 local function StopTicker()
@@ -887,6 +1202,16 @@ end
 function WH:IsActive()
     local cfg = WH.Store()
     return (cfg and cfg.enabled and S.isWarrior) and true or false
+end
+
+-- The display says whether the debuff row has anything to show; the
+-- target is read again when it starts to.
+function WH.WantDebuffs(on)
+    on = on and true or false
+    if S.wantDebuffs ~= on then
+        S.wantDebuffs = on
+        dirty.targetAuras = true
+    end
 end
 
 -- Settings UI hook: re-resolve tracked spells after custom add/remove.
@@ -964,6 +1289,12 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         -- a talent point spent or reset changes Heroic Strike's cost
         ev:RegisterEvent("CHARACTER_POINTS_CHANGED")
         pcall(ev.RegisterEvent, ev, "PLAYER_TALENT_UPDATE")
+        -- (the spec defaults: the other ways a spec changes, where the
+        -- client has them)
+        local valid = C_EventUtils and C_EventUtils.IsEventValid
+        for _, name in ipairs({ "ACTIVE_TALENT_GROUP_CHANGED", "TRAIT_CONFIG_UPDATED", "PLAYER_LEVEL_UP" }) do
+            if not valid or valid(name) then pcall(ev.RegisterEvent, ev, name) end
+        end
         ev:RegisterEvent("PLAYER_REGEN_DISABLED")
         ev:RegisterEvent("PLAYER_REGEN_ENABLED")
         -- the combat log, auras, target and bag events register in
@@ -982,9 +1313,16 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         dirty.bags = true
     elseif event == "UNIT_ATTACK_SPEED" then
         RescaleSwing()
-    elseif event == "SPELLS_CHANGED" or event == "CHARACTER_POINTS_CHANGED"
-        or event == "PLAYER_TALENT_UPDATE" then
+    elseif event == "SPELLS_CHANGED" then
         dirty.spells = true
+    elseif event == "CHARACTER_POINTS_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
+        dirty.spells = true
+        specAt = GetTime()
+        wake = true
+    elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "TRAIT_CONFIG_UPDATED"
+        or event == "PLAYER_LEVEL_UP" then
+        specAt = GetTime()
+        wake = true
     elseif event == "PLAYER_REGEN_DISABLED" then
         S.inCombat = true
         wake = true
@@ -993,6 +1331,7 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         wake = true
     elseif event == "PLAYER_ENTERING_WORLD" then
         dirty.auras, dirty.targetAuras, dirty.bags, dirty.spells = true, true, true, true
+        specAt = specAt or GetTime()
     end
 end)
 

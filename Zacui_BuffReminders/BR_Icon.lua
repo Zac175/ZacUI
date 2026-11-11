@@ -83,7 +83,8 @@ end
 Icon.HDOn = HDOn
 Icon.HD_LAYOUT_DEF = { grow = "RIGHT", spacingX = 14, spacingY = 14 }
 Icon.SHORT = { battleshout = "Shout", trueshot = "Trueshot", intellect = "Intellect", fortitude = "Fortitude",
-    spirit = "Spirit", shadowprot = "Shadow", motw = "Wild", thorns = "Thorns", soulstone = "Soulstone" }
+    spirit = "Spirit", shadowprot = "Shadow", motw = "Wild", thorns = "Thorns", soulstone = "Soulstone",
+    fearward = "Fear Ward", commandingshout = "Command", earthshield = "Earth" }
 -- what an icon setting draws at
 function Icon.Opacity(ic)
     local o = tonumber(ic and ic.opacity) or 0.7

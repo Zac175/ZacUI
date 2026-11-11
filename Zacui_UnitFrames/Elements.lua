@@ -2449,21 +2449,93 @@ end
 
 -- Which auras an icon row keeps: the same tests for live frames and the
 -- settings preview's made-up auras. `dispels` is what the player can remove.
-local function debuffShown(cfg, name, spellID, source, dispelType, dispels)
+-- "Never show" lists (cfg.hideBuffList / cfg.hideDebuffList, the whitelist's
+-- entry shape; nil or empty = nothing hidden, one table read and out): an
+-- aura on one never takes an icon, whatever the other filters say. The
+-- dispel tint and glow still see it. (WoW Forever: an aura the game hides
+-- has no name to match, so it can't be hidden this way in combat.)
+local function auraNever(list, name, spellID)
+    return list ~= nil and list[1] ~= nil and auraListMatch(list, name, spellID)
+end
+-- (2026-11-10) THE FILTER: both rows ask ZacUI's aura filter
+-- (Core_AuraFilter, places "uf_debuffs" and "uf_buffs"). The settings
+-- these rows had of their own - only mine, only what I can remove, the
+-- show lists and the never-show lists - are read into those filters the
+-- first time they are used (see the places, registered below), so a
+-- frame shows what it showed. Without the filter (an older ZacUI core)
+-- the old tests still stand.
+local function AFilter()
+    local Zf = _G.ZacUI
+    return Zf and Zf.AuraFilter
+end
+local afAura, afCtx = {}, {}
+-- WHICH FILTERS a frame asks: the two all frames share, or - with "Party
+-- and raid frames have filters of their own" on - the group pair. Set at
+-- the top of each frame's aura pass.
+local plD, plB = "uf_debuffs", "uf_buffs"
+local function setPlaces(frame)
+    local ac = ns.db and ns.db.auras
+    if ac and ac.groupFilter and frame and frame.isGroupUnit then
+        plD, plB = "uf_group_debuffs", "uf_group_buffs"
+    else
+        plD, plB = "uf_debuffs", "uf_buffs"
+    end
+end
+local function viaFilter(AF, place, name, spellID, mine, dispel, count, duration, expires)
+    afAura.name, afAura.spellId, afAura.mine, afAura.dispel = name, spellID, mine and true or false, dispel and true or false
+    afAura.count, afAura.duration, afAura.expirationTime, afAura.hidden = count, duration, expires, nil
+    afCtx.inCombat = UnitAffectingCombat and UnitAffectingCombat("player") and true or false
+    return (AF.Pass(place, afAura, afCtx))
+end
+local function debuffShown(cfg, name, spellID, source, dispelType, dispels, count, duration, expires)
+    local AF = AFilter()
+    if AF then
+        -- (dispel: what YOU can take off, as "only debuffs I can remove" meant)
+        return viaFilter(AF, plD, name, spellID, source == "player",
+            dispels and dispelType and dispels[dispelType], count, duration, expires)
+    end
     return ((not cfg.onlyMine) or source == "player")
        and ((not cfg.dispellableOnly) or (dispels and dispelType and dispels[dispelType]))
        and ((not cfg.filterEnabled) or auraListMatch(cfg.debuffList, name, spellID))
+       and not auraNever(cfg.hideDebuffList, name, spellID)
 end
-local function buffShown(cfg, name, spellID)
-    return (not cfg.filterEnabled) or auraListMatch(cfg.buffList, name, spellID)
+local function buffShown(cfg, name, spellID, source, count, duration, expires)
+    local AF = AFilter()
+    if AF then return viaFilter(AF, plB, name, spellID, source == "player", nil, count, duration, expires) end
+    return ((not cfg.filterEnabled) or auraListMatch(cfg.buffList, name, spellID))
+       and not auraNever(cfg.hideBuffList, name, spellID)
 end
 -- WoW Forever: a debuff the game hides passes only the filters that don't
 -- need its name or type ("only mine": the never-hidden "from you" flag)
+local function hiddenShown(AF, place, a)
+    local Zh = _G.ZacUI
+    afAura.name, afAura.spellId, afAura.dispel, afAura.count, afAura.duration, afAura.expirationTime =
+        nil, nil, nil, nil, nil, nil
+    afAura.hidden = true
+    afAura.mine = (Zh and Zh.AuraIsMine and Zh.AuraIsMine(a)) and true or false
+    afCtx.inCombat = UnitAffectingCombat and UnitAffectingCombat("player") and true or false
+    return (AF.Pass(place, afAura, afCtx))
+end
 local function hiddenDebuffShown(cfg, a)
-    if a == nil or cfg.dispellableOnly or cfg.filterEnabled then return false end
+    if a == nil then return false end
+    local AF = AFilter()
+    if AF then return hiddenShown(AF, plD, a) end
+    if cfg.dispellableOnly or cfg.filterEnabled then return false end
     if not cfg.onlyMine then return true end
-    local Z = _G.ZacUI
-    return (Z and Z.AuraIsMine and Z.AuraIsMine(a)) and true or false
+    local Zh = _G.ZacUI
+    return (Zh and Zh.AuraIsMine and Zh.AuraIsMine(a)) and true or false
+end
+local function hiddenBuffShown(cfg, a)
+    if a == nil then return false end
+    local AF = AFilter()
+    if AF then return hiddenShown(AF, plB, a) end
+    return not cfg.filterEnabled
+end
+-- the icon limit: the filter's, else the shared one
+local function auraMax(cfg, place)
+    local AF = AFilter()
+    local m = AF and tonumber(AF.Get(place).adv.max)
+    return m or cfg.max
 end
 -- its icon and stacks straight onto the icon (hidden values as they are)
 local function showHiddenAura(b, unit, a)
@@ -2546,6 +2618,8 @@ function ns.UpdateAuras(frame, updateInfo)
     local wantBuffs   = fcfg and fcfg.showBuffs
     local wantDebuffs = fcfg and fcfg.showDebuffs
     local unit = frame.unit
+    setPlaces(frame)
+    afCtx.sample = nil
     if not unit or not UnitExists(unit) or not scanAura then
         for _, b in ipairs(frame.auraIcons) do b:Hide() end
         setDispelHighlight(frame, nil)
@@ -2589,6 +2663,7 @@ function ns.UpdateAuras(frame, updateInfo)
     -- wanted) it carries on alone until a dispellable type turns up.
     if wantDebuffs or checkDispel then
         local n  = 0
+        local dmax = auraMax(cfg, plD)
         local iconsDone = not wantDebuffs
         local oy = (fcfg.debuffY or 0) - (da.below and cbGap or 0)
         for index = 1, 40 do
@@ -2603,12 +2678,12 @@ function ns.UpdateAuras(frame, updateInfo)
                     if b.swipe then hdAura(b, true, nil, nil, nil) end
                     placeAura(frame, b, da, n, perRow, step, fcfg.debuffX or 0, oy)
                     n = n + 1
-                    if n >= cfg.max then iconsDone = true end
+                    if n >= dmax then iconsDone = true end
                 end
             elseif checkDispel and not foundDispel and dispelType and playerDispels[dispelType] then
                 foundDispel = dispelType
             end
-            if name and not iconsDone and debuffShown(cfg, name, spellID, source, dispelType, playerDispels) then
+            if name and not iconsDone and debuffShown(cfg, name, spellID, source, dispelType, playerDispels, count, duration, expires) then
                 pool = pool + 1
                 local b = getAuraIcon(frame, pool)
                 b.icon:SetTexture(icon)
@@ -2616,7 +2691,7 @@ function ns.UpdateAuras(frame, updateInfo)
                 if b.swipe then hdAura(b, true, dispelType, duration, expires) end
                 placeAura(frame, b, da, n, perRow, step, fcfg.debuffX or 0, oy)
                 n = n + 1
-                if n >= cfg.max then iconsDone = true end
+                if n >= dmax then iconsDone = true end
             end
             if iconsDone and (foundDispel or not checkDispel) then break end
         end
@@ -2628,21 +2703,22 @@ function ns.UpdateAuras(frame, updateInfo)
     if wantBuffs then
         local n  = 0
         local oy = (fcfg.buffY or 0) - (ba.below and cbGap or 0)
+        local bmax = auraMax(cfg, plB)
         for index = 1, 40 do
-            local name, icon, count, _, spellID, _, duration, expires = scanAura(unit, index, "HELPFUL")
+            local name, icon, count, source, spellID, _, duration, expires = scanAura(unit, index, "HELPFUL")
             if name == nil then break end
             if name == false then
                 -- (WoW Forever: a buff the game hides; icon = its table)
-                if icon and not cfg.filterEnabled then
+                if icon and hiddenBuffShown(cfg, icon) then
                     pool = pool + 1
                     local b = getAuraIcon(frame, pool)
                     showHiddenAura(b, unit, icon)
                     if b.swipe then hdAura(b, false, nil, nil, nil) end
                     placeAura(frame, b, ba, n, perRow, step, fcfg.buffX or 0, oy)
                     n = n + 1
-                    if n >= cfg.max then break end
+                    if n >= bmax then break end
                 end
-            elseif buffShown(cfg, name, spellID) then
+            elseif buffShown(cfg, name, spellID, source, count, duration, expires) then
                 pool = pool + 1
                 local b = getAuraIcon(frame, pool)
                 b.icon:SetTexture(icon)
@@ -2650,7 +2726,7 @@ function ns.UpdateAuras(frame, updateInfo)
                 if b.swipe then hdAura(b, false, nil, duration, expires) end
                 placeAura(frame, b, ba, n, perRow, step, fcfg.buffX or 0, oy)
                 n = n + 1
-                if n >= cfg.max then break end
+                if n >= bmax then break end
             end
         end
     end
@@ -2668,6 +2744,8 @@ local NO_AURAS = {}
 function ns.PaintAuras(frame, debuffs, buffs, friendly)
     if not frame.auraIcons then return end
     local cfg, fcfg = ns.db.auras, frame.cfg or {}
+    setPlaces(frame)
+    afCtx.sample = true     -- (made-up auras: not for the "seen lately" list)
     debuffs, buffs = debuffs or NO_AURAS, buffs or NO_AURAS
     local dispels = playerDispels or PREVIEW_DISPELS
     local found
@@ -2686,8 +2764,9 @@ function ns.PaintAuras(frame, debuffs, buffs, friendly)
         local function row(list, a, want, ox, oy, test, block)
             if not want then return end
             local n = 0
+            local lim = auraMax(cfg, block == "debuffs" and plD or plB)
             for _, e in ipairs(list) do
-                if n >= cfg.max then break end
+                if n >= lim then break end
                 if test(e) then
                     pool = pool + 1
                     local b = getAuraIcon(frame, pool)
@@ -2706,9 +2785,9 @@ function ns.PaintAuras(frame, debuffs, buffs, friendly)
             end
         end
         row(debuffs, da, fcfg.showDebuffs, fcfg.debuffX or 0, (fcfg.debuffY or 0) - (da.below and cbGap or 0),
-            function(e) return debuffShown(cfg, e.name, e.spellID, e.source, e.dispelType, dispels) end, "debuffs")
+            function(e) return debuffShown(cfg, e.name, e.spellID, e.source, e.dispelType, dispels, e.count, e.duration) end, "debuffs")
         row(buffs, ba, fcfg.showBuffs, fcfg.buffX or 0, (fcfg.buffY or 0) - (ba.below and cbGap or 0),
-            function(e) return buffShown(cfg, e.name, e.spellID) end, "buffs")
+            function(e) return buffShown(cfg, e.name, e.spellID, e.source, e.count, e.duration) end, "buffs")
     end
     for j = pool + 1, #frame.auraIcons do frame.auraIcons[j]:Hide() end
 end
@@ -3127,4 +3206,97 @@ function ns.UpdateAll(frame)
     -- reassigned constantly as the roster shifts.
     ns.UpdateHealerDot(frame)
     if frame.isGroupUnit and ns._matchApplied then ns.GroupBorder(frame) end
+end
+
+-- ============================================================
+-- THE AURA FILTER'S TWO PLACES (2026-11-10)
+-- ============================================================
+-- What the rows had of their own becomes each filter's start, once:
+--   only the listed ones (filterEnabled)  -> Nothing + the list as Always
+--   only what I can remove                -> Dispellable
+--   only my debuffs                       -> Mine only (or Only mine, with
+--                                            one of the two above)
+--   none of them                          -> Everything
+--   the never-show lists                  -> Never show
+--   the shared icon limit                 -> Most icons
+-- (One mix has no twin: "only the listed ones" together with "only what I
+-- can remove" - the list wins.)
+do
+    local AF = AFilter()
+    if AF then
+        local function Take(dst, list)
+            if type(list) ~= "table" then return end
+            for _, e in ipairs(list) do
+                if e.id then
+                    local n = e.name
+                    if (not n) and GetSpellInfo then local ok, sn = pcall(GetSpellInfo, e.id) n = ok and sn or nil end
+                    dst["#" .. tostring(e.id)] = (type(n) == "string" and n) or ("Spell " .. tostring(e.id))
+                elseif e.name then
+                    dst[tostring(e.name):lower()] = e.label or e.name
+                end
+            end
+        end
+        local function Redraw()
+            for f in pairs(ns.unitButtons or {}) do
+                if f.auraIcons then pcall(ns.UpdateAuras, f) end
+            end
+        end
+        AF.Register("uf_debuffs", {
+            label = "Unit frames: debuffs", kind = "debuff", preset = "all", max = 8,
+            noSort = true, noBoss = true, refresh = Redraw,
+            migrate = function(c)
+                local ac = ns.db and ns.db.auras
+                if type(ac) ~= "table" then return end
+                if ac.filterEnabled then
+                    c.preset = "none"
+                    Take(c.always, ac.debuffList)
+                    c.adv.onlyMine = ac.onlyMine and true or false
+                elseif ac.dispellableOnly then
+                    c.preset = "dispel"
+                    c.adv.onlyMine = ac.onlyMine and true or false
+                elseif ac.onlyMine then
+                    c.preset = "mine"
+                else
+                    c.preset = "all"
+                end
+                Take(c.never, ac.hideDebuffList)
+                if tonumber(ac.max) then c.adv.max = tonumber(ac.max) end
+            end,
+        })
+        AF.Register("uf_buffs", {
+            label = "Unit frames: buffs", kind = "buff", preset = "all", max = 8,
+            noSort = true, noBoss = true, refresh = Redraw,
+            migrate = function(c)
+                local ac = ns.db and ns.db.auras
+                if type(ac) ~= "table" then return end
+                if ac.filterEnabled then
+                    c.preset = "none"
+                    Take(c.always, ac.buffList)
+                else
+                    c.preset = "all"
+                end
+                Take(c.never, ac.hideBuffList)
+                if tonumber(ac.max) then c.adv.max = tonumber(ac.max) end
+            end,
+        })
+        -- the group pair: each starts as a copy of the shared one, so
+        -- switching it on changes nothing until it is set up
+        local function From(src)
+            return function(c)
+                local o = AF.Get(src)
+                c.preset = o.preset
+                for k, v in pairs(o.always) do c.always[k] = v end
+                for k, v in pairs(o.never) do c.never[k] = v end
+                for k, v in pairs(o.adv) do c.adv[k] = v end
+            end
+        end
+        AF.Register("uf_group_debuffs", {
+            label = "Party and raid frames: debuffs", kind = "debuff", preset = "all", max = 8,
+            noSort = true, noBoss = true, refresh = Redraw, migrate = From("uf_debuffs"),
+        })
+        AF.Register("uf_group_buffs", {
+            label = "Party and raid frames: buffs", kind = "buff", preset = "all", max = 8,
+            noSort = true, noBoss = true, refresh = Redraw, migrate = From("uf_buffs"),
+        })
+    end
 end

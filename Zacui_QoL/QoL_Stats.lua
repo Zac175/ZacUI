@@ -354,6 +354,10 @@ function ST.Apply()
     ev:RegisterEvent("PLAYER_REGEN_DISABLED")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    -- (2026-11-10) switched on = there is a frame, even while nothing
+    -- calls for it: Edit Mode places what exists and reads a missing
+    -- frame as "switched off".
+    if not block then Block() block:Hide() end
     ST.Update()
 end
 

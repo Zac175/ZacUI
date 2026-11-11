@@ -106,6 +106,13 @@ local function DB()
               locked = true, clickthrough = false, segment = 0,
               lastMeterDisplay = "damage_done" },
         }
+        -- (2026-11-10) an install made from now on: the threat window,
+        -- when it is switched on, opens beside the damage window instead
+        -- of on Blizzard's action bars at the bottom of the screen
+        if ns.NewDefaults and ns.NewDefaults() then
+            local t = d.windows[1]
+            t.point, t.x, t.y = "BOTTOMRIGHT", -240, 124
+        end
         d.threat = {
             updateSpeed = 1, absoluteMode = false, hidePullBar = false,
             onlyMyGroup = false, showPartyPets = false,
@@ -288,6 +295,7 @@ local LOOK = {
     showIcons = false,                      -- (2026-11-03, Zac: "off by default")
     dmfIcon = true,                         -- the Darkmoon Faire mark after a name (2026-11-06)
     dmfOnlyBuffed = true,                   -- ...only while you have your world buffs on
+    dmfHideMine = true,                     -- ...and not while you have the fortune yourself (2026-11-09)
     barColorMode = "class",                 -- "class" | "custom"
     barColor = { r = 0.33, g = 0.6, b = 0.85, a = 1 },
     barAlpha = 1,
@@ -422,6 +430,10 @@ function Meter.DMFShowNow(d)
     if not dmfOn then return false end
     d = d or Look()
     if d.dmfIcon == false or not IsInRaid() then return false end
+    -- (2026-11-09, Zac: "the dmf icon should hide if i have dmf only show
+    -- if others have it and i dont") with the fortune on yourself there is
+    -- nobody to catch out: no marks, unless the switch is off
+    if d.dmfHideMine ~= false and Meter.meDMF then return false end
     if not worldBuffNights then return true end
     return d.dmfOnlyBuffed == false or Meter.meBuffed
 end
@@ -432,16 +444,19 @@ local function DMFScan()
     local d = Look()
     if d.dmfIcon == false or not IsInRaid() then
         -- nothing read outside a raid; what was there goes
-        if next(Meter.DMF) or Meter.meBuffed then
+        if next(Meter.DMF) or Meter.meBuffed or Meter.meDMF then
             wipe(Meter.DMF)
             Meter.meBuffed = false
+            Meter.meDMF = false
             if Meter.DirtyAll then Meter.DirtyAll() end
         end
         return
     end
     local changed = false
-    local _, world = HasDMF("player", true)
+    local mine, world = HasDMF("player", true)
     if world ~= Meter.meBuffed then Meter.meBuffed = world changed = true end
+    mine = mine and true or false
+    if mine ~= (Meter.meDMF or false) then Meter.meDMF = mine changed = true end
     for i = 1, 40 do
         local u = "raid" .. i
         local g = UnitGUID(u)

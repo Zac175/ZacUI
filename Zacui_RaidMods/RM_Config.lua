@@ -789,7 +789,22 @@ local function General(L)
         replay = ReplayPreview,
         -- (no "top part": every sample is shown whole, scaled to fit - Zac
         -- 2026-11-04 "some are cut off")
-        modes = PREVIEW_MODES,
+        -- (a mode with no piece on this game version - TBC's raids have no
+        -- circles - is not offered: it would be an empty strip)
+        modes = (function()
+            local out = {}
+            for _, m in ipairs(PREVIEW_MODES) do
+                local mp = MODE_PIECES[m.id]
+                local have = mp == nil
+                if mp then
+                    for _, p in ipairs(mp.pieces or {}) do
+                        if RM.units and RM.units[p.id] then have = true break end
+                    end
+                end
+                if have then out[#out + 1] = m end
+            end
+            return out
+        end)(),
         modesLabel = "Show",
     })
     PreviewCard(L)

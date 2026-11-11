@@ -71,7 +71,7 @@ BR.DEFAULTS = {
         countFont = { size = 16, outline = "OUTLINE", shadow = true },
         namesFont = { size = 12, outline = "OUTLINE", shadow = true },
         colors = {
-            background = C(0.08, 0.08, 0.08, 0.9),
+            background = C(0.110, 0.110, 0.110, 0.9),
             normalBorder = C(0, 0, 0, 1),
             missingBorder = C(1, 0.3, 0.3, 1),
             missingText = C(1, 0.3, 0.3, 1),
@@ -89,9 +89,9 @@ BR.DEFAULTS = {
         rowFont = { size = 11, outline = "OUTLINE", shadow = true },
         titleFont = { size = 11, outline = "OUTLINE", shadow = true },
         colors = {
-            background = C(0.06, 0.06, 0.06, 0.95),
+            background = C(0.100, 0.100, 0.100, 0.95),
             border = C(0, 0, 0, 1),
-            headerBackground = C(0.10, 0.10, 0.10, 1),
+            headerBackground = C(0.140, 0.140, 0.140, 1),
             rowBackground = C(1, 1, 1, 0.03),
             apGood = C(0.3, 1, 0.3, 1),
             apWarning = C(1, 0.8, 0.1, 1),
@@ -322,9 +322,17 @@ function BR.InRaidInstance(filter)
     if not IsInInstance then return false end
     local inside, kind = IsInInstance()
     if not (inside and kind == "raid") then return false end
-    if HasFilter(filter) then
-        local name = GetInstanceInfo and GetInstanceInfo() or nil
-        return (name and filter[name]) and true or false
+    -- (a game version with no raid list has no ticks to untick: every raid)
+    if HasFilter(filter) and D.Raids and #D.Raids() > 0 then
+        if not GetInstanceInfo then return false end
+        local name, _, _, _, _, _, _, id = GetInstanceInfo()
+        if name and filter[name] then return true end
+        if id then
+            for n, on in pairs(filter) do
+                if on and D.RAID_IDS[n] == id then return true end
+            end
+        end
+        return false
     end
     return true
 end
@@ -768,6 +776,7 @@ if ns.Roster and ns.Roster.On then ns.Roster.On("buffRem", function() BR.Kick() 
 if ns.OnSettingsChanged and ns.Coalesce then
     local soon = ns.Coalesce(function()
         if BR.Restyle then BR.Restyle() end
+        if BR.EnsureFrames then BR.EnsureFrames() end
         RunAll()
     end)
     ns.OnSettingsChanged(function()
@@ -781,5 +790,27 @@ local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
-    C_Timer.After(1, function() BR.Kick(true) end)
+    C_Timer.After(1, function()
+        BR.Kick(true)
+        BR.EnsureFrames()
+    end)
 end)
+
+-- (2026-11-10, Zac: "set to load in a dungeon or raid, but standing in
+-- Stormwind the setting is off ... so people can configure stuff") The
+-- icon row and the tracker were only made the first time they had
+-- something to show - so with "Show in: raids" there was nothing to move
+-- in a city and Edit Mode called them switched off. While the reminders
+-- are on, both exist (hidden) from login, wherever you are: Edit Mode and
+-- the settings page can place and show them anywhere.
+function BR.EnsureFrames()
+    if not BR.On() or (InCombatLockdown and InCombatLockdown()) then return end
+    local mine = BR.MyBuffs()
+    if #mine == 0 then return end
+    if BR.IconUI and BR.IconUI.Holder then pcall(BR.IconUI.Holder) end
+    if BR.TrackerUI and BR.TrackerUI.Build then
+        for _, def in ipairs(mine) do
+            if BR.TrackerOn(def.key) then pcall(BR.TrackerUI.Build) break end
+        end
+    end
+end

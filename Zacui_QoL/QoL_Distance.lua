@@ -92,11 +92,16 @@ function DI.Range_(unit)
 end
 
 -- the text and its colour key for a bracket
+function DI.HasDeadZone()
+    local fl = ns.Flavor and ns.Flavor()
+    return fl ~= "tbc" and fl ~= "retail"
+end
 function DI.Text(lo, hi)
     if lo == nil then return "?", "far" end
     local t = hi and string.format("%d-%d", lo, hi) or string.format("%d+", lo)
     local key
-    local hunter = UnitClass and select(2, UnitClass("player")) == "HUNTER"
+    -- (2026-11-09) the dead zone went in TBC 2.3 and Retail has no minimum range
+    local hunter = DI.HasDeadZone() and UnitClass and select(2, UnitClass("player")) == "HUNTER"
     if hi and hi <= DI.MELEE then key = "melee"
     elseif hunter and hi and lo >= 5 and hi <= 8 then key = "dead"
     elseif hi and hi <= DI.Range() then key = "range"
@@ -193,6 +198,10 @@ function DI.Apply()
     ev:RegisterEvent("PLAYER_REGEN_DISABLED")
     ev:RegisterEvent("PLAYER_REGEN_ENABLED")
     ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    -- (2026-11-10) switched on = there is a frame, even while nothing
+    -- calls for it: Edit Mode places what exists and reads a missing
+    -- frame as "switched off".
+    if not frame then Frame() Style() frame:Hide() end
     DI.Update()
 end
 function DI.Registered(e) return ev ~= nil and ev:IsEventRegistered(e) or false end
@@ -255,9 +264,11 @@ AddTab("qol", "onscreen", "On screen", function(L)
         format = function(v) return v .. " yd" end,
         onChange = function(v) d.range = (v ~= DI.RANGE) and v or nil end })
     for _, k in ipairs({ { "melee", "In melee reach" }, { "dead", "Dead zone (hunters)" }, { "range", "In range" }, { "far", "Too far" } }) do
+      if k[1] ~= "dead" or DI.HasDeadZone() then
         kids[#kids + 1] = UI.ColorPicker(L.current, { label = k[2],
             get = function() local r, g, b = DI.Color(k[1]) return r, g, b, 1 end,
             set = function(r, g, b) d["c_" .. k[1]] = { r = r, g = g, b = b, a = 1 } Live() end })
+      end
     end
     kids[#kids + 1] = UI.Button(L.current, "Test", { width = 80,
         tooltip = "Shows the text with a made-up distance for a few seconds.", onClick = function() DI.Test() end })

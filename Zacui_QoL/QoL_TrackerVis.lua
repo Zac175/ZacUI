@@ -178,7 +178,7 @@ AddTab("qol", "quests", "Quests", function(L)
     end, { tooltip = "The quest tracker goes away in the places ticked below and comes back as you leave them." })
     L:Row(on, 17)
     local kids = {}
-    for _, k in ipairs({ { "raid", "In raids" }, { "dungeon", "In dungeons" }, { "pvp", "In battlegrounds and arenas" },
+    for _, k in ipairs({ { "raid", "In raids" }, { "dungeon", "In dungeons" }, { "pvp", (ns.Flavor and ns.Flavor() == "era") and "In battlegrounds" or "In battlegrounds and arenas" },
         { "combat", "In any fight" } }) do
         kids[#kids + 1] = UI.Checkbox(L.current, k[2], TV.Rule(k[1]), function(v)
             if k[1] == "raid" then if v then d.raid = nil else d.raid = false end else d[k[1]] = v and true or nil end

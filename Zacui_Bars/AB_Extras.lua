@@ -382,6 +382,32 @@ local function ApplyBagBar(profile)
         bagbar.buttons[i] = b
         -- keepNormal: on a bag slot the NormalTexture IS the bag art
         SkinSecureIcon(b, { keepNormal = true })
+        -- (2026-11-10, Zac on Retail: "black border around the thing i
+        -- hovered") Retail rounds a bag slot's picture with a circle mask;
+        -- inside ZacUI's square slot that left black corners all round.
+        -- Under ZacUI's own look the mask comes off and the picture fills
+        -- the square, cropped like every icon. Region calls only.
+        if not (AB.Kit and AB.Kit() ~= "zacui") then
+            local mask = rawget(b, "CircleMask")
+            for _, key in ipairs({ "icon", "Icon", "IconTexture" }) do
+                local ic = b[key]
+                if type(ic) == "table" and ic.RemoveMaskTexture then
+                    if mask then pcall(ic.RemoveMaskTexture, ic, mask) end
+                    if ic.GetNumMaskTextures and ic.GetMaskTexture then
+                        local okN, nMask = pcall(ic.GetNumMaskTextures, ic)
+                        for k = (okN and type(nMask) == "number" and nMask or 0), 1, -1 do
+                            local okM, mt = pcall(ic.GetMaskTexture, ic, k)
+                            if okM and mt then pcall(ic.RemoveMaskTexture, ic, mt) end
+                        end
+                    end
+                    if ic.ClearAllPoints and ic.GetTexture and ic:GetTexture() then
+                        ic:ClearAllPoints()
+                        ic:SetPoint("TOPLEFT", b, "TOPLEFT", 1, -1)
+                        ic:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -1, 1)
+                    end
+                end
+            end
+        end
     end
     SmallBarCommon(bagbar, cfg, bagbar.buttons, 37, #bagbar.buttons, cfg.initial)
     if KeyRingButton and cfg.keyring and not cfg.onebag then

@@ -70,7 +70,7 @@ local NAME_Y, TAG_GAP, STAGE_GAP, DESC_GAP, BADGE_GAP = -16, -3, -12, -10, 6
 local DESC_W = CARD_W - 28
 -- the card's own colours (fixed, as the reference's are: a warm near-black
 -- card, a hairline of white at 14%, a darker stage)
-local CARD_BG = { 0.103, 0.095, 0.088, 1 }
+local CARD_BG = { 0.150, 0.150, 0.150, 1 }
 local CARD_EDGE = { 1, 1, 1, 0.14 }
 local STAGE_BG = { 0.051, 0.040, 0.030, 1 }
 local STAGE_EDGE = { 1, 1, 1, 0.08 }

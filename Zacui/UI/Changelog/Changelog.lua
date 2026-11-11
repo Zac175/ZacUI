@@ -175,7 +175,7 @@ local function Fill()
     local x, y = pad - 1, -12
     UI.SettingsBuild(function()
         for _, v in ipairs(Changelog.Visible(showAll)) do
-            local meta = UI.PopupText(child, "head", { text = MetaText(v), justify = "RIGHT" })
+            local meta = UI.PopupText(child, "hint", { text = MetaText(v), justify = "RIGHT" })
             meta:SetPoint("TOPRIGHT", child, "TOPLEFT", x + width, y)
             -- the title wraps short of the version and date (and the tag)
             local room = width - math.ceil(meta:GetStringWidth() or 0) - (IsNew(v) and 52 or 16)
@@ -201,8 +201,15 @@ local function Fill()
             rule:SetPoint("TOPLEFT", child, "TOPLEFT", x, y - 20)
             rule:SetWidth(width)
             rule:SetVertexColor(1, 1, 1, S.SECTION_RULE_A)
-            y = DrawSections(child, v, x, y - 30, width)
-            y = y - 10
+            -- (2026-11-09, Zac: "i like readychecks changelog more") the
+            -- sections in Readycheck's compact type: small coloured heads,
+            -- small indented lines, close together
+            local wasSet = UI._zSettings
+            UI._zSettings = false
+            local okD, ny = pcall(DrawSections, child, v, x + 2, y - 28, width - 4)
+            UI._zSettings = wasSet
+            if not okD then error(ny, 0) end
+            y = ny - 6
         end
     end)
     local h = -y + 6
@@ -210,7 +217,8 @@ local function Fill()
     f.scroll:Recalculate(h)
     f.scroll.bar:SetValue(0)
     f.scroll:SetVerticalScroll(0)
-    f:SetTitle(showAll and "Changelog" or "What's new", "ZacUI v" .. tostring(Changelog.Current()))
+    f:SetTitle(showAll and "Changelog" or "What's New", "")
+    if f.verText then f.verText:SetText("v" .. tostring(Changelog.Current())) end
     f.showAll:SetChecked(showAll)
 end
 
@@ -218,9 +226,16 @@ end
 -- window's look - the title and the version under it, the close box, the
 -- list, and a foot with "Show all versions" and Got it.
 local function BuildPopup()
-    local f = UI.Popup("ZacUIChangelogFrame", 560, 380, "What's new", { desc = " ", rule = true, size = "small" })
+    -- (one-line head, as Readycheck's: the title left, the version by the X)
+    local f = UI.Popup("ZacUIChangelogFrame", 520, 380, "What's New", { rule = true, size = "small" })
     f:SetPoint("CENTER", 0, 40)
-    f.version = f.descText
+    f.verText = UI.PopupText(f, "hint", { text = "", justify = "RIGHT" })
+    if f.closeButton then
+        f.verText:SetPoint("RIGHT", f.closeButton, "LEFT", -10, 0)
+    else
+        f.verText:SetPoint("TOPRIGHT", f, "TOPRIGHT", -44, -14)
+    end
+    f.version = f.verText
 
     local got = f:SetButtons({ { text = "Got it", kind = "primary", onClick = function() UI.CloseWindow(f) end } })[1]
     got:SetActive(true)

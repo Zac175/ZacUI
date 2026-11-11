@@ -38,12 +38,17 @@ local function GetAura(unit, index, filter)
             if hiddenClient then return false, a end
             return
         end
-        return a.icon, a.applications, a.duration, a.expirationTime, a.name
+        -- (also: is it yours, its spell id, its dispel type - for the filter)
+        local mine = a.isFromPlayerOrPlayerPet
+        if mine == nil then mine = (a.sourceUnit == "player" or a.sourceUnit == "pet") end
+        return a.icon, a.applications, a.duration, a.expirationTime, a.name, mine and true or false,
+            a.spellId, a.dispelName
     elseif UnitAura then
-        local name, icon, count, _, duration, expirationTime =
+        local name, icon, count, dispel, duration, expirationTime, caster, _, _, spellId =
             UnitAura(unit, index, filter)
         if not name then return end
-        return icon, count, duration, expirationTime, name
+        return icon, count, duration, expirationTime, name, (caster == "player" or caster == "pet"),
+            spellId, dispel
     end
 end
 
@@ -56,6 +61,24 @@ end
 local function OwnedByGroups(name)
     local D = NP.Debuffs
     return name ~= nil and D ~= nil and D.Shows ~= nil and D.Shows(name)
+end
+
+-- Debuffs this strip never shows (d.auras.hideNames: names with commas,
+-- any case; nil or empty = none, as always). The set is rebuilt only when
+-- the text changes. (WoW Forever: a debuff the game hides in combat has no
+-- name to match and still shows.)
+local hideSrc, hideSet
+local function NeverShown(d, name)
+    local src = d.auras.hideNames
+    if not src or src == "" then return false end
+    if src ~= hideSrc then
+        hideSrc, hideSet = src, {}
+        for n in tostring(src):gmatch("[^,\n]+") do
+            n = n:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+            if n ~= "" then hideSet[n] = true end
+        end
+    end
+    return name ~= nil and hideSet[name:lower()] or false
 end
 
 -- The HUD's BT/WW row (HUD > Hesitation) standing over this plate right
@@ -173,51 +196,90 @@ function NP.UpdateAuras(f)
         return
     end
 
-    local filter = d.auras.mineOnly and "HARMFUL|PLAYER" or "HARMFUL"
-    local shown = 0
-    local index = 1
-    while shown < d.auras.max do
-        local icon, count, duration, expirationTime, aname =
-            GetAura(f.unit, index, filter)
-        if icon == nil or (hiddenClient and index > 40) then break end
+    -- (2026-11-10) THE FILTER (Core_AuraFilter, place "np_strip"): every
+    -- debuff on the unit is read, the filter says which show and which
+    -- are pinned, and the row is drawn from what is left, in its order.
+    -- "Mine only", the icon limit and the never-show names this row had
+    -- before are that filter's preset, limit and Never list now.
+    local AF = ns.AuraFilter
+    local list = f._afList
+    if not list then list = {} f._afList = list end
+    local pool = f._afPool
+    if not pool then pool = {} f._afPool = pool end
+    for i = #list, 1, -1 do list[i] = nil end
+    local ctx = f._afCtx
+    if not ctx then ctx = {} f._afCtx = ctx end
+    ctx.inCombat = UnitAffectingCombat and UnitAffectingCombat("player") and true or false
+    local cls = UnitClassification and UnitClassification(f.unit)
+    ctx.boss = (cls == "worldboss" or cls == "elite" or cls == "rareelite") and true or false
+    local index, used = 1, 0
+    -- (only yours can show: ask the game for yours alone, as this row did)
+    local mineQuery = (AF and AF.OnlyMine("np_strip")) or (not AF and d.auras.mineOnly)
+    local query = mineQuery and "HARMFUL|PLAYER" or "HARMFUL"
+    while index <= 40 do
+        local icon, count, duration, expirationTime, aname, mine, spellId, dispel =
+            GetAura(f.unit, index, query)
+        if icon == nil then break end
+        if mineQuery then mine = true end
         index = index + 1
-
-        if icon ~= false and OwnedByGroups(aname) then
-            -- (drawn by the debuff groups: see OwnedByGroups)
-        elseif icon == false then
+        used = used + 1
+        local a = pool[used]
+        if not a then a = {} pool[used] = a end
+        if icon == false then
             -- (WoW Forever: hidden details; `count` holds the aura's table)
-            if count then
-                shown = shown + 1
-                local btn = AcquireIcon(holder, shown)
-                pcall(btn.tex.SetTexture, btn.tex, count.icon)
-                if not ns.ShowAuraCount(btn.count, f.unit, count) then btn.count:SetText("") end
-                btn._cdStart, btn._cdDur = nil, nil
-                if ns.ShowAuraTimer(btn.cd, f.unit, count) then btn.cd:Show() else btn.cd:Hide() end
-                btn:Show()
-            end
+            a.hidden, a.raw = true, count
+            a.name, a.spellId, a.duration, a.expirationTime, a.count, a.dispel = nil, nil, nil, nil, nil, nil
+            a.mine = mineQuery or (count and ns.AuraIsMine and ns.AuraIsMine(count)) or nil
+            a.icon = nil
         else
+            a.hidden, a.raw = nil, nil
+            a.icon, a.count, a.duration, a.expirationTime = icon, count, duration, expirationTime
+            a.name, a.mine, a.spellId, a.dispel = aname, mine and true or false, spellId, dispel
+        end
+        if (a.hidden and a.raw) or (not a.hidden and not OwnedByGroups(aname)) then
+            local show, pinned = true, false
+            if AF then show, pinned = AF.Pass("np_strip", a, ctx) end
+            if show then
+                a.pinned = pinned
+                list[#list + 1] = a
+            end
+        end
+    end
+    if AF then AF.Arrange("np_strip", list)
+    else for i = #list, (d.auras.max or 6) + 1, -1 do list[i] = nil end end
+
+    local shown = 0
+    for _, a in ipairs(list) do
         shown = shown + 1
-        -- This runs per icon on every UNIT_AURA of the plate, which in a
-        -- pull is many times a second. Size and font are set once, at birth
-        -- and in LayoutAuras (any settings change re-lays out), not here.
-        -- The swipe is only restarted when its timing actually changed;
-        -- SetCooldown with the same pair would restart the animation.
         local btn = AcquireIcon(holder, shown)
-        btn.tex:SetTexture(icon)
-        btn.count:SetText(count and count > 1 and count or "")
-        if duration and duration > 0 and expirationTime then
-            local start = expirationTime - duration
-            if btn._cdStart ~= start or btn._cdDur ~= duration then
-                btn._cdStart, btn._cdDur = start, duration
-                btn.cd:SetCooldown(start, duration)
-            end
-            btn.cd:Show()
-        else
+        if a.hidden then
+            local raw = a.raw
+            pcall(btn.tex.SetTexture, btn.tex, raw.icon)
+            if not ns.ShowAuraCount(btn.count, f.unit, raw) then btn.count:SetText("") end
             btn._cdStart, btn._cdDur = nil, nil
-            btn.cd:Hide()
+            if ns.ShowAuraTimer(btn.cd, f.unit, raw) then btn.cd:Show() else btn.cd:Hide() end
+        else
+            -- This runs per icon on every UNIT_AURA of the plate, which in a
+            -- pull is many times a second. Size and font are set once, at birth
+            -- and in LayoutAuras (any settings change re-lays out), not here.
+            -- The swipe is only restarted when its timing actually changed;
+            -- SetCooldown with the same pair would restart the animation.
+            btn.tex:SetTexture(a.icon)
+            btn.count:SetText(a.count and a.count > 1 and a.count or "")
+            local duration, expirationTime = a.duration, a.expirationTime
+            if duration and duration > 0 and expirationTime then
+                local start = expirationTime - duration
+                if btn._cdStart ~= start or btn._cdDur ~= duration then
+                    btn._cdStart, btn._cdDur = start, duration
+                    btn.cd:SetCooldown(start, duration)
+                end
+                btn.cd:Show()
+            else
+                btn._cdStart, btn._cdDur = nil, nil
+                btn.cd:Hide()
+            end
         end
         btn:Show()
-        end
     end
 
     for i = shown + 1, #holder.icons do
@@ -259,4 +321,28 @@ function NP.PlaceAuraRow(f, shown)
         btn:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT",
             (i - 1) * (w + gap), 0)
     end
+end
+
+-- ============================================================
+-- THE FILTER'S PLACE
+-- ============================================================
+-- What this row had of its own before the filter (Mine only, Most icons,
+-- the never-show names) becomes the filter's preset, limit and Never list
+-- the first time it is read, so the row shows what it showed.
+if ns.AuraFilter then
+    ns.AuraFilter.Register("np_strip", {
+        label = "Nameplates: simple debuff row", kind = "debuff", preset = "mine", max = 6,
+        refresh = function() if NP.RefreshAll then NP.RefreshAll() elseif NP.Refresh then NP.Refresh() end end,
+        migrate = function(c)
+            local ok, d = pcall(DB)
+            local a = ok and type(d) == "table" and d.auras
+            if type(a) ~= "table" then return end
+            c.preset = (a.mineOnly == false) and "all" or "mine"
+            if tonumber(a.max) then c.adv.max = tonumber(a.max) end
+            for n in tostring(a.hideNames or ""):gmatch("[^,\n]+") do
+                n = n:gsub("^%s+", ""):gsub("%s+$", "")
+                if n ~= "" then c.never[n:lower()] = n end
+            end
+        end,
+    })
 end

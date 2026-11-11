@@ -235,6 +235,7 @@ function Search.Refresh(itemId, layout, entries)
         end
     end
     index[itemId] = keep
+    if Search.SavePage then Search.SavePage(itemId) end
 end
 
 -- ============================================================
@@ -289,21 +290,130 @@ end
 
 function Search.IsIndexing() return running end
 
+-- ============================================================
+-- THE INDEX IS KEPT BETWEEN SESSIONS (2026-11-10)
+-- Zac: "typing in the search box omega lags my game". Reading every page
+-- unseen is the expensive part (each one is a full page build, some two
+-- thousand frames in all that the client never gives back), and it ran
+-- again on the first search of every session, one page a frame, right
+-- under the typing. Now:
+--   * what was read is saved (ZacUIDB.searchIndex) with a stamp of what
+--     it was read on: the version, the game version, the language and
+--     which modules are switched on. With the same stamp the next
+--     session loads it and builds nothing; a new version (or a module
+--     switched) reads again, once.
+--   * a page you open is re-read from the real page as before
+--     (Search.Refresh) and the saved copy follows.
+--   * when pages do have to be read, the reading waits while keys are
+--     arriving (TYPE_PAUSE after the last one), so typing stays smooth
+--     and the results fill in a moment later.
+-- Not a setting: no profile carries it, and it is safe to delete.
+-- ============================================================
+local CACHE_FORMAT = 1
+local TYPE_PAUSE = 0.4
+local lastKey = -100
+local cacheLoaded = false
+
+function Search.NoteKey() lastKey = GetTime and GetTime() or 0 end
+
+local function CacheSig()
+    local parts = { "f" .. CACHE_FORMAT, tostring(_G.ZacUIFrame and _G.ZacUIFrame.VERSION or "?"),
+        tostring(ns.Flavor and ns.Flavor() or "?"), tostring(GetLocale and GetLocale() or "?") }
+    local mods = type(ZacUIDB) == "table" and type(ZacUIDB.modules) == "table" and ZacUIDB.modules or {}
+    local off = {}
+    for k, v in pairs(mods) do if v == false then off[#off + 1] = tostring(k) end end
+    table.sort(off)
+    parts[#parts + 1] = table.concat(off, ",")
+    return table.concat(parts, "|")
+end
+
+-- an entry without what can be worked out again (hay, key, the page id)
+local function Slim(list)
+    local out = {}
+    for i, e in ipairs(list) do
+        local c = {}
+        for k, v in pairs(e) do
+            if k ~= "hay" and k ~= "key" and k ~= "item" and k ~= "widget" then c[k] = v end
+        end
+        out[i] = c
+    end
+    return out
+end
+local function Fatten(id, saved)
+    local list = {}
+    for i, c in ipairs(saved) do
+        local e = {}
+        for k, v in pairs(c) do e[k] = v end
+        e.item = id
+        e.hay = ((e.label or "") .. " " .. (e.text or "")):lower()
+        e.key = (e.kind or "") .. "\1" .. (e.label or "") .. "\1" .. (e.card or "")
+            .. "\1" .. (e.text or "")
+        list[i] = e
+    end
+    return list
+end
+
+local function Cache(create)
+    if type(ZacUIDB) ~= "table" then return nil end
+    local c = ZacUIDB.searchIndex
+    local sig = CacheSig()
+    if type(c) ~= "table" or c.sig ~= sig or type(c.pages) ~= "table" then
+        if not create then return nil end
+        c = { sig = sig, pages = {} }
+        ZacUIDB.searchIndex = c
+    end
+    return c
+end
+local function SavePage(id)
+    if not done[id] then return end
+    local c = Cache(true)
+    -- (a page with nothing to find is saved empty, so it is not read again)
+    if c then c.pages[id] = Slim(index[id] or {}) end
+end
+function Search.ForgetSaved()
+    if type(ZacUIDB) == "table" then ZacUIDB.searchIndex = nil end
+end
+function Search.SavedSig() local c = Cache(false) return c and c.sig or nil end
+Search.SavePage = SavePage
+
 -- Forget a page's entries, so the next search reads it again (a part
 -- that adds a tab to a page after the page was indexed, see
 -- ns.AddPageTab; a whole new menu row is picked up on its own).
 function Search.Invalidate(itemId)
     if itemId == nil then
         for k in pairs(done) do done[k] = nil end
+        if Search.ForgetSaved then Search.ForgetSaved() end
         return
     end
     done[itemId] = nil
+    local c = type(ZacUIDB) == "table" and ZacUIDB.searchIndex
+    if type(c) == "table" and type(c.pages) == "table" then c.pages[itemId] = nil end
 end
 
 -- Start (once per session) the background build. onDone runs when every
 -- page is in, so the window can redraw results that were partial.
+-- once per session: the saved pages for this stamp come in
+local function LoadCache()
+    if cacheLoaded then return end
+    cacheLoaded = true
+    local c = Cache(false)
+    if not c then return end
+    EachItem(function(item, parent)
+        local saved = c.pages[item.id]
+        if type(saved) == "table" and item.page and not done[item.id] and not SKIP[item.id] and not Off(item)
+            and not (parent and Off(parent)) then
+            local okF, list = pcall(Fatten, item.id, saved)
+            if okF and type(list) == "table" then
+                index[item.id] = list
+                done[item.id] = true
+            end
+        end
+    end)
+end
+
 function Search.EnsureIndex(onDone)
     if running then return end
+    LoadCache()
     local todo = {}
     EachItem(function(item, parent)
         if item.page and not done[item.id] and not SKIP[item.id] and not Off(item)
@@ -315,6 +425,11 @@ function Search.EnsureIndex(onDone)
     running = true
     local i = 0
     local function Step()
+        -- (keys are arriving: the reading waits, typing stays smooth)
+        if GetTime and (GetTime() - lastKey) < TYPE_PAUSE then
+            C_Timer.After(0.1, Step)
+            return
+        end
         i = i + 1
         local item = todo[i]
         if not item then
@@ -322,7 +437,10 @@ function Search.EnsureIndex(onDone)
             if onDone then pcall(onDone) end
             return
         end
-        if not done[item.id] then IndexOne(item) end
+        if not done[item.id] then
+            IndexOne(item)
+            SavePage(item.id)
+        end
         C_Timer.After(0, Step)
     end
     C_Timer.After(0, Step)
@@ -349,7 +467,7 @@ local COMMANDS = {
     { cmd = "/zacui line <Frame> <y>",      desc = "move a panel's header hairline" },
     { cmd = "/zacui status",      desc = "list every module and its state" },
     { cmd = "/zacui id",          desc = "identify the next frame you click (its name in chat)" },
-    { cmd = "/zacui flavor",      desc = "what runs on this game version (era, tbc, forever)" },
+    { cmd = "/zacui flavor",      desc = "what runs on this game version (era, tbc, forever, retail)" },
     { cmd = "/zacui version",     desc = "your version and the newest one seen in your guild and group" },
     { cmd = "/zacui reset",       desc = "back to shipped defaults", paste = true },
     { cmd = "/zui plate",         desc = "the sample nameplate with everything on", feature = "nameplates" },
@@ -553,6 +671,10 @@ function Search.Run(query)
             -- the word itself; the page's own name counts in full
             if not Score(pageName, nil, tokens) then score = math.floor(score / 2) end
             if pageName:find(phrase, 1, true) then score = score + 30 end
+            -- (2026-11-10) a page whose name BEGINS with what was typed
+            -- ("colour" -> Colours) is what was asked for, ahead of a
+            -- setting on some tab that happens to be called just that
+            if pageName:sub(1, #phrase) == phrase and pageName ~= phrase then score = score + 50 end
             -- the page whose name is the query is what was asked for
             if pageName == phrase then score = score + 60 end
             results[#results + 1] = { item = item.id, kind = "page", label = item.label,

@@ -47,6 +47,7 @@ D.REAGENTS = {
     [17029] = "Sacred Candle",
     [17021] = "Wild Berries",
     [17026] = "Wild Thornroot",
+    [22148] = "Wild Quillvine",
 }
 
 -- key, class, label, icon, ids (ranks), duration (s), reach, classes,
@@ -92,6 +93,14 @@ D.BUFFS = {
       group = { label = "Prayer of Shadow Protection", icon = "Interface\\Icons\\Spell_Holy_PrayerofShadowProtection",
                 ids = { 27683 }, duration = 1200, reagents = { 17029 } } },
 
+    -- Fear Ward: a dwarf priest's own spell on Classic Era (10 minutes),
+    -- every priest's from level 20 on TBC (3 minutes, set below). Shown
+    -- only to a priest who knows it.
+    { key = "fearward", class = "PRIEST", label = "Fear Ward",
+      icon = "Interface\\Icons\\Spell_Holy_Excorcism",
+      ids = { 6346 }, duration = 600,
+      reach = "chosen", tanks = true, on = false, threshold = 0 },
+
     { key = "motw", class = "DRUID", label = "Mark of the Wild",
       icon = "Interface\\Icons\\Spell_Nature_Regeneration",
       ids = { 1126, 5232, 6756, 5234, 8907, 9884, 9885 }, duration = 1800,
@@ -112,6 +121,79 @@ D.BUFFS = {
       -- Minor, Lesser, (plain), Greater, Major Soulstone
       item = { 5232, 16892, 16893, 16895, 16896 } },
 }
+-- (2026-11-10) TBC'S RANKS, added on a TBC client only (Classic Era's
+-- lists stay exactly as they were). Each id was checked by name against
+-- the TBC spell database: Battle Shout 8 (2048), Trueshot Aura 4 (27066),
+-- Arcane Intellect 6 (27126), Arcane Brilliance 2 (27127, Arcane Powder),
+-- Power Word: Fortitude 7 (25389), Prayer of Fortitude 3 (25392), Divine
+-- Spirit 5 (25312), Prayer of Spirit 2 (32999), Shadow Protection 4
+-- (25433), Prayer of Shadow Protection 2 (39374), Mark of the Wild 8
+-- (26990), Gift of the Wild 3 (26991, Wild Quillvine 22148), Thorns 7
+-- (26992). Buffs are found by name, so the ranks only matter for the icon,
+-- "do I know it" and which reagent the best group rank takes.
+-- Soulstone: the Master Soulstone (item 22116) and the buff it leaves
+-- (Soulstone Resurrection, 27239). Fear Ward lasts 3 minutes there.
+D.TBC_RANKS = {
+    battleshout = { ids = { 2048 } },
+    trueshot = { ids = { 27066 } },
+    intellect = { ids = { 27126 }, group = { 27127 }, reagents = { 17020 } },
+    fortitude = { ids = { 25389 }, group = { 25392 }, reagents = { 17029 } },
+    spirit = { ids = { 25312 }, group = { 32999 }, reagents = { 17029 } },
+    shadowprot = { ids = { 25433 }, group = { 39374 }, reagents = { 17029 } },
+    motw = { ids = { 26990 }, group = { 26991 }, reagents = { 22148 } },
+    thorns = { ids = { 26992 } },
+    soulstone = { ids = { 27239 }, item = { 22116 } },
+    fearward = { ids = {}, duration = 180 },
+}
+-- THE BUFFS ONLY TBC HAS, added on a TBC client only (ids checked by name
+-- against the TBC spell database).
+--   Commanding Shout (469, level 68): the warrior's other shout - 1080
+--   health for the party, 2 minutes. A warrior keeps one shout up, so it
+--   is off until chosen; it matters to everyone, not just melee.
+--   Earth Shield (974, 32593, 32594; a Restoration talent): on one
+--   person of the shaman's choosing, 10 minutes or 6 charges.
+-- after = the entry it follows in the list.
+D.TBC_BUFFS = {
+    { after = "battleshout", key = "commandingshout", class = "WARRIOR", label = "Commanding Shout",
+      icon = "Interface\\Icons\\Ability_Warrior_RallyingCry",
+      ids = { 469 }, duration = 120,
+      reach = "party", on = false, threshold = 0 },
+    { after = "thorns", key = "earthshield", class = "SHAMAN", label = "Earth Shield",
+      icon = "Interface\\Icons\\Spell_Nature_SkinofEarth",
+      ids = { 974, 32593, 32594 }, duration = 600,
+      reach = "chosen", tanks = true, on = false, threshold = 0 },
+}
+if ns.Flavor and ns.Flavor() == "tbc" then
+    for _, b in ipairs(D.BUFFS) do
+        local add = D.TBC_RANKS[b.key]
+        if add then
+            for _, id in ipairs(add.ids) do b.ids[#b.ids + 1] = id end
+            if add.duration then b.duration = add.duration end
+            if add.item and b.item then
+                for _, id in ipairs(add.item) do b.item[#b.item + 1] = id end
+            end
+            if add.group and b.group then
+                -- (a reagent for every rank already listed, then the new one's)
+                local g = b.group
+                if g.reagents then
+                    for i = #g.reagents + 1, #g.ids do g.reagents[i] = g.reagents[#g.reagents] end
+                end
+                for i, id in ipairs(add.group) do
+                    g.ids[#g.ids + 1] = id
+                    if g.reagents then g.reagents[#g.ids] = add.reagents[i] end
+                end
+            end
+        end
+    end
+end
+if ns.Flavor and ns.Flavor() == "tbc" then
+    for _, nb in ipairs(D.TBC_BUFFS) do
+        local at = #D.BUFFS
+        for i, b in ipairs(D.BUFFS) do if b.key == nb.after then at = i break end end
+        table.insert(D.BUFFS, at + 1, nb)
+    end
+end
+
 D.BY_KEY = {}
 for i, b in ipairs(D.BUFFS) do
     b.order = i
@@ -129,6 +211,9 @@ D.ENGLISH = {
     shadowprot = { "Shadow Protection", "Prayer of Shadow Protection" },
     motw = { "Mark of the Wild", "Gift of the Wild" },
     thorns = { "Thorns" },
+    fearward = { "Fear Ward" },
+    commandingshout = { "Commanding Shout" },
+    earthshield = { "Earth Shield" },
     soulstone = { "Soulstone Resurrection" },
 }
 
@@ -142,3 +227,29 @@ end
 -- the raid instances the "Inside raids" filter can be narrowed to
 D.RAIDS = { "Molten Core", "Onyxia's Lair", "Blackwing Lair", "Zul'Gurub", "Ruins of Ahn'Qiraj",
     "Temple of Ahn'Qiraj", "Naxxramas" }
+-- (2026-11-10) PER GAME VERSION. TBC keeps Classic's raids and adds its
+-- own; WoW Forever's raids are not known yet, so it lists none and the
+-- filter is not applied there (every raid counts). A tick is kept by the
+-- raid's English name, as it always was, and matched by the instance id
+-- too (GetInstanceInfo's 8th value), so another client language or
+-- another spelling of the instance's name still counts.
+D.RAIDS_TBC = { "Karazhan", "Gruul's Lair", "Magtheridon's Lair", "Serpentshrine Cavern", "Tempest Keep",
+    "Hyjal Summit", "Black Temple", "Zul'Aman", "Sunwell Plateau" }
+D.RAID_IDS = {
+    ["Molten Core"] = 409, ["Onyxia's Lair"] = 249, ["Blackwing Lair"] = 469, ["Zul'Gurub"] = 309,
+    ["Ruins of Ahn'Qiraj"] = 509, ["Temple of Ahn'Qiraj"] = 531, ["Naxxramas"] = 533,
+    ["Karazhan"] = 532, ["Gruul's Lair"] = 565, ["Magtheridon's Lair"] = 544, ["Serpentshrine Cavern"] = 548,
+    ["Tempest Keep"] = 550, ["Hyjal Summit"] = 534, ["Black Temple"] = 564, ["Zul'Aman"] = 568,
+    ["Sunwell Plateau"] = 580,
+}
+function D.Raids()
+    local fl = (ns.Flavor and ns.Flavor()) or "era"
+    if fl == "era" then return D.RAIDS end
+    if fl == "tbc" then
+        local out = {}
+        for _, n in ipairs(D.RAIDS) do out[#out + 1] = n end
+        for _, n in ipairs(D.RAIDS_TBC) do out[#out + 1] = n end
+        return out
+    end
+    return {}
+end

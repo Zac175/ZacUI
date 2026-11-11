@@ -107,14 +107,39 @@ local function PaintRow(self)
         pw:SetAlpha((off or pending or hot or pw._zHot) and 1 or 0)
     end
     local showSel = sel and not group
+    -- (2026-11-09) every page row is a button: a plate with an edge; the
+    -- edge goes to the accent under the mouse and on the open page. A
+    -- group is a header: its name, then a line to the sidebar's edge.
+    local pl = self._zNavPlate
+    if pl then
+        pl:SetShown(not group)
+        if not group then
+            local PLc = UI.PL
+            if showSel then
+                pl:Paint({ r = 0, g = 0, b = 0, a = 0 }, { r = 0, g = 0, b = 0, a = 0 },
+                    { r = a.r, g = a.g, b = a.b, a = 0.70 }, 0)
+            elseif hot then
+                pl:Paint({ r = 1, g = 1, b = 1, a = 0.085 }, { r = 1, g = 1, b = 1, a = 0.05 },
+                    { r = a.r, g = a.g, b = a.b, a = 0.50 }, 0.06)
+            else
+                pl:Paint({ r = 1, g = 1, b = 1, a = 0.045 }, { r = 1, g = 1, b = 1, a = 0.02 },
+                    { r = 1, g = 1, b = 1, a = off and 0.04 or 0.085 }, 0.03)
+            end
+        end
+    end
+    if self._zGroupLine then
+        self._zGroupLine:SetShown(group)
+        if group then Grad(self._zGroupLine, a, 0.45) end
+    end
     self._zInd:SetShown(showSel)
     self._zInd:SetVertexColor(a.r, a.g, a.b, 1)
     self._zGlow:SetShown(showSel)
-    if showSel then Grad(self._zGlow, a, S.NAV_GLOW) end
+    if showSel then Grad(self._zGlow, a, 0.32) end
     self._zEdgeT:SetShown(showSel)
     self._zEdgeB:SetShown(showSel)
     if showSel then Grad(self._zEdgeT, S.EDGE_TINT, S.NAV_EDGE) Grad(self._zEdgeB, S.EDGE_TINT, S.NAV_EDGE) end
     local hover = hot and not showSel and not group
+    hover = hover and not pl
     self._zHL:SetShown(hover)
     self._zHL:SetVertexColor(1, 1, 1, S.NAV_HL)
     self._zHoverGlow:SetShown(hover)
@@ -150,25 +175,31 @@ local function AcquireRow(index)
         t:Hide()
         return t
     end
+    -- the row's plate (UI.Plate): 12 in from each side, a 3 px gap between
+    -- rows. The open page's wash, bar and hairlines sit inside it.
+    local NPL = UI.Plate(row, 12, 12, 1, 2)
+    row._zNavPlate = NPL
+    local box = NPL.fill
     row._zGlow = Tex("BACKGROUND", 1)
-    row._zGlow:SetAllPoints()
+    row._zGlow:SetAllPoints(box)
     row._zHoverGlow = Tex("BACKGROUND", 2)
-    row._zHoverGlow:SetAllPoints()
+    row._zHoverGlow:SetAllPoints(box)
     row._zHL = Tex("BACKGROUND", 3)
-    row._zHL:SetAllPoints()
+    row._zHL:SetAllPoints(box)
     local function Edge(side)
         local g = Tex("BORDER", 0)
         if ns.Pixel then ns.Pixel.Edge(g, side, row) else g:SetHeight(1) end
-        g:SetPoint(side .. "LEFT", row, side .. "LEFT", 0, 0)
-        g:SetPoint(side .. "RIGHT", row, side .. "RIGHT", 0, 0)
+        g:ClearAllPoints()
+        g:SetPoint(side .. "LEFT", box, side .. "LEFT", 0, 0)
+        g:SetPoint(side .. "RIGHT", box, side .. "RIGHT", 0, 0)
         return g
     end
     row._zEdgeT, row._zEdgeB = Edge("TOP"), Edge("BOTTOM")
     local function Bar(sub)
         local t = Tex("ARTWORK", sub)
         t:SetWidth(3)
-        t:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-        t:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
+        t:SetPoint("TOPLEFT", box, "TOPLEFT", 0, 0)
+        t:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 0, 0)
         return t
     end
     row._zInd, row._zHoverInd = Bar(2), Bar(1)
@@ -182,6 +213,13 @@ local function AcquireRow(index)
     sign:SetPoint("LEFT", row._zText, "RIGHT", 4, 0)
     sign:Hide()
     row._zSign = sign
+    -- a group's line: from after its name (and the +/-) to the edge
+    local gl = Tex("ARTWORK", 0)
+    if ns.Pixel then ns.Pixel.Edge(gl, "TOP", row) else gl:SetHeight(1) end
+    gl:ClearAllPoints()
+    gl:SetPoint("LEFT", row._zText, "RIGHT", 26, 0)
+    gl:SetPoint("RIGHT", row, "RIGHT", -14, 0)
+    row._zGroupLine = gl
     -- (an invisible marker, shown on a group row: the tour and older code
     -- tell a category row from a page row by it)
     local chev = row:CreateTexture(nil, "ARTWORK")
@@ -199,7 +237,7 @@ local function AcquireRow(index)
     local SW, SH = math.floor(S.TOGGLE_W * 0.8 + 0.5), math.floor(S.TOGGLE_H * 0.8 + 0.5)
     local pw = CreateFrame("Button", nil, row)
     pw:SetSize(SW, SH)
-    pw:SetPoint("RIGHT", -18, 0)
+    pw:SetPoint("RIGHT", -22, 0)
     pw:SetFrameLevel(row:GetFrameLevel() + 2)
     pw:SetHitRectInsets(-4, -4, -6, -6)
     local pill = UI.Pill(pw, "ARTWORK", 1, SH)
@@ -411,7 +449,8 @@ local function BuildNavInner()
         UI._zFontDress(fs, (kind == "group") and S.F_GROUP or S.F_NAV)
         fs:SetText(label)
         fs:ClearAllPoints()
-        fs:SetPoint("LEFT", row, "LEFT", (kind == "child") and S.CHILD_X or S.NAV_LEFT, 0)
+        -- (a page's label sits 12 inside its plate; a group's at the edge)
+        fs:SetPoint("LEFT", row, "LEFT", (kind == "group") and S.NAV_LEFT or 24, 0)
         -- a part's power button (ns.PartState: in the AddOns folder)
         local part = item.addon and ns.PartState and ns.PartState(item.addon) ~= "missing"
         local pw = row._zPower
@@ -423,7 +462,7 @@ local function BuildNavInner()
             row._zSign:SetTexture(((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\")
                 .. (s.expanded[item.id] and "minus" or "add"))
         else
-            fs:SetPoint("RIGHT", row, "RIGHT", part and -(18 + math.floor(S.TOGGLE_W * 0.8 + 0.5) + 12) or -18, 0)
+            fs:SetPoint("RIGHT", row, "RIGHT", part and -(22 + math.floor(S.TOGGLE_W * 0.8 + 0.5) + 12) or -22, 0)
         end
 
         row._zSelected = (s.selected == item.id)
@@ -989,10 +1028,12 @@ local function Build()
             t:SetTexture(FLAT)
             return t
         end
-        local hl = Tex("BACKGROUND", 3) hl:SetAllPoints()
-        local glow = Tex("BACKGROUND", 2) glow:SetAllPoints()
+        -- (a button like the page rows: a plate 12 in from each side)
+        local plate = UI.Plate(row, 12, 12, 3, 3)
+        local hl = Tex("BACKGROUND", 3) hl:SetAllPoints(plate.fill)
+        local glow = Tex("BACKGROUND", 2) glow:SetAllPoints(plate.fill)
         local ind = Tex("ARTWORK", 1) ind:SetWidth(3)
-        ind:SetPoint("TOPLEFT") ind:SetPoint("BOTTOMLEFT")
+        ind:SetPoint("TOPLEFT", plate.fill, "TOPLEFT") ind:SetPoint("BOTTOMLEFT", plate.fill, "BOTTOMLEFT")
         local icon = row:CreateTexture(nil, "ARTWORK", nil, 2)
         icon._zui_own = true
         icon:SetSize(S.NAV_ICON_H, S.NAV_ICON_H)
@@ -1003,11 +1044,18 @@ local function Build()
         row._zText = label
         row._zPaint = function(self)
             local hot = self._zHot
-            hl:SetShown(hot and true or false)
+            local ac = GetColor("ui", "accent")
+            if hot then
+                plate:Paint({ r = 1, g = 1, b = 1, a = 0.085 }, { r = 1, g = 1, b = 1, a = 0.05 },
+                    { r = ac.r, g = ac.g, b = ac.b, a = 0.50 }, 0.06)
+            else
+                plate:Paint({ r = 1, g = 1, b = 1, a = 0.045 }, { r = 1, g = 1, b = 1, a = 0.02 },
+                    { r = 1, g = 1, b = 1, a = 0.085 }, 0.03)
+            end
+            hl:SetShown(false)
             hl:SetVertexColor(1, 1, 1, S.NAV_HL)
-            glow:SetShown(hot and true or false)
-            if hot then Grad(glow, S.HOVER_TINT, S.NAV_HOVER_GLOW) end
-            ind:SetShown(hot and true or false)
+            glow:SetShown(false)
+            ind:SetShown(false)
             local h = S.HOVER_TINT
             ind:SetVertexColor(h.r, h.g, h.b, S.NAV_HOVER_IND)
             local a = hot and S.NAV_HOVER or S.NAV_EN
@@ -1075,24 +1123,54 @@ local function Build()
             PaneHeight = function() return pane:GetHeight() or 0 end })
     end
 
-    -- THE HEADER'S CORNER: fold to a badge, left of the close box (40 x 40
-    -- boxes, as EllesmereUI's collapse and close)
+    -- THE HEADER'S CORNER (2026-11-09, Zac picked mock A: "a looks the
+    -- best"): small raised plates like the settings buttons - reload, the
+    -- scale as one joined control (- 75% +), fold, and the X, which goes
+    -- red under the mouse. CORNER is a plate's side; the glyph art is the
+    -- header's own set, drawn small.
+    local CORNER, CORNER_GAP = 26, 6
+    local function CornerPlate(b, glyph, danger)
+        local PL = UI.PL
+        local pl = UI.Plate(b)
+        b._zPaint = function(self)
+            local hot = self._zHot and true or false
+            if danger and hot then
+                local x = ns.GetColor("button", "xHover")
+                pl:Paint({ r = x.r * 0.53, g = x.g * 0.53, b = x.b * 0.53, a = 1 },
+                    { r = x.r * 0.38, g = x.g * 0.38, b = x.b * 0.38, a = 1 },
+                    { r = x.r * 0.87, g = x.g * 0.87, b = x.b * 0.87, a = 1 }, PL.SHEEN_H)
+            else
+                pl:Paint(hot and PL.TOP_H or PL.TOP, hot and PL.BOT_H or PL.BOT,
+                    { r = 1, g = 1, b = 1, a = hot and 0.22 or PL.EDGE }, hot and PL.SHEEN_H or PL.SHEEN)
+            end
+            if glyph then glyph:SetVertexColor(1, 1, 1, (hot or danger) and 1 or 0.80) end
+        end
+        b:_zPaint()
+    end
     do
+        -- the X the window was built with, re-dressed as a plate
+        local x = window.closeButton
+        if x and x._zA then
+            x:SetSize(CORNER, CORNER)
+            x._zA:SetSize(22, 22)
+            x:ClearAllPoints()
+            x:SetPoint("TOPRIGHT", window, "TOPRIGHT", -18, -18)
+            CornerPlate(x, x._zA, true)
+        end
         local fold = CreateFrame("Button", nil, tb)
-        fold:SetSize(40, 40)
-        fold:SetPoint("TOPRIGHT", window, "TOPRIGHT", -(14 + 40 + 4), -11)
+        fold:SetSize(CORNER, CORNER)
+        fold:SetPoint("TOPRIGHT", window, "TOPRIGHT", -(18 + CORNER + CORNER_GAP), -18)
         fold:SetFrameLevel(window:GetFrameLevel() + 30)
         local ft = fold:CreateTexture(nil, "ARTWORK")
         ft._zui_own = true
-        ft:SetSize(38, 38)
+        ft:SetSize(22, 22)
         ft:SetPoint("CENTER")
         -- (drawn in the header's art set, the X's line weight)
         ft:SetTexture((ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\chevup128", "CLAMP", "CLAMP", "TRILINEAR")
-        fold._zPaint = function(self) ft:SetVertexColor(1, 1, 1, self._zHot and 1 or S.DIM_A) end
+        CornerPlate(fold, ft)
         fold:SetScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
         fold:SetScript("OnLeave", function(self) self._zHot = nil self:_zPaint() GameTooltip:Hide() end)
         fold:SetScript("OnClick", function() ns.ConfigFold() end)
-        fold:_zPaint()
         UI.Tooltip(fold, "Fold", "Fold this window to a small badge so you can see the game. Previews and Edit Mode keep "
             .. "running; the badge's + brings it back.")
         window.foldButton = fold
@@ -1110,16 +1188,15 @@ local function Build()
         local ICO = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\"
         local function IconBtn(art, title, tip, onClick)
             local b = CreateFrame("Button", nil, tb)
-            b:SetSize(32, 40)
+            b:SetSize(CORNER, CORNER)
             b:SetFrameLevel(window:GetFrameLevel() + 30)
             local t = b:CreateTexture(nil, "ARTWORK")
             t._zui_own = true
-            t:SetSize(38, 38)
+            t:SetSize(22, 22)
             t:SetPoint("CENTER")
             t:SetTexture(ICO .. art, "CLAMP", "CLAMP", "TRILINEAR")
-            -- the settings window's own hover, as its X: white at the dim
-            -- alpha, full white under the mouse - no plate, no tint
-            b._zPaint = function(self) t:SetVertexColor(1, 1, 1, self._zHot and 1 or S.DIM_A) end
+            -- (2026-11-09) a small raised plate, as the settings buttons
+            CornerPlate(b, t)
             b:SetScript("OnEnter", function(self) self._zHot = true self:_zPaint() end)
             b:SetScript("OnLeave", function(self) self._zHot = nil self:_zPaint() GameTooltip:Hide() end)
             b:SetScript("OnClick", onClick)
@@ -1152,19 +1229,28 @@ local function Build()
         end
         local plus = IconBtn("plus128", "Window scale", "Grows this window only.",
             function() SetScale(Scale() + 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end)
-        plus:SetPoint("RIGHT", window.foldButton, "LEFT", -6, 0)
-        local pct = UI.SFont(tb, S.F_VALUE, { text = math.floor(Scale() * 100 + 0.5) .. "%", justify = "CENTER" })
-        pct._zPaint = function(self) self:SetTextColor(1, 1, 1, S.DIM_A) end
+        plus:SetPoint("RIGHT", window.foldButton, "LEFT", -(CORNER_GAP + 8), 0)
+        window.scalePlus = plus
+        -- the number sits on a plate of its own between - and +, the three
+        -- sharing edges so they read as one control
+        local pctBox = CreateFrame("Frame", nil, tb)
+        pctBox:SetSize(46, CORNER)
+        pctBox:SetFrameLevel(window:GetFrameLevel() + 30)
+        pctBox:EnableMouse(true)
+        pctBox:SetPoint("RIGHT", plus, "LEFT", 1, 0)
+        CornerPlate(pctBox)
+        local pct = UI.SFont(pctBox, S.F_VALUE, { text = math.floor(Scale() * 100 + 0.5) .. "%", justify = "CENTER" })
+        pct._zPaint = function(self) self:SetTextColor(1, 1, 1, 1) end
         pct:_zPaint()
         pct:SetWidth(46)
-        pct:SetPoint("RIGHT", plus, "LEFT", 0, 0)
+        pct:SetPoint("CENTER", pctBox, "CENTER", 0, 0)
         window.scaleText = pct
         local minus = IconBtn("minus128", "Window scale", "Shrinks this window only.",
             function() SetScale(Scale() - 0.05); window.scaleText:SetText(math.floor(Scale() * 100 + 0.5) .. "%") end)
-        minus:SetPoint("RIGHT", pct, "LEFT", 0, 0)
-        reload:SetPoint("RIGHT", minus, "LEFT", -14, 0)
+        minus:SetPoint("RIGHT", pctBox, "LEFT", 1, 0)
+        reload:SetPoint("RIGHT", minus, "LEFT", -(CORNER_GAP + 8), 0)
         window.scaleUp, window.scaleDown, window.reloadButton = plus, minus, reload
-        UI.Tooltip(pct, "Window scale", "Grows or shrinks this window only. Under the ZacUI look a size "
+        UI.Tooltip(pctBox, "Window scale", "Grows or shrinks this window only. Under the ZacUI look a size "
             .. "close to whole screen pixels is nudged onto them, so text and lines stay sharp.")
         window:SetScale(ExactScale(Scale()))
     end

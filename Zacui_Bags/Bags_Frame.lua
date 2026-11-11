@@ -90,6 +90,29 @@ local function SlotGap()
     return math.max(0, math.min(20, tonumber(BagCfg().spacing) or GAP))
 end
 local function Empty(spec) return type(spec) ~= "table" or next(spec) == nil end
+
+-- THE GROUPED LAYOUT (ZacUIDB.bags.layout = "groups"): which group a slot
+-- is drawn in, by the item's class. Free slots are the last group, so
+-- there is always somewhere to drop something.
+local GROUP_HEAD = 15
+local GROUP_NAMES = { "Consumables", "Gear", "Trade goods", "Quest items", "Everything else", "Free" }
+local GROUP_BY_CLASS = { [0] = 1, [2] = 2, [4] = 2, [7] = 3, [5] = 3, [9] = 3, [12] = 4 }
+local groupOfLink = {}
+local function GroupOf(item)
+    if not item then return #GROUP_NAMES end
+    local link = item.link or item.id
+    if not link then return 5 end
+    local g = groupOfLink[link]
+    if g then return g end
+    local classID
+    if GetItemInfoInstant then
+        local ok, _, _, _, _, _, cid = pcall(GetItemInfoInstant, link)
+        if ok then classID = cid end
+    end
+    g = GROUP_BY_CLASS[classID or -1] or 5
+    if classID ~= nil then groupOfLink[link] = g end
+    return g
+end
 -- bumped on every settings change: a slot restyles its fonts when behind
 local lookVer = 1
 local DressSlot   -- (below, with the item buttons)
@@ -1495,6 +1518,19 @@ local function NewItemButton(parent)
     btn._zCooldown = _G[name .. "Cooldown"] or btn.Cooldown
     btn._zCount = _G[name .. "Count"] or btn.Count
     DressSlot(btn)
+    -- a new item's gold edge goes once the mouse has been over it: the
+    -- game is told it is no longer new, and the slot is painted again
+    if btn.HookScript then
+        btn:HookScript("OnEnter", function(self)
+            local n = self._zNew
+            if not n then return end
+            self._zNew = nil
+            if C_NewItems and C_NewItems.RemoveNewItem then pcall(C_NewItems.RemoveNewItem, n[1], n[2]) end
+            for _, v in pairs(views) do
+                if v.frame and v.frame:IsShown() then pcall(v.Paint, v, { [n[1]] = true }) end
+            end
+        end)
+    end
     return btn
 end
 
@@ -1553,6 +1589,22 @@ local function PaintSlot(btn, item, isQuest, faded)
         TintBorder(btn, ns.ColorOf(cfg.borderColor))
     else
         TintBorder(btn)
+    end
+    -- (2026-11-10, the bags mock: "a gold ring on new items") an item the
+    -- game still calls new wears the accent on its edge until the mouse
+    -- has been over it (the hover below puts its own edge back)
+    btn._zNew = nil
+    if item and cfg.newItemRing ~= false and C_NewItems and C_NewItems.IsNewItem and not faded then
+        local parent = btn.GetParent and btn:GetParent()
+        local bag, slot = parent and parent.GetID and parent:GetID(), btn.GetID and btn:GetID()
+        if type(bag) == "number" and type(slot) == "number" then
+            local okN, isNew = pcall(C_NewItems.IsNewItem, bag, slot)
+            if okN and isNew == true then
+                local a = Col("accent")
+                TintBorder(btn, a.r, a.g, a.b, 1)
+                btn._zNew = { bag, slot }
+            end
+        end
     end
 
     -- ============================================================
@@ -1926,6 +1978,15 @@ local function DressViewKit(view, kit)
             sort:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, -(M.TITLEBAR + 3))
         end
     end
+    -- (2026-11-10) the Groups button wears the look's own panel button, as
+    -- Sort does under the 2004 look, and keeps its place left of Sort
+    if view.groupsButton then
+        KitButton(view.groupsButton)
+        if sort then
+            view.groupsButton:ClearAllPoints()
+            view.groupsButton:SetPoint("RIGHT", sort, "LEFT", -6, 0)
+        end
+    end
     if chrome then
         -- the money along the bottom in the client's coin box: the free
         -- count at its left, the money its copper 13 in from the right
@@ -2001,6 +2062,53 @@ local function CreateView(key, globalName, title, bagList)
     end)
     view.sortButton = sort
 
+    -- (2026-11-09, Zac: both bag mocks, "give users the option to choose")
+    -- GROUPS: one grid as always, or the slots split by kind under the
+    -- settings window's tick-and-line headers. The button is lit while on.
+    local groupsBtn = UI.Button(frame, "Groups", { width = 62, height = 20,
+        tooltip = "Split the bag by kind (consumables, gear, trade goods, quest items, the rest, free slots), "
+            .. "or show it as one grid. Nothing is moved in your bags: only where each slot is drawn." })
+    groupsBtn:SetPoint("RIGHT", sort, "LEFT", -6, 0)
+    groupsBtn:SetScript("OnClick", function()
+        local c = BagCfg()
+        if c.layout == "groups" then c.layout = nil else c.layout = "groups" end
+        for _, v in pairs(views) do
+            if v.groupsButton then v.groupsButton:SetActive(c.layout == "groups") end
+            v._layoutSig = nil
+            pcall(v.Refresh, v)
+        end
+    end)
+    groupsBtn:SetActive(BagCfg().layout == "groups")
+    view.groupsButton = groupsBtn
+
+    -- (2026-11-10, the bags mock: "search and Sort in the title bar")
+    -- ZacUI's own window only, and only when asked for: the three sit on
+    -- the title bar beside the X, and the row they had goes - the bag row
+    -- and the slots move up by it. Read once, as the window is built.
+    if BagCfg().titleTools and not view.chrome and kit0 ~= "classic" and frame.titleBar then
+        local TOOL_H, ROW = 18, 25
+        local lvl = frame.titleBar:GetFrameLevel() + 2
+        local right = frame.closeButton
+        sort:SetHeight(TOOL_H) groupsBtn:SetHeight(TOOL_H) search:SetHeight(TOOL_H)
+        sort:ClearAllPoints()
+        if right then sort:SetPoint("RIGHT", right, "LEFT", -6, 0)
+        else sort:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(M.TITLEBAR + 4), -(M.TITLEBAR - TOOL_H) / 2) end
+        search:ClearAllPoints()
+        search:SetPoint("RIGHT", groupsBtn, "LEFT", -6, 0)
+        -- as wide as the bar leaves it (a narrow bag: shorter, then gone)
+        local function FitSearch()
+            local room = (frame:GetWidth() or 0) - 250
+            search:SetShown(room >= 50)
+            search:SetWidth(math.max(50, math.min(140, room)))
+        end
+        FitSearch()
+        frame:HookScript("OnSizeChanged", FitSearch)
+        for _, w in ipairs({ sort, groupsBtn, search }) do w:SetFrameLevel(lvl) end
+        view.titleTools = true
+        view.geo.rowY = view.geo.rowY - ROW
+        view.geo.top = view.geo.top - ROW
+    end
+
     -- The bag slots, on their own row under the search box.
     BuildBagBar(view)
 
@@ -2012,6 +2120,22 @@ local function CreateView(key, globalName, title, bagList)
     local money = UI.Font(frame, F.SMALL, { justify = "RIGHT" })
     money:SetPoint("BOTTOMRIGHT", -PAD, 7)
     view.moneyText = money
+
+    -- how full the bags are (painted by PaintFooter), right of the count
+    local fb = CreateFrame("Frame", nil, frame)
+    fb:SetSize(70, 6)
+    fb:SetPoint("LEFT", free, "RIGHT", 8, 0)
+    UI.Fill(fb, "ui", "elementBg")
+    UI.Border(fb, "ui", "border")
+    fb._zPaint = UI.PaintBox
+    fb:_zPaint()
+    fb.fill = fb:CreateTexture(nil, "ARTWORK")
+    fb.fill._zui_own = true
+    fb.fill:SetTexture(FLAT)
+    fb.fill:SetPoint("TOPLEFT", 1, -1)
+    fb.fill:SetPoint("BOTTOMLEFT", 1, 1)
+    fb:Hide()
+    view.fillBar = fb
     -- their spots, for a saved anchor to go on top of
     view.footerDef = {
         free = { point = "BOTTOMLEFT", to = frame, relPoint = "BOTTOMLEFT", x = PAD, y = 7 },
@@ -2100,8 +2224,18 @@ local function CreateView(key, globalName, title, bagList)
         view.holders[bag] = holder
     end
 
+    -- (2026-11-10, Zac: "typing in the search box omega lags my game")
+    -- Typing only changes which slots are faded. This ran a full layout
+    -- and repaint of the bag on every key; now it is one repaint a beat
+    -- after the last key, and only while the bag is showing.
+    local searchSerial = 0
     search.editBox:HookScript("OnTextChanged", function()
-        view:Refresh()
+        searchSerial = searchSerial + 1
+        local mine = searchSerial
+        C_Timer.After(0.1, function()
+            if mine ~= searchSerial then return end
+            if view.frame:IsShown() then view:Paint() end
+        end)
     end)
 
     function view:Button(bag, index)
@@ -2153,7 +2287,43 @@ local function CreateView(key, globalName, title, bagList)
         for _, bag in ipairs(self.bagList) do
             sig = sig .. ":" .. tostring(Bags.Slots(bag))
         end
+        -- grouped: which group each slot is in is part of the layout
+        if BagCfg().layout == "groups" then
+            local parts = { sig, "g" }
+            for _, bag in ipairs(self.bagList) do
+                for slot = 1, Bags.Slots(bag) do
+                    parts[#parts + 1] = GroupOf(Bags.Item(bag, slot))
+                end
+            end
+            sig = table.concat(parts, "")
+        end
         return sig, cols
+    end
+
+    -- a group's header: the accent tick, its name, how many, a hairline
+    local function GroupHead(self, i)
+        self.groupHeads = self.groupHeads or {}
+        local h = self.groupHeads[i]
+        if h then return h end
+        h = CreateFrame("Frame", nil, self.grid)
+        h:SetHeight(GROUP_HEAD)
+        h.tick = h:CreateTexture(nil, "ARTWORK")
+        h.tick._zui_own = true
+        h.tick:SetTexture(FLAT)
+        h.tick:SetSize(3, 11)
+        h.tick:SetPoint("LEFT", 0, 0)
+        h.name = UI.Font(h, F.SMALL, { cat = "text", key = "normal" })
+        h.name:SetPoint("LEFT", h.tick, "RIGHT", 6, 0)
+        h.count = UI.Font(h, F.SMALL, { cat = "text", key = "gray" })
+        h.count:SetPoint("LEFT", h.name, "RIGHT", 6, 0)
+        h.line = h:CreateTexture(nil, "ARTWORK")
+        h.line._zui_own = true
+        h.line:SetTexture(FLAT)
+        h.line:SetHeight(1)
+        h.line:SetPoint("LEFT", h.count, "RIGHT", 8, 0)
+        h.line:SetPoint("RIGHT", h, "RIGHT", 0, 0)
+        self.groupHeads[i] = h
+        return h
     end
 
     -- In the default plain mode a closed window is laid out when it next
@@ -2177,6 +2347,63 @@ local function CreateView(key, globalName, title, bagList)
 
         local n = 0
         local size, gap = SlotSize(), SlotGap()
+        if BagCfg().layout == "groups" then
+            -- GROUPED: the same buttons, drawn group by group
+            local lists = {}
+            for _, bag in ipairs(self.bagList) do
+                local slots = Bags.Slots(bag)
+                for slot = 1, slots do
+                    local btn = self:Button(bag, slot)
+                    if btn then
+                        local g = GroupOf(Bags.Item(bag, slot))
+                        lists[g] = lists[g] or {}
+                        lists[g][#lists[g] + 1] = btn
+                    end
+                end
+                local list = self.buttons[bag]
+                if list then
+                    for i = slots + 1, #list do list[i]:Hide() end
+                end
+            end
+            local y, used = 0, 0
+            local a, rule = Col("accent"), GetColor("text", "gray")
+            local gridW = cols * size + (cols - 1) * gap
+            for g = 1, #GROUP_NAMES do
+                local list = lists[g]
+                if list and #list > 0 then
+                    used = used + 1
+                    local head = GroupHead(self, used)
+                    head:ClearAllPoints()
+                    head:SetPoint("TOPLEFT", self.grid, "TOPLEFT", 0, -y)
+                    head:SetWidth(gridW)
+                    head.tick:SetVertexColor(a.r, a.g, a.b, 1)
+                    head.name:SetText(GROUP_NAMES[g])
+                    head.count:SetText(#list)
+                    head.line:SetVertexColor(rule.r, rule.g, rule.b, 0.25)
+                    head:Show()
+                    y = y + GROUP_HEAD + 3
+                    for i, btn in ipairs(list) do
+                        local col = (i - 1) % cols
+                        local row = math.floor((i - 1) / cols)
+                        btn:ClearAllPoints()
+                        btn:SetSize(size, size)
+                        btn:SetPoint("TOPLEFT", self.grid, "TOPLEFT", col * (size + gap), -(y + row * (size + gap)))
+                        btn:Show()
+                        if btn._zCooldown and btn._zCooldown.Show then btn._zCooldown:Show() end
+                    end
+                    local rows = math.ceil(#list / cols)
+                    y = y + rows * size + (rows - 1) * gap + 7
+                end
+            end
+            for i = used + 1, #(self.groupHeads or {}) do self.groupHeads[i]:Hide() end
+            local geo = self.geo
+            local w = geo.l + geo.r + gridW
+            self.frame:SetSize(math.max(300, w), geo.top + math.max(size, y - 7) + geo.bottom)
+            self._layoutSig = sig
+            self._layoutPending = nil
+            return true
+        end
+        for i = 1, #(self.groupHeads or {}) do self.groupHeads[i]:Hide() end
         for _, bag in ipairs(self.bagList) do
             local slots = Bags.Slots(bag)
             for slot = 1, slots do
@@ -2246,6 +2473,21 @@ local function CreateView(key, globalName, title, bagList)
             end
         end
         self.freeText:SetText(freeCount .. " / " .. totalCount .. " free")
+        -- (2026-11-10, the bags mock) how full the bags are, as a small
+        -- bar beside the count; not under a game look's coin band
+        local fb = self.fillBar
+        if fb then
+            local on = BagCfg().fillBar ~= false and not self.chrome and totalCount > 0
+            fb:SetShown(on)
+            if on then
+                local frac = math.max(0, math.min(1, (totalCount - freeCount) / totalCount))
+                local a = Col("accent")
+                local full = frac >= 0.999 and GetColor("text", "red") or a
+                fb.fill:SetVertexColor(full.r, full.g, full.b, 1)
+                fb.fill:SetWidth(math.max(0.01, (fb:GetWidth() - 2) * frac))
+                fb.fill:SetShown(frac > 0)
+            end
+        end
         self:PlaceFooter()
         self:PaintMoney()
     end

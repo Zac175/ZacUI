@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Consumables|r
 ## Notes: ZacUI consumable bars: flasks, elixirs, food and jujus, potions, weapon stones and oils - one click each. Readycheck's consumables, potion and weapon bars, ZacUI's way.
 ## Author: Zac
-## Version: 3.0.6
+## Version: 3.0.8
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

@@ -1163,7 +1163,11 @@ local function BuildTip()
     f:SetClampedToScreen(true)
     local bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
     bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.05, 0.06, 0.95)
+    -- (2026-11-10: was a fixed near-black; the window colour everyone else wears)
+    do
+        local c = ns.GetColor and ns.GetColor("ui", "windowBg") or { r = 0.110, g = 0.110, b = 0.110 }
+        bg:SetColorTexture(c.r, c.g, c.b, 0.95)
+    end
     if ns.AddPixelBorder then ns.AddPixelBorder(f) end
     f.fake = { id = -1, preview = true, frame = f, rowframe = f, settings = {} }
     f.rows = {}

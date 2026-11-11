@@ -810,7 +810,7 @@ local function BuyNext()
     -- something to land on.
     buying.pendingCount = CountMatches(target)
     buying.pendingMoney = GetMoney and GetMoney() or nil
-    local click = { buyout = entry.buyout or 0, count = entry.count or 1,
+    local click = { buyout = entry.buyout or 0, count = entry.count or 1, owner = target.owner,
         money = buying.pendingMoney, at = GetTime and GetTime() or 0 }
     buying.clicks[#buying.clicks + 1] = click
     buying.pendingClick = click
@@ -877,6 +877,7 @@ local function CountClick(run, c)
     run.bought = run.bought + 1
     run.units = run.units + (c.count or 1)
     run.spent = run.spent + (c.buyout or 0)
+    if run.done then run.done[#run.done + 1] = { owner = c.owner, count = c.count or 1, buyout = c.buyout or 0 } end
     return true
 end
 
@@ -969,7 +970,10 @@ local function BeginPurchase(plan, onChange, onDone, onConfirmed)
     end
     if not PlaceAuctionBid then return false, "this client has no bidding API" end
 
-    buying = { queue = {}, bought = 0, spent = 0, missed = 0, units = 0, clicks = {},
+    -- (2026-11-09: total and done are for the buy window's progress bar
+    -- and its list of what was bought)
+    buying = { queue = {}, bought = 0, spent = 0, missed = 0, units = 0, clicks = {}, done = {},
+               total = #plan.picks,
                item = plan.item, onChange = onChange, onDone = onDone,
                onConfirmed = onConfirmed }
     -- the run's identity: stack size and price of what was clicked
@@ -1000,6 +1004,9 @@ local function PurchaseState()
         nextPrice = nextUp and nextUp.buyout or nil,
         nextCount = nextUp and nextUp.count or nil,
         nextName = nextUp and nextUp.name or nil,
+        -- every auction of the run (bought ones leave the queue), the
+        -- queue itself and what was bought, for the window's bar and list
+        total = buying.total, queue = buying.queue, done = buying.done,
     }
 end
 

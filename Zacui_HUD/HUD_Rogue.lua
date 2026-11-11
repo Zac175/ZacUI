@@ -6,6 +6,7 @@
 
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 ns.HUD.DefineClass({
     class = "ROGUE", className = "Rogue", label = "Rogue HUD", store = "rogue",
@@ -109,10 +110,12 @@ ns.HUD.DefineClass({
     },
     -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
     -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
-    -- section 13: Icy Veins' Classic and TBC rogue guides). The base lists
-    -- are Classic Era's (WoW Forever plays them too; no Rupture / Expose
-    -- Armor / poison debuffs there: debuff slots and the warrior's Sunder);
-    -- a spec's tbc block replaces the rows it names on TBC.
+    -- section 13: Icy Veins' and Wowhead's Classic and TBC rogue guides).
+    -- The base lists are Classic Era's (no Rupture / Expose Armor / poison
+    -- debuffs there: debuff slots and the warrior's Sunder); a spec's tbc
+    -- or forever block replaces the rows it names on that game version
+    -- (WoW Forever: Shank, Venom and Death Mark are its own, and its bleeds
+    -- and Deadly Poison are worth a slot there).
     roles = {
         { key = "assassination", label = "Assassination", tab = 1, aux = true, res = { rangeDim = true }, show = {
             main = { "kick", "coldBlood", "vanish", "tea", "potion", "rune" },
@@ -124,10 +127,15 @@ ns.HUD.DefineClass({
           tbc = { show = {
               main = { "kick", "coldBlood", "vanish", "cloakOfShadows", "tea", "potion", "rune" },
               utility = { "sliceDice", "rupture", "exposeArmor", "feint", "shiv", "stealth", "sap" },
-              debuffs = { "rupture", "exposeArmor", "deadly" } },
+              buffs = { "sliceDice", "findWeakness", "coldBlood", "zhc" },
+              debuffs = { "rupture", "exposeArmor", "deadly", "deadly7" } },
             glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
                       ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } },
-                      ["debuffs:exposeArmor"] = { { when = "expiring", style = "pulse" } } } } },
+                      ["debuffs:exposeArmor"] = { { when = "expiring", style = "pulse" } } } },
+          forever = { show = {
+              main = { "kick", "shank", "coldBlood", "vanish", "tea", "potion", "rune" },
+              buffs = { "sliceDice", "venom", "coldBlood", "zhc" },
+              debuffs = { "rupture", "garrote", "deadly", "deadly4" } } } },
         { key = "combat", label = "Combat", tab = 2, aux = true, res = { rangeDim = true }, show = {
             main = { "kick", "adrenaline", "bladeFlurry", "vanish", "tea", "potion", "rune" },
             utility = { "sliceDice", "feint", "stealth", "sap", "cheapShot" },
@@ -139,12 +147,15 @@ ns.HUD.DefineClass({
           tbc = { show = {
               main = { "kick", "adrenaline", "bladeFlurry", "vanish", "cloakOfShadows", "tea", "potion", "rune" },
               utility = { "sliceDice", "rupture", "exposeArmor", "feint", "shiv", "stealth", "sap" },
-              debuffs = { "rupture", "exposeArmor", "deadly" } },
+              debuffs = { "rupture", "exposeArmor", "deadly", "deadly7" } },
             glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
                       ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } },
                       ["debuffs:exposeArmor"] = { { when = "expiring", style = "pulse" } },
                       adrenaline = { { when = "ready", style = "edge", combatOnly = true } },
-                      bladeFlurry = { { when = "ready", style = "edge", combatOnly = true } } } } },
+                      bladeFlurry = { { when = "ready", style = "edge", combatOnly = true } } } },
+          forever = { show = {
+              main = { "kick", "shank", "adrenaline", "bladeFlurry", "vanish", "tea", "potion", "rune" },
+              debuffs = { "rupture", "garrote", "deadly", "deadly4" } } } },
         { key = "subtlety", label = "Subtlety", tab = 3, aux = true, res = { rangeDim = true }, show = {
             main = { "kick", "prep", "ghostly", "vanish", "tea", "potion", "rune" },
             utility = { "sliceDice", "hemo", "feint", "stealth", "sap", "cheapShot", "garrote" },
@@ -154,10 +165,16 @@ ns.HUD.DefineClass({
           tbc = { show = {
               main = { "kick", "prep", "shadowstep", "vanish", "cloakOfShadows", "tea", "potion", "rune" },
               utility = { "sliceDice", "hemo", "rupture", "exposeArmor", "feint", "shiv", "stealth", "sap" },
-              debuffs = { "rupture", "hemo", "exposeArmor", "deadly" } },
+              debuffs = { "rupture", "hemo", "exposeArmor", "deadly", "deadly7" } },
             glows = { ["buffs:sliceDice"] = { { when = "expiring", style = "pulse" } },
-                      ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } } } } },
+                      ["debuffs:rupture"] = { { when = "anticlip", style = "solid" } } } },
+          forever = { show = {
+              main = { "kick", "shank", "deathMark", "prep", "ghostly", "vanish", "tea", "potion", "rune" },
+              debuffs = { "rupture", "garrote", "hemo", "deathMarkDebuff", "deadly", "deadly4" } } } },
     },
+    -- The poison debuffs are found by name, and Deadly Poison's carries
+    -- its rank: V is Classic Era's top rank and VII is TBC's (the entry is
+    -- swapped there); WoW Forever's trainers stop at IV, so it has both.
     flavors = {
         tbc = { add = {
             { key = "shadowstep",     kind = "spell", spell = "shadowstep",     spellId = 36554, label = "Shadowstep" },
@@ -165,7 +182,17 @@ ns.HUD.DefineClass({
             { key = "deadlyThrow",    kind = "spell", spell = "deadlyThrow",    spellId = 26679, label = "Deadly Throw", row = "utility" },
             { key = "shiv",           kind = "spell", spell = "shiv",           spellId = 5938,  label = "Shiv", row = "utility" },
             { key = "cloakBuff",      id = 31224, label = "Cloak of Shadows", row = "buffs" },
+            { key = "findWeakness",   id = 31238, label = "Find Weakness", row = "buffs" },
+            -- (level 70's rank has its own aura name; the base entry is rank V)
+            { key = "deadly7",        id = 27187, label = "Deadly Poison VII", row = "debuffs" },
             { key = "anesthetic",     id = 26688, label = "Anesthetic Poison", row = "debuffs" },
+        } },
+        forever = { add = {
+            { key = "shank",           kind = "spell", spell = "shank",     spellId = 1329283, label = "Shank" },
+            { key = "deathMark",       kind = "spell", spell = "deathMark", spellId = 1316709, label = "Death Mark" },
+            { key = "venom",           id = 1310703, label = "Venom", row = "buffs" },
+            { key = "deadly4",         id = 11354,   label = "Deadly Poison IV", row = "debuffs" },
+            { key = "deathMarkDebuff", id = 1316709, label = "Death Mark", row = "debuffs" },
         } },
     },
     buffBars = { "sliceDice", "adrenaline", "bladeFlurry" },

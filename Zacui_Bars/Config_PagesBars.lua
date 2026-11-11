@@ -303,7 +303,11 @@ local function EveryBarGeneral(L, A, p)
         function() return c.tooltip end, function(v) c.tooltip = v end)
     Check(L, "Self-cast modifier", function() return c.selfcast end, function(v) c.selfcast = v end,
         "Holding the self-cast key casts on you.")
-    Check(L, "Focus-cast modifier", function() return c.focuscast end, function(v) c.focuscast = v end)
+    -- (options audit 2026-11-09) Classic Era has no focus target (Core_Flavor's
+    -- "uf_focus" row), so there is nothing to focus-cast on there
+    if not (ns.FeatureOn and not ns.FeatureOn("uf_focus")) then
+        Check(L, "Focus-cast modifier", function() return c.focuscast end, function(v) c.focuscast = v end)
+    end
     Check(L, "Right-click casts on yourself", function() return c.rightclickself end, function(v) c.rightclickself = v end)
     L:EndCard()
     KeysCard(L, A, p)
@@ -338,7 +342,10 @@ local function GeneralTab(L, A, p, id, kind, cfg, n)
     if kind == "action" then PagingCard(L, A, cfg, n) end
     if kind == "bagbar" then
         L:Card("Bags")
-        Check(L, "Show the key ring", function() return cfg.keyring end, function(v) cfg.keyring = v end)
+        -- (options audit 2026-11-09) Retail has no key ring (removed in 4.2)
+        if not (ns.Flavor and ns.Flavor() == "retail") then
+            Check(L, "Show the key ring", function() return cfg.keyring end, function(v) cfg.keyring = v end)
+        end
         Check(L, "Only the backpack", function() return cfg.onebag end, function(v) cfg.onebag = v end)
         L:EndCard()
     end

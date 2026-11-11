@@ -461,7 +461,11 @@ local function BuildBreakdown()
     f:SetClampedToScreen(true)
     local bg = f:CreateTexture(nil, "BACKGROUND", nil, -8)
     bg:SetAllPoints()
-    bg:SetColorTexture(0.05, 0.05, 0.06, 0.97)
+    -- (2026-11-10: was a fixed near-black; the window colour everyone else wears)
+    do
+        local c = ns.GetColor and ns.GetColor("ui", "windowBg") or { r = 0.110, g = 0.110, b = 0.110 }
+        bg:SetColorTexture(c.r, c.g, c.b, 0.97)
+    end
     if AddPixelBorder then AddPixelBorder(f) end
 
     f.title = f:CreateFontString(nil, "OVERLAY")

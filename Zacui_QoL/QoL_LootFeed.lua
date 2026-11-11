@@ -374,6 +374,10 @@ function LF.Apply()
         LF.Clear()
     end
     for _, row in ipairs(rows) do StyleRow(row) end
+    -- (2026-11-10) switched on = there is a frame, even while nothing
+    -- calls for it: Edit Mode places what exists and reads a missing
+    -- frame as "switched off".
+    if on then Strip() end
     if strip then Layout() end
 end
 LF.Registered = function() return registered end

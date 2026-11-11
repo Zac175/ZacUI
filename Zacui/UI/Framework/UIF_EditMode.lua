@@ -1,7 +1,26 @@
 -- UIF_EditMode - one button that puts EVERY ZacUI placeholder on screen
--- at once over a dimmed, gridded world, with a floating control box to
--- find, park, snap, attach, match and reset elements, undo a move, and
--- leave either keeping the changes or putting everything back.
+-- at once over a dimmed, gridded world. A bar at the top of the screen
+-- finds elements, turns the grid and snapping on and off, undoes a move
+-- and leaves (keeping the changes or putting everything back); the box
+-- you click wears its own actions (attach, match size, reset, settings,
+-- hide); the Elements panel lists every element with its tick.
+-- (2026-11-09 redesign, Zac: the bar and the actions on the box replace
+-- the floating control box as the way in; that box is the Frames panel.)
+-- (2026-11-10 tidy, Zac: "keep the top bar ... there was some text
+-- overlap on that top bar ... clean it up make it more user friendly")
+--   * the top bar lays itself out from what its texts measure: the
+--     status line shortens, then goes, then the search box goes, before
+--     anything can run into anything else; a button that is not there
+--     (Raid mods) leaves no hole
+--   * a line under the bar says how to use it (drag, arrows, right-click,
+--     Escape); the "click another frame" prompt takes its place while
+--     picking instead of sitting on top of the bar
+--   * one word for the things you move: "frame" (was "element" in some
+--     places and "frame" in others)
+--   * the Frames panel lists what can be placed first and what cannot
+--     (switched off, Blizzard's, not on this version) under a heading
+--   * the picked box shows only what can be done with it, the common
+--     things first (Reset, Settings, Hide)
 -- Part of ZacUI; load order is set by the TOC (after UIF_EditSession).
 --
 -- WHAT IT MOVES. Everything with a ZacUI-owned position:
@@ -349,6 +368,8 @@ local byKey = {}            -- [key] = movable
 local reopenConfig = false
 local openPage              -- a page to open on the way out (its settings)
 local bar
+local top                   -- the bar across the top of the screen
+local acts                  -- the picked box's actions
 local filterText = ""
 local filtered = {}         -- [key] = true: hidden by the filter just now
 local focusKeys, focusUntil = {}, nil  -- what a page sent us to, and its flash
@@ -356,7 +377,18 @@ local focusKeys, focusUntil = {}, nil  -- what a page sent us to, and its flash
 local function IsParked(key) return DB().parked[key] == true end
 local function IsGrey(m) return StateOf(m) ~= nil end
 
+-- (2026-11-10, Zac: "the move ui is still kinda confusing to use
+-- especially with the raid mods") The raid mods add some twenty boxes of
+-- their own, most of them in the middle of the screen where the HUD is
+-- placed. They are out of the way until the top bar's "Raid mods" button
+-- brings them in (remembered); a settings page that sends one of them
+-- here brings them in too.
+local function IsRaidMod(m)
+    local k = m and m.key
+    return type(k) == "string" and (k:find("^raidmods_") ~= nil or k == "rmRazTarget")
+end
 local function Matches(m)
+    if IsRaidMod(m) and not DB().showRaidMods then return false end
     if filterText == "" then return true end
     local label = tostring(m.label or ""):lower()
     for word in filterText:gmatch("%S+") do
@@ -437,6 +469,9 @@ local function SetParked(m, park)
     end
 end
 
+local BuildTop   -- forward: the bar across the top (built on first entry)
+local LayoutTop  -- forward: what fits on it, measured (status, search box)
+local Select     -- forward: pick a box, with its actions
 local Exit       -- forward: the bar's OnHide calls it
 local FillBar    -- forward: Show all / Hide all refill the list
 local RefreshBar -- forward: the count, the undo button, the moved dots
@@ -830,6 +865,7 @@ local function StopPick()
     picking = nil
     if catcher then catcher:Hide() end
     if banner then banner:Hide() end
+    if top and top.hint then top.hint:SetShown(active) end
 end
 
 local PICK_TEXT = {
@@ -873,13 +909,19 @@ local function StartPick(kind, m)
         banner:SetHeight(28)
         UI.Fill(banner, "tooltip", "bg")
         UI.Border(banner, "ui", "accent")
+        -- (a fill is white until its box is painted)
+        banner._zPaint = UI.PaintBox
+        banner:_zPaint()
         banner.text = UI.Font(banner, F.LABEL, { text = "", cat = "text", key = "normal" })
         banner.text:SetPoint("CENTER", 0, 0)
-        banner:SetPoint("TOP", UIParent, "TOP", 0, -8)
+        -- under the top bar, where the how-to line is (it steps aside
+        -- while a frame is being picked), never on the bar's own text
+        banner:SetPoint("TOP", UIParent, "TOP", 0, -50)
     end
     picking = { kind = kind, m = m }
     banner.text:SetText(PICK_TEXT[kind]:format(m.label) .. "  |cff999999Right-click or Escape: never mind.|r")
-    banner:SetWidth(banner.text:GetStringWidth() + 28)
+    banner:SetWidth((banner.text:GetStringWidth() or 300) + 28)
+    if top and top.hint then top.hint:Hide() end
     catcher:Show()
     banner:Show()
 end
@@ -982,10 +1024,30 @@ local function ApplyFilter()
     if guides then guides._acc = 1 end
 end
 
+-- THE SEARCH (2026-11-10). Both boxes (the top bar's and the panel's)
+-- come here. The top bar's used to pass its text to the panel's box and
+-- rely on that box's own change handler, which a text set by code does
+-- not fire; and every key refilled the whole list, making a new tick box
+-- for every row. Now: one function, applied a beat after the last key.
+local filterSerial = 0
+local function SetFilter(text, now)
+    local t = (tostring(text or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""))
+    filterSerial = filterSerial + 1
+    local mine = filterSerial
+    local function Apply()
+        if mine ~= filterSerial or not active then return end
+        if t == filterText then return end
+        filterText = t
+        ApplyFilter()
+        FillBar()
+    end
+    if now or not (C_Timer and C_Timer.After) then Apply() else C_Timer.After(0.12, Apply) end
+end
+
 local function BuildBar()
     -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup), its margin the
     -- bar's own so the title lines up with the list
-    bar = UI.Popup("ZacUIEditModeBar", W, 200, "Edit Mode", { pad = M.CARD_PAD })
+    bar = UI.Popup("ZacUIEditModeBar", W, 200, "Frames", { pad = M.CARD_PAD })
     bar:SetFrameStrata("TOOLTIP")
     bar:SetClampedToScreen(true)
     bar._zOnMoved = function()
@@ -1013,9 +1075,7 @@ local function BuildBar()
 
     -- the filter: hides every element whose name lacks what is typed
     bar.filter = UI.EditBox(bar, { width = iw, hint = "Find a frame...", onChange = function(text)
-        filterText = (tostring(text or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""))
-        ApplyFilter()
-        FillBar()
+        SetFilter(text, true)
     end })
     bar.filter:SetPoint("TOPLEFT", desc, "BOTTOMLEFT", 0, -8)
 
@@ -1081,15 +1141,15 @@ local function BuildBar()
             FillBar()
         end })
     UI.Tooltip(bar.showHide, "Hide all / Show all",
-        "Every element out of the way while you place the rest, or all of them back.")
+        "Every frame out of the way while you place the rest, or all of them back.")
     bar.resetAll = UI.Button(bar, "Reset all", { width = iw - 2 * third - 12, height = M.BUTTON_H, size = F.SMALL,
-        tooltip = "Every element back to its default spot. Cancel or Ctrl+Z puts them back.",
+        tooltip = "Every frame back to its default spot. Cancel or Ctrl+Z puts them back.",
         onClick = function()
             for _, m in ipairs(current) do
                 if m.reset and not IsGrey(m) then m.reset(true) end
             end
             ES.Check()
-            Print("every element back to its default spot (Ctrl+Z or Cancel puts them back).")
+            Print("every frame back to its default spot (Ctrl+Z or Cancel puts them back).")
         end })
     bar.undo:SetPoint("BOTTOMLEFT", bar.cancel, "TOPLEFT", 0, 6)
     bar.showHide:SetPoint("LEFT", bar.undo, "RIGHT", 6, 0)
@@ -1104,8 +1164,25 @@ local function BuildBar()
     local bc = ns.GetColor("ui", "border")
     bar.rule:SetVertexColor(bc.r, bc.g, bc.b, 1)
 
-    -- the X, Escape and the buttons all land here; Exit is idempotent
-    bar:HookScript("OnHide", function() if active then Exit("save") end end)
+    -- (2026-11-09) the panel is the element list now: closing it only
+    -- closes it. The top bar's buttons and Escape leave Edit Mode.
+    bar:HookScript("OnHide", function() if RefreshBar then RefreshBar() end end)
+
+    -- what the top bar does is not shown twice: the filter, the two
+    -- toggles, Undo, Cancel and Save & Exit stay built (the top bar and
+    -- the tests drive them) and out of sight
+    bar.desc:SetText("Untick a frame to hide it while you place the rest. The buttons beside a name reset it "
+        .. "or open its settings.")
+    for _, w in ipairs({ bar.filter, bar.snap, bar.grid, bar.undo, bar.cancel, bar.save }) do w:Hide() end
+    bar.dim:ClearAllPoints()
+    bar.dim:SetPoint("TOPLEFT", bar.desc, "BOTTOMLEFT", 0, -8)
+    bar.showHide:ClearAllPoints()
+    bar.showHide:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", pad, pad)
+    bar.resetAll:ClearAllPoints()
+    bar.resetAll:SetPoint("LEFT", bar.showHide, "RIGHT", 6, 0)
+    bar.rule:ClearAllPoints()
+    bar.rule:SetPoint("BOTTOMLEFT", bar.showHide, "TOPLEFT", -pad + 1, 8)
+    bar.rule:SetPoint("RIGHT", bar, "RIGHT", -1, 0)
 end
 
 local function NewRow(i)
@@ -1167,8 +1244,9 @@ end
 
 local function BarHeight(listH)
     local descH = math.max(12, (bar.desc and bar.desc:GetStringHeight()) or 24)
-    return bar.headerHeight + descH + 8 + M.EDIT_H + 8 + M.CHECK + 8 + 30 + 6 + listH
-        + 8 + 9 + M.BUTTON_H + 6 + M.BUTTON_H + M.CARD_PAD
+    -- (the hidden filter, toggles and second button row take no room)
+    return bar.headerHeight + descH + 8 + 30 + 6 + listH
+        + 8 + 9 + M.BUTTON_H + M.CARD_PAD
 end
 
 FillBar = function()
@@ -1179,12 +1257,36 @@ FillBar = function()
     for _, m in ipairs(current) do
         if Matches(m) then shown[#shown + 1] = m end
     end
+    -- (2026-11-10) what can be placed comes first; what cannot (switched
+    -- off, Blizzard's own, not on this version) follows under a heading,
+    -- so the list reads top to bottom as "these you can move"
+    local firstGrey
+    do
+        local live, grey = {}, {}
+        for _, m in ipairs(shown) do
+            if StateOf(m) then grey[#grey + 1] = m else live[#live + 1] = m end
+        end
+        if #grey > 0 then firstGrey = #live + 1 end
+        shown = live
+        for _, m in ipairs(grey) do shown[#shown + 1] = m end
+    end
+    if firstGrey and not bar.offHead then
+        bar.offHead = UI.Font(bar.list, F.SMALL, { text = "Can't be placed right now  (hover a name for why)",
+            cat = "text", key = "disabled" })
+    end
+    if bar.offHead then bar.offHead:SetShown(firstGrey ~= nil) end
     for i, m in ipairs(shown) do
+        if i == firstGrey then
+            bar.offHead:ClearAllPoints()
+            bar.offHead:SetPoint("BOTTOMLEFT", bar.list, "TOPLEFT", 0, -(y + ROW) + 5)
+            y = y + ROW
+        end
         local row = bar.rows[i] or NewRow(i)
         row.movable = m
-        -- the checkbox binds its callback at build, and the movable it
-        -- refers to changes per pass, so it is rebuilt each time
-        if row.check then row.check:Hide() row.check:SetParent(nil) row.check = nil end
+        -- (2026-11-10) one tick box per row for the row's life: its
+        -- callback reads the row's movable when clicked. It was rebuilt
+        -- on every refill, a new frame each time for every row (frames
+        -- are never given back), which is what made the search crawl.
         local tag, why = StateOf(m)
         row.why = tag and why or nil
         -- a frame pushed off the screen says so (its Reset brings it back)
@@ -1195,14 +1297,24 @@ FillBar = function()
             row.tag:SetText(tag)
             row.grey:Show() row.tag:Show() row.box:Show()
             row.cog:Hide() row.reset:Hide()
+            if row.check then row.check:Hide() end
             row.dot:ClearAllPoints()
         else
             row.grey:Hide() row.tag:Hide() row.box:Hide()
             local label = m.label .. (off and " |cffff9933(off screen)|r" or "")
                 .. (ES.LinkOf(m.key) and " |cff999999(attached)|r" or "")
-            row.check = UI.Checkbox(row, label, not IsParked(m.key), function(v) SetParked(m, not v) end)
-            row.check:SetPoint("LEFT")
+            if not row.check then
+                row.check = UI.Checkbox(row, label, true, function(v)
+                    local mv = row.movable
+                    if mv then SetParked(mv, not v) end
+                end)
+                row.check:SetPoint("LEFT")
+            end
+            row.check._zText:SetText(label)
+            row.check:SetChecked(not IsParked(m.key))
             local textW = row.check._zText and row.check._zText:GetStringWidth() or 0
+            row.check:SetWidth(M.CHECK + 7 + math.max(10, textW))
+            row.check:Show()
             row.dot:ClearAllPoints()
             row.dot:SetPoint("LEFT", row, "LEFT", M.CHECK + 7 + textW + 6, 0)
             row.reset:SetScript("OnClick", function()
@@ -1215,6 +1327,7 @@ FillBar = function()
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", bar.list, "TOPLEFT", 0, -y)
         row:SetPoint("RIGHT", bar.list, "RIGHT", 0, 0)
+        row._zY = y
         PaintRow(row)
         y = y + ROW
         row:Show()
@@ -1243,8 +1356,9 @@ FillBar = function()
     if d.barPoint then
         bar:SetPoint(d.barPoint, UIParent, d.barPoint, d.barX or 0, d.barY or 0)
     else
-        -- top left: the middle of the screen is where the HUD is placed
-        bar:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -20)
+        -- top left, under the top bar: the middle of the screen is where
+        -- the HUD is placed
+        bar:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -60)
     end
     RefreshBar()
 end
@@ -1259,6 +1373,28 @@ RefreshBar = function()
         if not IsParked(m.key) and not IsGrey(m) then anyShown = true break end
     end
     bar.showHide:SetLabel(anyShown and "Hide all" or "Show all")
+    if top then
+        local live = 0
+        for _, m in ipairs(current) do
+            if not IsGrey(m) and not (IsRaidMod(m) and not DB().showRaidMods) then live = live + 1 end
+        end
+        -- the status line, long and short (LayoutTop takes what fits)
+        if n > 0 then
+            top._status = { n .. (n == 1 and " frame moved" or " frames moved"), n .. " moved" }
+        else
+            top._status = { live .. (live == 1 and " frame" or " frames"), "" }
+        end
+        top.undo:SetDisabled(not ES.CanUndo())
+        top.grid:SetActive(DB().grid and true or false)
+        top.snap:SetActive(DB().snap and true or false)
+        top.list:SetActive(bar:IsShown() and true or false)
+        local anyRM = false
+        for _, m in ipairs(current) do if IsRaidMod(m) then anyRM = true break end end
+        top.rm:SetShown(anyRM)
+        top.rm:SetActive(DB().showRaidMods and true or false)
+        LayoutTop()
+    end
+    if acts and acts:IsShown() and acts.Fill then acts:Fill() end
     for _, row in ipairs(bar.rows) do
         if row:IsShown() and row.movable then PaintRow(row) end
     end
@@ -1269,6 +1405,7 @@ local function ScrollTo(key)
     for i, row in ipairs(bar.rows) do
         if row:IsShown() and row.movable and row.movable.key == key then
             local top = (i - 1) * ROW
+            if row._zY then top = row._zY end
             local h = bar.scroll:GetHeight() or 0
             local _, max = bar.scrollBar:GetMinMaxValues()
             local v = math.max(0, math.min(max or 0, top - h / 2 + ROW / 2))
@@ -1279,10 +1416,331 @@ local function ScrollTo(key)
 end
 
 -- ============================================================
+-- THE TOP BAR (2026-11-09)
+-- One strip at the top of the screen: what Edit Mode is, how many
+-- elements and how many moved, the filter, Grid, Snap, the Elements
+-- panel, Undo, Cancel, Save & Exit.
+-- ============================================================
+local TOP_H = 44
+local HINT_H = 22
+local FILTER_MIN, FILTER_MAX = 120, 240
+local HINT_TEXT = "Drag a box to move it.     Arrow keys nudge the picked box (Shift: 10).     "
+    .. "Right-click a box for more.     Escape saves and exits."
+
+-- What fits, from what the texts measure (2026-11-10). Right to left:
+-- Save & Exit, Cancel, Undo | Frames, Raid mods (only when there are
+-- any), Snap, Grid | the search box. Left: the title and a status line.
+-- The search box gets what is left between the two, between FILTER_MIN
+-- and FILTER_MAX. When that is too little the status line shortens, then
+-- goes; then the search box goes. Nothing is ever laid over anything.
+LayoutTop = function()
+    if not top then return end
+    local width = top:GetWidth() or 640
+    local x = 12
+    local function Put(b, gap)
+        b:ClearAllPoints()
+        b:SetPoint("RIGHT", top, "RIGHT", -x, 0)
+        x = x + (b:GetWidth() or 0) + gap
+    end
+    Put(top.save, 6) Put(top.cancel, 6) Put(top.undo, 16)
+    Put(top.list, 6)
+    if top.rm:IsShown() then Put(top.rm, 6) end
+    Put(top.snap, 6) Put(top.grid, 16)
+    local left = 14 + 3 + 9 + math.ceil(top.title:GetStringWidth() or 80)
+    local st = top._status or { "", "" }
+    local tries = { { st[1], true }, { st[2], true }, { "", true }, { st[2], false }, { "", false } }
+    for _, t in ipairs(tries) do
+        local status, withFilter = t[1], t[2]
+        local sw = 0
+        if status ~= "" then
+            top.count:SetText(status)
+            sw = 10 + math.ceil(top.count:GetStringWidth() or (#status * 6))
+        end
+        local room = width - x - left - sw - 16
+        if room >= (withFilter and FILTER_MIN or 0) then
+            top.count:SetText(status)
+            top.count:SetShown(status ~= "")
+            top.filter:SetShown(withFilter)
+            if withFilter then
+                top.filter:SetWidth(math.min(FILTER_MAX, room))
+                top.filter:ClearAllPoints()
+                top.filter:SetPoint("RIGHT", top, "RIGHT", -x, 0)
+            end
+            top._layout = { status = status, filter = withFilter, room = room }
+            return
+        end
+    end
+    top.count:SetText("")
+    top.count:Hide()
+    top.filter:Hide()
+    top._layout = { status = "", filter = false, room = 0 }
+end
+
+BuildTop = function()
+    top = CreateFrame("Frame", "ZacUIEditModeTop", UIParent)
+    top:SetFrameStrata("TOOLTIP")
+    top:SetHeight(TOP_H)
+    local sw = UIParent:GetWidth() or 1024
+    top:SetWidth(math.max(640, math.min(1040, sw - 40)))
+    top:SetPoint("TOP", UIParent, "TOP", 0, 0)
+    top:EnableMouse(true)
+    UI.Fill(top, "ui", "windowBg", 0.97)
+    UI.Border(top, "ui", "border")
+    -- (2026-11-10, Zac: "moveui header is white and no texture") a fill
+    -- is white until its box is painted
+    top._zPaint = UI.PaintBox
+    top:_zPaint()
+    top:Hide()
+
+    local tick = top:CreateTexture(nil, "ARTWORK")
+    tick._zui_own = true
+    tick:SetTexture(FLAT)
+    tick:SetSize(3, 20)
+    tick:SetPoint("LEFT", top, "LEFT", 14, 0)
+    local a = Col("accent")
+    tick:SetVertexColor(a.r, a.g, a.b, 1)
+    top.title = UI.Font(top, F.TITLE, { text = "Edit Mode", cat = "text", key = "normal" })
+    top.title:SetPoint("LEFT", tick, "RIGHT", 9, 0)
+    -- the status line: how many frames moved in this pass (LayoutTop
+    -- shortens or drops it when the bar is narrow)
+    top.count = UI.Font(top, F.SMALL, { text = "", cat = "text", key = "gray" })
+    top.count:SetPoint("LEFT", top.title, "RIGHT", 10, -1)
+    top.count:SetWordWrap(false)
+
+    local function Btn(label, w, tip, body, fn)
+        local b = UI.Button(top, label, { width = w, height = 24, size = F.LABEL, onClick = fn })
+        if tip then UI.Tooltip(b, tip, body) end
+        return b
+    end
+    top.save = Btn("Save & Exit", 96, "Save & Exit",
+        "Keep everything where it is now, and leave. (Escape does the same.)", function() Exit("save") end)
+    top.save:SetActive(true)
+    top.cancel = Btn("Cancel", 64, "Cancel",
+        "Put back every frame moved since Edit Mode opened, and leave.", function() Exit("cancel") end)
+    top.undo = Btn("Undo", 56, "Undo  (Ctrl+Z)", "Put back the last move.", function() ES.Undo() RefreshBar() end)
+    top.list = Btn("Frames", 66, "Frames",
+        "The list of everything that can be moved: untick one to hide it while you place the rest, "
+            .. "reset one or all of them, open a frame's settings, dim the world.", function()
+            if bar:IsShown() then bar:Hide() else UI.OpenWindow(bar) end
+            RefreshBar()
+        end)
+    top.snap = Btn("Snap", 52, "Snap to frames",
+        "A dragged frame's edges and centre snap to the nearest other frame's, and to the middle and edges "
+            .. "of the screen. Hold Alt while dragging to place one freely.", function()
+            local d = DB()
+            d.snap = not d.snap
+            bar.snap:SetChecked(d.snap)
+            RefreshBar()
+        end)
+    top.rm = Btn("Raid mods", 78, "Raid mods",
+        "The raid mods' own boxes (timers, warnings, icons, lists): out of the way until you ask for them, "
+            .. "so the rest is easier to place.", function()
+            local d = DB()
+            d.showRaidMods = not d.showRaidMods
+            ApplyFilter()
+            FillBar()
+        end)
+    top.grid = Btn("Grid", 52, "Grid", "The grid under everything, one pixel wide.", function()
+        local d = DB()
+        d.grid = not d.grid
+        bar.grid:SetChecked(d.grid)
+        PaintOverlay()
+        RefreshBar()
+    end)
+
+    top.filter = UI.EditBox(top, { width = FILTER_MIN, hint = "Find a frame...", onChange = function(text)
+        local t = tostring(text or "")
+        -- (the panel's hidden box keeps the same text; the filtering is
+        -- done here, a beat after the last key)
+        if bar and bar.filter and bar.filter.editBox and bar.filter.editBox:GetText() ~= t then
+            bar.filter:SetText(t)
+        end
+        SetFilter(t)
+    end })
+
+    -- HOW TO USE IT, in one line under the bar. It steps aside for the
+    -- "click another frame" prompt while one is being picked.
+    local hint = CreateFrame("Frame", "ZacUIEditModeHint", top)
+    hint:SetFrameStrata("TOOLTIP")
+    hint:SetHeight(HINT_H)
+    hint:EnableMouse(false)
+    UI.Fill(hint, "ui", "windowBg", 0.80)
+    hint._zPaint = UI.PaintBox
+    hint:_zPaint()
+    hint.text = UI.Font(hint, F.SMALL, { text = HINT_TEXT, cat = "text", key = "gray" })
+    hint.text:SetPoint("CENTER", 0, 0)
+    hint.text:SetWordWrap(false)
+    hint:SetPoint("TOP", top, "BOTTOM", 0, 0)
+    -- as wide as its text, never wider than the bar (a short version
+    -- when even that is too much)
+    local tw = math.ceil(hint.text:GetStringWidth() or 560) + 28
+    if tw > top:GetWidth() then
+        hint.text:SetText("Drag to move.   Arrows nudge.   Right-click for more.   Escape saves.")
+        tw = math.min(top:GetWidth(), math.ceil(hint.text:GetStringWidth() or 400) + 28)
+    end
+    hint:SetWidth(tw)
+    top.hint = hint
+
+    LayoutTop()
+end
+
+-- ============================================================
+-- THE PICKED BOX'S ACTIONS (2026-11-09)
+-- Click a box and what can be done with it is written on it (under it
+-- when the box is too small): attach / detach, match width, match
+-- height, reset, its settings, hide. The same things the right-click
+-- menu holds, with nothing to go looking for.
+-- ============================================================
+local function ActsFor(m)
+    local link = ES.LinkOf(m.key)
+    local canSize = m.size and m.size.set and true or false
+    local out = {}
+    -- (2026-11-10) only what can be done with this frame, the common
+    -- things first; what it cannot do (and why) is in its right-click menu
+    if m.reset ~= nil then
+        out[#out + 1] = { "Reset", true, function() if m.reset then m.reset(true) ES.Check() RefreshBar() end end,
+            "Back to its default spot. Ctrl+Z puts it back." }
+    end
+    if ES.PageFor(m) ~= nil then
+        out[#out + 1] = { "Settings", true, function() OpenSettings(m) end,
+            "Leave Edit Mode (keeping your changes) on the page that styles it." }
+    end
+    out[#out + 1] = { "Hide", true, function() SetParked(m, true) FillBar() end,
+        "Out of the way while you place the rest. The Frames button on the top bar brings it back." }
+    if link then
+        out[#out + 1] = { "Detach", true, function() ES.Detach(m.key) ES.Check() RefreshBar() end,
+            "It stops following the frame it is attached to." }
+    elseif m.follower then
+        out[#out + 1] = { "Attach to", true, function() StartPick("attach", m) end,
+            "Click another frame: this one then follows it wherever it goes." }
+    end
+    if canSize then
+        out[#out + 1] = { "Match width", true, function() StartPick("w", m) end,
+            "Click the frame whose width this one should take." }
+        out[#out + 1] = { "Match height", true, function() StartPick("h", m) end,
+            "Click the frame whose height this one should take." }
+    end
+    return out
+end
+
+local function BuildActs()
+    acts = CreateFrame("Frame", "ZacUIEditModeActs", UIParent)
+    acts:SetFrameStrata("FULLSCREEN_DIALOG")
+    acts:SetHeight(18)
+    acts:EnableMouse(true)
+    UI.Fill(acts, "ui", "windowBg", 0.92)
+    acts._zPaint = UI.PaintBox
+    acts:_zPaint()
+    acts.items, acts.rules = {}, {}
+    acts:Hide()
+    local function Item(i)
+        local b = acts.items[i]
+        if b then return b end
+        b = CreateFrame("Button", nil, acts)
+        b:SetHeight(18)
+        b.text = UI.Font(b, F.SMALL, { text = "", cat = "text", key = "gold" })
+        b.text:SetPoint("CENTER", 0, 0)
+        b:SetScript("OnEnter", function(self)
+            self.hot = true
+            acts:Tint(self)
+            if self.tip then
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                local t, c = ns.GetColor("tooltip", "title"), ns.GetColor("tooltip", "body")
+                GameTooltip:AddLine(self.text:GetText() or "", t.r, t.g, t.b)
+                GameTooltip:AddLine(self.tip, c.r, c.g, c.b, true)
+                GameTooltip:Show()
+            end
+        end)
+        b:SetScript("OnLeave", function(self) self.hot = nil acts:Tint(self) GameTooltip:Hide() end)
+        b:SetScript("OnClick", function(self) if self.on and self.fn then self.fn() end end)
+        local r = acts:CreateTexture(nil, "ARTWORK")
+        r._zui_own = true
+        r:SetTexture(FLAT)
+        r:SetSize(1, 10)
+        acts.rules[i] = r
+        acts.items[i] = b
+        return b
+    end
+    function acts:Tint(b)
+        local c
+        if not b.on then c = ns.GetColor("text", "disabled")
+        elseif b.hot then c = ns.GetColor("text", "normal")
+        else c = Col("accent") end
+        b.text:SetTextColor(c.r, c.g, c.b, 1)
+    end
+    function acts:Fill()
+        local h = self.h
+        local m = h and MovableOf(h)
+        if not (m and h:IsShown()) then self:Hide() return end
+        local list = ActsFor(m)
+        local x = 6
+        local bc = ns.GetColor("text", "disabled")
+        for i, it in ipairs(list) do
+            local b = Item(i)
+            b.text:SetText(it[1])
+            b.on, b.fn, b.tip = it[2], it[3], it[4]
+            local w = math.floor((b.text:GetStringWidth() or 40) + 12.5)
+            b:SetWidth(w)
+            b:ClearAllPoints()
+            b:SetPoint("LEFT", self, "LEFT", x, 0)
+            b:Show()
+            self:Tint(b)
+            local r = self.rules[i]
+            r:ClearAllPoints()
+            r:SetPoint("LEFT", self, "LEFT", x - 1, 0)
+            r:SetVertexColor(bc.r, bc.g, bc.b, 0.6)
+            r:SetShown(i > 1)
+            x = x + w
+        end
+        for i = #list + 1, #self.items do self.items[i]:Hide() self.rules[i]:Hide() end
+        self:SetWidth(x + 6)
+        -- on the box, under its name, when there is room; else under the
+        -- box (above it at the bottom of the screen)
+        self:ClearAllPoints()
+        local bw, bh = h:GetWidth() or 0, h:GetHeight() or 0
+        local follows = rawget(h, "_zFollows")
+        if bw >= x + 16 and bh >= (follows and 62 or 50) then
+            self:SetPoint("TOP", h, "CENTER", 0, follows and -18 or -8)
+            self._zFill:Hide()
+        else
+            self._zFill:Show()
+            if (h:GetBottom() or 100) < 40 then
+                self:SetPoint("BOTTOM", h, "TOP", 0, 18)
+            else
+                self:SetPoint("TOP", h, "BOTTOM", 0, -16)
+            end
+        end
+        self:Show()
+    end
+    -- the box went (hidden, filtered, another picked): so do its actions
+    acts:SetScript("OnUpdate", function(self, dt)
+        self._acc = (self._acc or 0) + dt
+        if self._acc < 0.15 then return end
+        self._acc = 0
+        local h = self.h
+        if not (active and h and Kit.selected == h and h:IsShown()) or picking then self:Hide() end
+    end)
+end
+
+Select = function(h)
+    Kit.Select(h)
+    if not active then return end
+    if not acts then BuildActs() end
+    acts.h = h
+    if h then acts:Fill() else acts:Hide() end
+end
+
+-- ============================================================
 -- KEYS (through the handle kit's keyboard frame, up for the pass)
 -- ============================================================
 local function Key(key)
     if picking and key == "ESCAPE" then StopPick() return true end
+    -- Escape: the Frames panel first when it is open, else leave,
+    -- keeping the changes (a stray key never throws work away)
+    if key == "ESCAPE" and active then
+        if bar and bar:IsShown() then bar:Hide() else Exit("save") end
+        return true
+    end
     if key == "Z" and IsControlKeyDown() then
         if ES.Undo() then RefreshBar() end
         return true
@@ -1307,13 +1765,20 @@ end
 
 local KIT_HOOKS = {
     snap = Snap,
-    select = function(h) Kit.Select(h) end,
+    select = function(h) Select(h) end,
+    follows = function(h)
+        local m = MovableOf(h)
+        local link = m and ES.LinkOf(m.key)
+        if not link then return nil end
+        local to = byKey[link.to]
+        return to and to.label or link.to
+    end,
     changed = function() ES.Check() end,
     dropped = function() end,
     menu = function(h)
         local m = MovableOf(h)
         if not m then return false end
-        Kit.Select(h)
+        Select(h)
         return Menu(m)
     end,
     key = Key,
@@ -1334,6 +1799,7 @@ local function Enter(opts)
     active = true
     openPage = nil
     filterText = ""
+    filterSerial = filterSerial + 1   -- (a search still waiting on its beat is dropped)
     wipe(filtered)
 
     -- the config window gets out of the way and comes back on the way out
@@ -1355,12 +1821,19 @@ local function Enter(opts)
     Kit.EditKeys(true)
 
     if not bar then BuildBar() end
+    if not top then BuildTop() end
     bar.filter:SetText("")
+    top.filter:SetText("")
+    ApplyFilter()       -- (the raid mods' boxes stay out unless asked for)
     FillBar()
     bar.dim:SetValue(DB().dim)
     bar.grid:SetChecked(DB().grid)
     bar.snap:SetChecked(DB().snap)
-    UI.OpenWindow(bar)
+    -- (the screen may have changed size since the bar was built)
+    top:SetWidth(math.max(640, math.min(1040, (UIParent:GetWidth() or 1024) - 40)))
+    top:Show()
+    if top.hint then top.hint:Show() end
+    RefreshBar()
     NotifyWatchers(true)
     if focus then ns.EditModeFocus(focus) end
 end
@@ -1378,9 +1851,19 @@ function ns.EditModeFocus(keys)
         end
     end
     if not first then return end
+    -- (a raid mods page sent one of its boxes here: they come in)
+    for _, key in ipairs(keys) do
+        if byKey[key] and IsRaidMod(byKey[key]) and not DB().showRaidMods then
+            DB().showRaidMods = true
+            ApplyFilter()
+            break
+        end
+    end
     if filterText ~= "" then
         filterText = ""
+    filterSerial = filterSerial + 1   -- (a search still waiting on its beat is dropped)
         bar.filter:SetText("")
+        if top then top.filter:SetText("") end
         ApplyFilter()
     end
     wipe(focusKeys)
@@ -1388,7 +1871,7 @@ function ns.EditModeFocus(keys)
     focusUntil = (GetTime and GetTime() or 0) + 1.6
     local ok, list = pcall(first.frames or function() end)
     local h = ok and type(list) == "table" and list[1]
-    if h and Kit.IsDressed(h) then Kit.Select(h) end
+    if h and Kit.IsDressed(h) then Select(h) end
     FillBar()
     ScrollTo(first.key)
     if guides then guides._acc = 1 end
@@ -1419,9 +1902,15 @@ Exit = function(mode)
     wipe(byKey)
     wipe(filtered)
     filterText = ""
+    filterSerial = filterSerial + 1   -- (a search still waiting on its beat is dropped)
     wipe(focusKeys)
     focusUntil = nil
     if overlay then overlay:Hide() end
+    if acts then acts:Hide() end
+    if top then
+        top:Hide()
+        if top.hint then top.hint:Hide() end
+    end
     if bar and bar:IsShown() then bar:Hide() end
     if undone and undone > 0 then
         Print(undone == 1 and "1 frame put back where it was." or (undone .. " frames put back where they were."))
@@ -1460,6 +1949,9 @@ ns.ExitEditMode = Exit
 ns.CancelEditMode = function() Exit("cancel") end
 ns.ToggleEditMode = Toggle
 ns.IsEditMode = function() return active end
+-- the bar and the list repainted and laid out again (after the bar's
+-- width or the UI scale changed)
+ns.EditModeRefresh = function() if active and RefreshBar then RefreshBar() end end
 ns.WatchEditMode = WatchEditMode
 ns.EditModeMovables = Movables
 -- the movable frames a settings page styles that can be moved here now

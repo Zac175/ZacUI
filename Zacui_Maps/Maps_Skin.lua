@@ -312,7 +312,10 @@ end
 function S.PaintHeader(bar)
     local db = DB()
     if bar._zFill then bar._zFill:SetVertexColor(Maps.Color("headerBg", "windowBg", nil, 0.82)) end
-    if bar._zRule then bar._zRule:SetVertexColor(Maps.Color("headerRule", "accent", nil, 0.5)) end
+    -- (2026-11-10, Zac: "the map header still uses the old styling") the
+    -- flat header every other ZacUI window wears: a white hairline under
+    -- it, the title white at the left. A picked colour still wins.
+    if bar._zRule then bar._zRule:SetVertexColor(Maps.Color("headerRule", "text", "normal", 0.10)) end
     if bar.title then
         Maps.StyleText(bar.title, db.titleFont, UI.F.NORMAL)
         bar.title:_zPaint()
@@ -334,11 +337,11 @@ function S.MakeHeader(bar)
     rule:SetPoint("BOTTOMRIGHT")
     bar._zRule = rule
 
-    bar.title = UI.Font(bar, UI.F.NORMAL, { cat = "text", key = "gold",
-        justify = "CENTER" })
-    bar.title:SetPoint("CENTER", 0, 0)
-    -- gold unless a colour is picked on the Maps page, whoever repaints it
-    bar.title._zPaint = function(self) self:SetTextColor(Maps.Color("titleColor", "text", "gold")) end
+    bar.title = UI.Font(bar, UI.F.NORMAL, { cat = "text", key = "normal",
+        justify = "LEFT" })
+    bar.title:SetPoint("LEFT", bar, "LEFT", 12, 0)
+    -- white unless a colour is picked on the Maps page, whoever repaints it
+    bar.title._zPaint = function(self) self:SetTextColor(Maps.Color("titleColor", "text", "normal")) end
 
     bar._zPaint = S.PaintHeader
     bar:_zPaint()
@@ -715,6 +718,9 @@ function S.Apply()
         end)
         x._zui_own = true
         x._zMapOwn = true
+        -- (the settings windows' X: white, dim at rest)
+        x._zSet = true
+        x:_zPaint()
         x:SetPoint("RIGHT", header, "RIGHT", -5, 0)
         LiftAboveCanvas(x, map, 20)
         UI.Tooltip(x, "Close", "Escape closes it too.")

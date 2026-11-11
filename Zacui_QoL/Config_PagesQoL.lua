@@ -851,12 +851,18 @@ local function LootTab(L, QoL)
     end
     L:EndCard()
 
-    L:Card("Known items")
-    L:Desc("One choice for the whole set. These win over the quality rule.")
-    for _, g in ipairs(AR.GROUPS) do
-        ChoiceRow(a.groups, g.key, g.label)
+    -- (options audit 2026-11-09) the known sets are Classic raid drops
+    -- (Zul'Gurub coins and bijous, Naxxramas scraps): none of them drops on
+    -- Retail, so the card is not shown there (saved choices stay)
+    -- (2026-11-09, Zac: "forever has no raids yet": not there either)
+    if not (ns.Flavor and (ns.Flavor() == "retail" or ns.Flavor() == "forever")) then
+        L:Card("Known items")
+        L:Desc("One choice for the whole set. These win over the quality rule.")
+        for _, g in ipairs(AR.GROUPS) do
+            ChoiceRow(a.groups, g.key, g.label)
+        end
+        L:EndCard()
     end
-    L:EndCard()
 
     L:Card("Your items")
     L:Desc("Specific items, by id or by shift-clicking a link into the "

@@ -985,14 +985,22 @@ local function Restride(container)
 
     -- What Blizzard actually anchors. It drops the disabled buttons when
     -- the frame asks it to; so do we, or a hidden button occupies a cell.
+    -- (one the aura filter keeps off the screen takes no cell either)
     local enabled = enabledScratch
     for i = #enabled, 1, -1 do enabled[i] = nil end
+    local anyFiltered = false
     for _, a in ipairs(auras) do
-        if a.hasValidInfo or a.isExample or a.isAuraAnchor then
+        if a._zFiltered then
+            anyFiltered = true
+        elseif a.hasValidInfo or a.isExample or a.isAuraAnchor then
             enabled[#enabled + 1] = a
         end
     end
     local toAnchor = (frame and frame.doNotAnchorDisabledFrames) and enabled or auras
+    if anyFiltered and toAnchor == auras then
+        toAnchor = {}
+        for _, a in ipairs(auras) do if not a._zFiltered then toAnchor[#toAnchor + 1] = a end end
+    end
 
     local horizontal = info.isHorizontal
     local compact = edgeTimers and horizontal and not KitStockGrid(cfg)
@@ -1079,13 +1087,113 @@ local function SeedAuras(frame, container)
     end
 end
 
+-- ============================================================
+-- THE AURA FILTER on your own buffs and debuffs (2026-11-10)
+-- ============================================================
+-- Places "player_buffs" and "player_debuffs" (Core_AuraFilter). Blizzard
+-- fills and shows its buttons; right after each of its passes the ones the
+-- filter says no to are hidden and the rest close up (Restride leaves
+-- them out). Nothing of Blizzard's is written - a button is only hidden
+-- and re-anchored, as the stride already does.
+-- A FILTER NOBODY HAS CHANGED DOES NOTHING: until a place's filter is
+-- saved and says something other than "everything", the pass returns at
+-- its first line and no button is touched.
+-- Weapon enchants are never filtered. An aura whose name the game hides
+-- (WoW Forever / Retail in a fight) stays unless the filter is "Nothing".
+local F_PLACE = { Buff = "player_buffs", Debuff = "player_debuffs" }
+local F_KIND = { Buff = "HELPFUL", Debuff = "HARMFUL" }
+local function FilterActive(place)
+    local s = ZacUIDB and ZacUIDB.auraFilters
+    local c = type(s) == "table" and s[place]
+    if type(c) ~= "table" then return false end
+    local adv = type(c.adv) == "table" and c.adv or nil
+    return (c.preset ~= nil and c.preset ~= "all")
+        or (type(c.never) == "table" and next(c.never) ~= nil)
+        or (adv and (adv.onlyMine or (tonumber(adv.minDur) or 0) > 0 or (tonumber(adv.maxDur) or 0) > 0
+            or (tonumber(adv.minStacks) or 0) > 1)) and true or false
+end
+local fAura, fCtx = {}, {}
+local function FilterPass(frame)
+    local on = FilterActive("player_buffs") or FilterActive("player_debuffs")
+    if not on and not (frame and frame._zAnyFiltered) then return end
+    local AF = ns.AuraFilter
+    local list = frame and frame.auraFrames
+    if not AF or type(list) ~= "table" then return end
+    local GetData = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+    local changed, any = false, false
+    for _, a in ipairs(list) do
+        local hide = false
+        local info = a.buttonInfo
+        if on and GetData and a.hasValidInfo and not a.isExample and type(info) == "table" then
+            local place = F_PLACE[info.auraType]
+            if place and info.index and FilterActive(place) then
+                local ok, d = pcall(GetData, "player", info.index, F_KIND[info.auraType])
+                if ok and type(d) == "table" then
+                    local nm = d.name
+                    if Secret(nm) or type(nm) ~= "string" then
+                        fAura.hidden, fAura.name, fAura.spellId = true, nil, nil
+                        -- (whose it is: the game's own never-hidden flag)
+                        fAura.mine = (ns.AuraIsMine and ns.AuraIsMine(d)) and true or false
+                        fAura.duration, fAura.expirationTime, fAura.count, fAura.dispel = nil, nil, nil, nil
+                    else
+                        fAura.hidden = nil
+                        fAura.name, fAura.spellId = nm, d.spellId
+                        fAura.mine = d.sourceUnit == "player"
+                        fAura.duration, fAura.expirationTime = d.duration, d.expirationTime
+                        fAura.count = d.applications
+                        fAura.dispel = d.dispelName and true or false
+                    end
+                    hide = not AF.Pass(place, fAura, fCtx)
+                end
+            end
+        end
+        if hide then
+            any = true
+            if a:IsShown() then a:Hide() end
+        elseif a._zFiltered and a.hasValidInfo and not a:IsShown() then
+            a:Show()
+        end
+        if (a._zFiltered or false) ~= hide then
+            a._zFiltered = hide or nil
+            changed = true
+        end
+    end
+    frame._zAnyFiltered = any or nil
+    local container = frame.AuraContainer
+    if changed and container then
+        if container._zuiAuras == nil then container._zuiAuras = list end
+        Restride(container)
+    end
+end
+local function FilterAll()
+    for _, frame in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
+        if frame and frame.AuraContainer then FilterPass(frame) end
+    end
+end
+ns.BuffFilterPass = FilterAll
+local function HookFilter(frame)
+    if frame._zuiFilterHooked or type(frame.UpdateAuraButtons) ~= "function" then return end
+    frame._zuiFilterHooked = true
+    -- after each of Blizzard's own passes, on its own dispatch
+    hooksecurefunc(frame, "UpdateAuraButtons", FilterPass)
+    local AF = ns.AuraFilter
+    if AF and not AF.Def("player_buffs") then
+        AF.Register("player_buffs", { label = "Your buffs (by the minimap)", kind = "buff", preset = "all",
+            noSort = true, noBoss = true, noMax = true, noCombat = true, refresh = FilterAll })
+        AF.Register("player_debuffs", { label = "Your debuffs (by the minimap)", kind = "debuff", preset = "all",
+            noSort = true, noBoss = true, noMax = true, noCombat = true, refresh = FilterAll })
+    end
+end
+
 local function ApplyAuraStride()
     for _, frame in ipairs({ _G.BuffFrame, _G.DebuffFrame }) do
         local container = frame and frame.AuraContainer
         if container then
             HookContainer(container)
             SeedAuras(frame, container)
+            HookFilter(frame)
             Restride(container)
+            FilterPass(frame)
         end
     end
 end

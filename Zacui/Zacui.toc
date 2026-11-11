@@ -2,7 +2,7 @@
 ## Title: ZacUI
 ## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
 ## Author: Zac
-## Version: 3.0.6
+## Version: 3.0.8
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB
@@ -64,6 +64,8 @@ Core\Core_Boot.lua
 # Which game this is (Classic Era, TBC, Forever) and what is off on each.
 # Right after Boot: every later file and every part may ask.
 Core\Core_Flavor.lua
+# One filter for every list of buffs or debuffs (2026-11-10). After Flavor.
+Core\Core_AuraFilter.lua
 # SETUP2: every CVar ZacUI writes goes through ns.CVar (recorded, put back on
 # disable / uninstall). Right after Flavor, before anything that writes one.
 Core\Core_CVar.lua
@@ -239,6 +241,8 @@ UI\Config\Config_PreviewDrag.lua
 # "Move in Edit Mode" on every page that styles a movable frame (wraps
 # the page header). After Config_Base; makes nothing at load.
 UI\Config\Config_EditLinks.lua
+# The aura filter's panel (Core_AuraFilter). After Config_Base.
+UI\Config\Config_AuraFilter.lua
 
 # ---------- Changelog ----------
 # The version history (data, newest first), then the popup after an

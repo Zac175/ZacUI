@@ -185,8 +185,9 @@ function V2.Normalize(def)
                 if over.res ~= nil then r = setmetatable({ res = over.res }, { __index = r }) end
                 if over.aux ~= nil then r = setmetatable({ aux = over.aux }, { __index = r }) end
             end
+            -- (specID: Retail's roles are keyed by the game's spec id, HUD_Retail.lua; nil elsewhere)
             roles[#roles + 1] = { key = r.key, label = r.label or r.key, tab = r.tab or i, form = r.form,
-                show = show, aux = r.aux, glows = r.glows, res = r.res }
+                show = show, aux = r.aux, glows = r.glows, res = r.res, specID = r.specID }
         end
     end
     def.roles = roles
@@ -268,8 +269,34 @@ V2.TalentTab, V2.TraitTab = TalentTab, TraitTab
 -- talent tabs where that client still has them. A tree holding two
 -- presets (Feral Combat: cat, bear) picks by the power you run on now:
 -- rage = bear. powerType: the HUD's own read (nil = cat).
+-- Retail: the game's own id of the spec you play (62 Arcane, 71 Arms,
+-- ...), or nil when the client gives none (no spec picked yet, a value it
+-- hides, a client without the call)
+function V2.RetailSpecID()
+    local CSI = C_SpecializationInfo
+    local getIndex = (CSI and CSI.GetSpecialization) or GetSpecialization
+    local getInfo = (CSI and CSI.GetSpecializationInfo) or GetSpecializationInfo
+    if not (getIndex and getInfo) then return nil end
+    local ok, index = pcall(getIndex)
+    if not ok or ns.IsSecret(index) or type(index) ~= "number" then return nil end
+    local okI, id = pcall(getInfo, index)
+    if not okI or ns.IsSecret(id) or type(id) ~= "number" then return nil end
+    return id
+end
+
 function V2.GuessRole(def, powerType)
     if not (def.roles and #def.roles > 0) then return nil end
+    if HUD.RETAIL then
+        -- Retail plays by spec: the role whose specID is the spec in force
+        -- (none listed for it: the class baseline)
+        local specID = V2.RetailSpecID()
+        if specID then
+            for _, r in ipairs(def.roles) do
+                if r.specID == specID then return r.key end
+            end
+        end
+        return nil
+    end
     local lvl = UnitLevel and UnitLevel("player")
     if type(lvl) == "number" and not ns.IsSecret(lvl) and lvl < 10 then return nil end
     local tab
@@ -352,10 +379,123 @@ end
 -- utility -> the utility row, starting hidden, a tracked buff -> the buff
 -- row). Returns true when a row gained an entry (icons to build).
 local CAT_ROW = { essential = "main", utility = "utility", buffs = "buffs" }
+
+-- Retail (HUD_Retail.lua's class HUD): the list IS the HUD, and it is the
+-- spec's. Essential -> the grid, Utility -> the utility row (off unless
+-- the spec's preset ticks it), TrackedBuff -> the buff row, TrackedBar ->
+-- a buff row entry the buff bars are seeded with (no icon of its own
+-- unless the game also lists it as a tracked buff). An entry the game
+-- hides by default starts unticked. An entry of the game's that is not
+-- in this read's set leaves its row (another spec's) - but only on a row
+-- this read filled: a list the game did not serve judges nothing, and an
+-- empty read changes nothing at all. Every entry keeps the game's word
+-- on it (known, the id in force, its other ids) for the HUD's reads.
+-- def._rver moves when a row changed: HUD_Retail rebuilds icons on it.
+local RCAT_LIST = { essential = "grid", utility = "utility", buffs = "buffRow", bars = "buffRow" }
+local RLIST_ROW = { grid = "main", utility = "utility", buffRow = "buffs" }
+local function RetailMerge(self, cat)
+    if #cat == 0 then return false end
+    local def = self.def
+    def.utility, def.buffRow, def.spells = def.utility or {}, def.buffRow or {}, def.spells or {}
+    local want = { grid = {}, utility = {}, buffRow = {} }
+    local order = { grid = {}, utility = {}, buffRow = {} }
+    local asBuff, asBar, barOrder = {}, {}, {}
+    for _, e in ipairs(cat) do
+        local listName = RCAT_LIST[e.category]
+        if listName and e.spellID and e.name then
+            local key = "game" .. e.spellID
+            -- (a key sits on the grid or the utility row, never both)
+            if not (listName == "utility" and want.grid[key]) then
+                if not want[listName][key] then
+                    want[listName][key] = e
+                    order[listName][#order[listName] + 1] = key
+                end
+                if e.category == "buffs" then asBuff[key] = true end
+                if e.category == "bars" and not asBar[key] then
+                    asBar[key] = true
+                    barOrder[#barOrder + 1] = key
+                end
+            end
+        end
+    end
+    local changed = false
+    for listName, set in pairs(want) do
+        local list = def[listName]
+        if not list then list = {} def[listName] = list end
+        if next(set) ~= nil then
+            for i = #list, 1, -1 do
+                local en = list[i]
+                if en.fromGame and not set[en.key] then
+                    table.remove(list, i)
+                    if listName ~= "buffRow" then def.spells[en.key] = nil end
+                    changed = true
+                end
+            end
+        end
+        for _, key in ipairs(order[listName]) do
+            local e = set[key]
+            local _, en = Find(list, key)
+            if not en then
+                local row = RLIST_ROW[listName]
+                if row == "buffs" then
+                    AddEntry(def, { key = key, id = e.spellID, label = e.name, row = row, fromGame = true })
+                else
+                    AddEntry(def, { key = key, kind = "spell", spell = key, spellId = e.spellID, label = e.name,
+                        row = row, fromGame = true, noRange = not e.hasRange })
+                end
+                _, en = Find(list, key)
+                changed = true
+            end
+            if en and en.fromGame then
+                local hide
+                if listName == "utility" then hide = true
+                elseif listName == "buffRow" then hide = (e.defaultHidden or not asBuff[key]) and true or nil
+                else hide = e.defaultHidden and true or nil end
+                en.defaultHidden = hide
+                en.isKnown = e.isKnown
+                en.curId = e.overrideSpellID or e.spellID
+                en.cdID, en.hasAura, en.selfAura, en.charges = e.cdID, e.hasAura, e.selfAura, e.charges
+                -- its other ids (the override, the linked spells): a preset or an
+                -- aura read may name the spell by any of them
+                local alt = en.altIds
+                if not alt then alt = {} en.altIds = alt else wipe(alt) end
+                local keys = en.altKeys
+                if not keys then keys = {} en.altKeys = keys else wipe(keys) end
+                local function add(id)
+                    if type(id) == "number" and id ~= e.spellID then
+                        alt[#alt + 1] = id
+                        keys[#keys + 1] = "game" .. id
+                    end
+                end
+                add(e.overrideSpellID)
+                for _, l in ipairs(e.linked or {}) do add(l) end
+            end
+        end
+    end
+    -- the buff bars' seeds: the game's tracked bars, in its order
+    local seeds = def.buffBars
+    local same = type(seeds) == "table" and #seeds == #barOrder
+    if same then
+        for i, k in ipairs(barOrder) do if seeds[i] ~= k then same = false break end end
+    end
+    if not same then
+        def.buffBars = barOrder
+        self._v2barSeeds = nil
+        changed = true
+    end
+    if changed then
+        def._rver = (def._rver or 0) + 1
+        self.dirty.spells = true
+        if self.V2BuildMissing then self:V2BuildMissing() end
+    end
+    return changed
+end
+
 function Engine:V2MergeCatalogue()
     if not (V2.Catalogue) then return false end
     local cat = V2.Catalogue()
     if type(cat) ~= "table" then return false end
+    if HUD.RETAIL and self.def.retail then return RetailMerge(self, cat) end
     local def = self.def
     local names = KnownNames(def)
     local added = false

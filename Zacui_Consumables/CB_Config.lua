@@ -359,7 +359,8 @@ local function Tab_general(L)
         Opt(L, "showEquippedWeapons", "Your main and off hand", nil, true)
         Opt(L, "showBagWeapons", "Weapons in your bags", nil, true)
     end
-    if key ~= "potions" then
+    -- (2026-11-09, Zac: hide on TBC - both factions have shamans there)
+    if key ~= "potions" and not (ns.Flavor and ns.Flavor() == "tbc") then
         Check(L, "Horde mode: no main hand button", CB.HordeMode(c), function(v) CB.SetHordeMode(c, v) end,
             "For Windfury Totem on the main hand. Kept for this faction only.")
     end
@@ -750,10 +751,13 @@ local function Tab_look(L)
         Colour(L, "conflictBorder", "Clashing buff edge")
     end
     if key ~= "potions" then
-        Colour(L, "elementalStone", "Elemental stone on")
-        Colour(L, "consecratedStone", "Consecrated stone on")
-        Colour(L, "denseStone", "Dense stone on")
-        Colour(L, "frostOil", "Frost oil on")
+        -- (2026-11-09) the Era stones' own colours are not offered on TBC
+        if not (ns.Flavor and ns.Flavor() == "tbc") then
+            Colour(L, "elementalStone", "Elemental stone on")
+            Colour(L, "consecratedStone", "Consecrated stone on")
+            Colour(L, "denseStone", "Dense stone on")
+            Colour(L, "frostOil", "Frost oil on")
+        end
         Colour(L, "enchanted", "Something else on")
     end
     L:EndCard()

@@ -382,6 +382,9 @@ end
 
 local function Layout()
     if laying then return end
+    -- before the tray is built (a settings slider moved first) there is
+    -- nothing to lay out
+    if not tray then return end
     if suppressed then
         -- Not just an early return: the owning addons re-show their
         -- buttons on their own schedule, and a layout pass that only

@@ -362,10 +362,28 @@ end
 function NP.MatchOn() MatchDecide() return matchOn end
 -- a save's values still on the old shipped default move to the new one;
 -- a key the save lacks is left for CopyDefaults (it takes the new one)
+-- The plate's own sizes are never moved on a save that already exists
+-- (the unit frames' rule, Zacui_UnitFrames/Config.lua GEOMETRY: "sizes
+-- and positions of an existing save are never moved"): a 150 x 16 plate
+-- with its 150 x 14 cast bar stays that size; only a fresh table draws
+-- the new 156 x 17 (the overlay on DEFAULTS above).
+local MATCH_GEOMETRY = { width = true, height = true, combatWidth = true, combatHeight = true,
+    castWidth = true, castHeight = true }
+local function MatchIsGeometry(e)
+    return e[1] == "enemy" and MATCH_GEOMETRY[e[#e - 1]] == true
+end
+NP.MatchIsGeometry = MatchIsGeometry
+-- (a table made this session - a fresh install, a new profile - is not a
+-- save that exists: when it was filled before the look settled it holds
+-- the old sizes only because DEFAULTS had no overlay yet, so its sizes
+-- move with the rest; DB() below notes such tables here)
+local matchFreshTables = setmetatable({}, { __mode = "k" })
 local function MatchMigrate(d)
     local moved = 0
+    local keepSizes = not matchFreshTables[d]
     for i, e in ipairs(MATCH) do
         local rec = MATCH_OLD[i]
+        if keepSizes and MatchIsGeometry(e) then rec = nil end
         local t = d
         for j = 1, #e - 2 do t = type(t) == "table" and t[e[j]] or nil end
         local k = e[#e - 1]
@@ -424,6 +442,8 @@ local function DB()
     if d and d == seeded and d._rev == DB_REV then return d end
     ZacUIDB.nameplates = d or {}
     d = ZacUIDB.nameplates
+    -- (no revision yet: a table made now, not a save - MatchMigrate)
+    if d._rev == nil then matchFreshTables[d] = true end
     -- REV 2: the first shipped defaults were a hand summary of the
     -- profile and got several values wrong (percent size, friendly name
     -- size, cast color, fades). Rev 1 tables are discarded wholesale -

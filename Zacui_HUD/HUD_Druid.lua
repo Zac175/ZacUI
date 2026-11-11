@@ -8,6 +8,7 @@
 
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 ns.HUD.DefineClass({
     class = "DRUID", className = "Druid", label = "Druid HUD", store = "druid",
@@ -46,6 +47,7 @@ ns.HUD.DefineClass({
         { key = "hurricane",       kind = "spell", spell = "hurricane",       label = "Hurricane", noRange = true },
         { key = "challengingRoar", kind = "spell", spell = "challengingRoar", label = "Challenging Roar", noRange = true },
         { key = "tranquility",     kind = "spell", spell = "tranquility",     label = "Tranquility", noRange = true },
+        { key = "swiftmend",       kind = "spell", spell = "swiftmend",       label = "Swiftmend" },
         { key = "potion",          kind = "itemPotion", label = "Potion" },
         { key = "rune",            kind = "itemRune",   label = "Rune" },
     },
@@ -74,7 +76,7 @@ ns.HUD.DefineClass({
         { key = "ffFeral",     id = 17392, label = "Faerie Fire (Feral)" },
         { key = "rake",        id = 9904, castsDot = true },
         { key = "rip",         id = 9896, castsDot = true },
-        { key = "pounce",      id = 9827, label = "Pounce Bleed" },
+        { key = "pounce",      id = 9826, label = "Pounce Bleed" },
         { key = "roots",       id = 9853 },
         { key = "hibernate",   id = 18658 },
         { key = "demoRoar",    id = 9898 },
@@ -109,28 +111,39 @@ ns.HUD.DefineClass({
         { key = "roots",         kind = "spell", spell = "roots",         label = "Entangling Roots" },
         { key = "removeCurse",   kind = "spell", spell = "removeCurse",   label = "Remove Curse" },
         { key = "abolishPoison", kind = "spell", spell = "abolishPoison", label = "Abolish Poison" },
-        { key = "swiftmend",     kind = "spell", spell = "swiftmend",     label = "Swiftmend" },
         { key = "rejuv",         kind = "spell", spell = "rejuv",         label = "Rejuvenation" },
         { key = "regrowth",      kind = "spell", spell = "regrowth",      label = "Regrowth" },
     },
     -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
     -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
     -- section 13: Icy Veins' Classic and TBC feral cat / bear, restoration
-    -- and balance guides). The base lists are Classic Era's (WoW Forever
-    -- plays them too: Era cats skip Rake / Rip in raids, debuff slots); a
-    -- spec's tbc block replaces the rows it names on TBC. Feral Combat holds
-    -- two presets: cat (energy) and bear (rage), by the form you fight in.
+    -- and balance guides). The base lists are Classic Era's (cats skip
+    -- Rake / Rip and moonkin skip Moonfire / Insect Swarm in raids there:
+    -- debuff slots); a spec's tbc or forever block replaces the rows it
+    -- names on that game version (WoW Forever: Shifting Power for Tiger's
+    -- Fury, Primal Bite, its own Lacerate and Wild Growth, one Faerie Fire
+    -- for every form). Feral Combat holds two presets: cat (energy) and
+    -- bear (rage), by the form you fight in.
     roles = {
         { key = "balance", label = "Balance", tab = 1, aux = true, res = { regen = true }, show = {
             main = { "innervate", "ns", "rebirth", "potion", "rune" },
-            utility = { "moonfire", "insectSwarm", "faerieFire", "roots", "removeCurse", "abolishPoison", "rejuv", "regrowth" },
+            utility = { "faerieFire", "roots", "removeCurse", "abolishPoison", "rejuv", "regrowth" },
             buffs = { "naturesGrace", "clearcasting", "innervate", "zhc" },
-            debuffs = { "moonfire", "insectSwarm", "faerieFire" } },
-          glows = { ["debuffs:moonfire"] = { { when = "anticlip", style = "solid" } },
-                    ["debuffs:insectSwarm"] = { { when = "anticlip", style = "solid" } },
-                    ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
+            debuffs = { "faerieFire" } },
+          glows = { ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
           tbc = { show = {
-              main = { "innervate", "forceOfNature", "rebirth", "potion", "rune" } } } },
+              main = { "innervate", "forceOfNature", "rebirth", "potion", "rune" },
+              utility = { "moonfire", "insectSwarm", "faerieFire", "roots", "removeCurse", "abolishPoison", "rejuv", "regrowth" },
+              debuffs = { "moonfire", "insectSwarm", "faerieFire" } },
+            glows = { ["debuffs:moonfire"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:insectSwarm"] = { { when = "anticlip", style = "solid" } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } },
+          forever = { show = {
+              utility = { "moonfire", "insectSwarm", "faerieFire", "roots", "removeCurse", "abolishPoison", "rejuv", "regrowth" },
+              debuffs = { "moonfire", "insectSwarm", "faerieFire" } },
+            glows = { ["debuffs:moonfire"] = { { when = "anticlip", style = "solid" } },
+                      ["debuffs:insectSwarm"] = { { when = "anticlip", style = "solid" } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
         { key = "cat", label = "Feral (cat)", tab = 2, form = "cat", aux = true, res = { druidMana = true, rangeDim = true }, show = {
             main = { "innervate", "cower", "rebirth", "potion", "rune" },
             utility = { "ffFeral", "removeCurse", "abolishPoison" },
@@ -143,7 +156,12 @@ ns.HUD.DefineClass({
               debuffs = { "rip", "mangleDebuff", "ffFeral" } },
             glows = { ["buffs:clearcasting"] = { { when = "active", style = "shine" } },
                       ["debuffs:rip"] = { { when = "anticlip", style = "solid" } },
-                      ["debuffs:mangleDebuff"] = { { when = "expiring", style = "pulse" } } } } },
+                      ["debuffs:mangleDebuff"] = { { when = "expiring", style = "pulse" } } } },
+          forever = { show = {
+              main = { "shiftingPower", "innervate", "cower", "rebirth", "potion", "rune" },
+              utility = { "rip", "rake", "faerieFire", "removeCurse", "abolishPoison" },
+              buffs = { "clearcasting", "innervate", "zhc" },
+              debuffs = { "rip", "rake", "faerieFire" } } } },
         { key = "bear", label = "Feral (bear)", tab = 2, form = "bear", aux = true, res = { druidMana = true, queued = true, rangeDim = true }, show = {
             main = { "frenzied", "enrage", "barkskin", "challengingRoar", "innervate", "rebirth", "potion", "rune" },
             utility = { "maul", "swipe", "growl", "ffFeral", "removeCurse", "abolishPoison" },
@@ -155,19 +173,28 @@ ns.HUD.DefineClass({
               main = { "mangleBear", "frenzied", "enrage", "challengingRoar", "innervate", "rebirth", "potion", "rune" },
               utility = { "maul", "swipe", "growl", "lacerate", "ffFeral", "removeCurse", "abolishPoison" },
               buffs = { "frenzied", "enrage", "clearcasting", "zhc" },
-              debuffs = { "lacerateDebuff", "mangleDebuff", "demoRoar", "ffFeral" } },
+              debuffs = { "lacerateDebuff", "mangleBearDebuff", "demoRoar", "ffFeral" } },
             glows = { ["debuffs:demoRoar"] = { { when = "expiring", style = "pulse" } },
                       ["debuffs:lacerateDebuff"] = { { when = "expiring", style = "pulse" } },
-                      mangleBear = { { when = "ready", style = "edge", combatOnly = true } } } } },
+                      mangleBear = { { when = "ready", style = "edge", combatOnly = true } } } },
+          forever = { show = {
+              main = { "primalBite", "frenzied", "enrage", "barkskin", "challengingRoar", "innervate", "rebirth", "potion", "rune" },
+              utility = { "maul", "swipe", "growl", "lacerate", "faerieFire", "removeCurse", "abolishPoison" },
+              debuffs = { "lacerateDebuff", "demoRoar", "faerieFire" } },
+            glows = { ["debuffs:demoRoar"] = { { when = "expiring", style = "pulse" } },
+                      ["debuffs:lacerateDebuff"] = { { when = "expiring", style = "pulse" } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
         { key = "restoration", label = "Restoration", tab = 3, aux = true, res = { regen = true }, show = {
-            main = { "ns", "innervate", "tranquility", "rebirth", "potion", "rune" },
-            utility = { "swiftmend", "rejuv", "regrowth", "removeCurse", "abolishPoison" },
+            main = { "ns", "swiftmend", "innervate", "tranquility", "rebirth", "potion", "rune" },
+            utility = { "rejuv", "regrowth", "removeCurse", "abolishPoison" },
             buffs = { "ns", "clearcasting", "innervate", "zhc" },
             debuffs = {} },
           glows = { ns = { { when = "ready", style = "edge", combatOnly = true } },
                     ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
           tbc = { show = {
-              utility = { "swiftmend", "lifebloom", "rejuv", "regrowth", "removeCurse", "abolishPoison" } } } },
+              utility = { "lifebloom", "rejuv", "regrowth", "removeCurse", "abolishPoison" } } },
+          forever = { show = {
+              main = { "ns", "swiftmend", "wildGrowth", "innervate", "tranquility", "rebirth", "potion", "rune" } } } },
     },
     flavors = {
         tbc = { add = {
@@ -180,7 +207,15 @@ ns.HUD.DefineClass({
             { key = "lifebloom",     kind = "spell", spell = "lifebloom",     spellId = 33763, label = "Lifebloom", row = "utility" },
             { key = "lifebloomBuff", id = 33763, label = "Lifebloom (self)", row = "buffs" },
             { key = "lacerateDebuff", id = 33745, label = "Lacerate", row = "debuffs" },
-            { key = "mangleDebuff",   id = 33876, label = "Mangle", row = "debuffs" },
+            { key = "mangleDebuff",   id = 33876, label = "Mangle (Cat)", row = "debuffs" },
+            { key = "mangleBearDebuff", id = 33878, label = "Mangle (Bear)", row = "debuffs" },
+        } },
+        forever = { add = {
+            { key = "shiftingPower", kind = "spell", spell = "shiftingPower", spellId = 1322605, label = "Shifting Power", noRange = true },
+            { key = "primalBite",    kind = "spell", spell = "primalBite",    spellId = 407995,  label = "Primal Bite" },
+            { key = "wildGrowth",    kind = "spell", spell = "wildGrowth",    spellId = 408120,  label = "Wild Growth" },
+            { key = "lacerate",      kind = "spell", spell = "lacerate",      spellId = 1328617, label = "Lacerate", row = "utility" },
+            { key = "lacerateDebuff", id = 1328617, label = "Lacerate", row = "debuffs" },
         } },
     },
     buffBars = { "tigersFury", "naturesGrace", "clearcasting", "enrage" },

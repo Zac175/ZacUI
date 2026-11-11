@@ -10,11 +10,10 @@ local ADDON_NAME = ...
 -- Zacui_HUD is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
--- Not on every game version (Core_Flavor's feature table; Retail's
--- classes play by spec, with the game's own Cooldown Manager): the whole
--- part stands down here, before it publishes ns.HUD. Every later file of
--- the part needs ns.HUD and returns at once without it, so no frame,
--- event, ticker or menu row is ever made there.
+-- Not on every game version (Core_Flavor's feature table): where the
+-- whole part is off it stands down here, before it publishes ns.HUD.
+-- Every later file of the part needs ns.HUD and returns at once without
+-- it, so no frame, event, ticker or menu row is ever made there.
 if ns.PartOff and ns.PartOff("Zacui_HUD") then return end
 
 -- shared state from earlier ZacUI files
@@ -27,6 +26,11 @@ local UI = ns.UI
 
 local HUD = {}
 ns.HUD = HUD
+-- Retail (Mainline 12.x, 2026-11-09): the part loads for HUD_Retail.lua's
+-- class HUD only. The Classic HUDs (Warrior, Priest, the seven class
+-- definitions, Drink Ticker, Hesitation) each return on this flag, so
+-- nothing of theirs is made there. False on every other game version.
+HUD.RETAIL = (ns.Flavor ~= nil and ns.Flavor() == "retail") or false
 
 -- API compat (Interface 11509 / 20506) --------------------------------
 HUD.GetSpellInfo = GetSpellInfo or (C_Spell and function(spell)
@@ -839,8 +843,39 @@ end
 -- when it is not simply the store's x / y, secure, ...)
 function HUD.RegisterMover(key, label, holder, store, opts)
     if not (RegisterMover and holder) then return end
+    -- (2026-11-10) a HUD piece is drawn while Edit Mode is open (the
+    -- preview below), so its box is see-through over the real icons
+    opts = opts or {}
+    if opts.clear == nil then opts.clear = true end
     RegisterMover(key, label, function() return holder end,
         "CENTER", (store and store.x) or 0, (store and store.y) or 0, nil, opts)
+end
+
+-- EDIT MODE SHOWS THE REAL HUD (2026-11-10, Zac: "needs to reflect the
+-- actual thing"): a HUD says how to switch its "show every element" test
+-- on and off, and Edit Mode switches it on for the pass and puts it back.
+--   on()      -> true when this HUD is enabled for this character
+--   get()     -> its test state now;  set(v)  switch it
+local editPreviews = {}
+function HUD.EditPreview(on, get, set)
+    editPreviews[#editPreviews + 1] = { on = on, get = get, set = set }
+end
+if ns.WatchEditMode then
+    ns.WatchEditMode(function(open)
+        for _, p in ipairs(editPreviews) do
+            local ok, want = pcall(p.on)
+            if open then
+                if ok and want then
+                    p.was = p.get() and true or false
+                    pcall(p.set, true)
+                    p.held = true
+                end
+            elseif p.held then
+                p.held = nil
+                pcall(p.set, p.was and true or false)
+            end
+        end
+    end)
 end
 
 -- CENTER offsets of a holder in UIParent units (holders are unscaled).
@@ -855,7 +890,12 @@ end
 -- delta. ZacUI only positions the handle itself, so a 0.3s watch (live
 -- only while that proxy is shown) carries the delta to the members.
 function HUD.RegisterGroup(key, label, handle, store, members)
-    HUD.RegisterMover(key, label, handle, store)
+    -- (2026-11-10, Zac: "moving the entire warrior hud around even when
+    -- my mouse is not moving") the watch below carries any move of this
+    -- handle's box to every member, so the box must only move when it is
+    -- dragged: it is fitted to the handle itself (exact), never to what is
+    -- drawn round it, which changes as the HUD's pieces show and hide
+    HUD.RegisterMover(key, label, handle, store, { exact = true, clear = false })
     groups[key] = { handle = handle, members = members }
 end
 
@@ -983,6 +1023,22 @@ end
 
 -- Layout helpers: one row each, the Readycheck-era AddCheck/AddSlider
 -- shape rebuilt on UI.* so every HUD page reads the same.
+-- A SPELL NOT LEARNED YET, SHOWN ANYWAY (2026-11-09, Zac: "the option to
+-- show all buttons even if not learned yet from either the talent tree or
+-- being the correct level"): cfg.showUnlearned on a HUD's store. The icon
+-- is drawn grey and dim with no cooldown, so it reads as "not yours yet";
+-- off by default, so nothing changes unless it is ticked.
+function HUD.Ghost(icon, sp)
+    icon:SetIconTexture((sp and sp.icon) or 134400)
+    if icon.ClearSwipe then icon:ClearSwipe() end
+    if icon.SetDesat then icon:SetDesat(true) end
+    if icon.SetIconColor then icon:SetIconColor(1, 1, 1, 0.45) end
+    return true
+end
+HUD.UNLEARNED_LABEL = "Show spells you haven't learned yet"
+HUD.UNLEARNED_DESC = "Ticked: an icon that is on for your spec shows even before you have the spell (a talent "
+    .. "you haven't taken, or a level you haven't reached), grey and dim until you learn it."
+
 function HUD.Check(L, label, checked, onSet, desc)
     local w = UI.Checkbox(L.current, label, checked and true or false, function(v)
         onSet(v and true or false)
@@ -1082,7 +1138,10 @@ end
 
 local function LookSig()
     local out = {}
-    Ser(HUD.Look(), out, 0)
+    -- (reading the look to compare it must not be what first saves it)
+    local root = Root()
+    local saved = root and type(root.look) == "table"
+    Ser(saved and HUD.Look() or HUD.LOOK_DEFAULTS, out, 0)
     out[#out + 1] = HUD.Smooth() and "s1" or "s0"
     out[#out + 1] = tostring(ZacUIDB and ZacUIDB.font and ZacUIDB.font.name)
     out[#out + 1] = tostring(ns.Media and ns.Media.BarName and ns.Media.BarName())

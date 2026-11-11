@@ -1006,7 +1006,9 @@ local function Tab_general(L)
             "Your damage and ranks (raid and class), each boss, your abilities next to the rest of your class, "
             .. "what hit you hardest, your deaths and the hesitation numbers - for the whole raid.")
         BindCheck(L, rc, "raidSummaryShow", "Open it when the last boss dies",
-            "Ragnaros, Onyxia, Nefarian, Hakkar, Ossirian, C'Thun, Kel'Thuzad. /zui raid opens it any time.")
+            -- (2026-11-10, options audit: the names are Classic Era's)
+            ((ns.Flavor and ns.Flavor() == "era") and "Ragnaros, Onyxia, Nefarian, Hakkar, Ossirian, C'Thun, Kel'Thuzad. "
+                or "When the raid's last boss dies. ") .. "/zui raid opens it any time.")
         local open = UI.Button(L.current, "Open the last raid summary", { width = 200,
             onClick = function() RSm.Open() end })
         local row = { open }
@@ -1129,6 +1131,11 @@ local function Tab_look(L)
             "In a raid, a small Darkmoon Faire icon after the name of everyone with Sayge's Dark Fortune of "
             .. "Damage (+10% damage), so you can see who has it. Checked every 15 seconds.",
             function(v) if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end ns.RefreshConfig() end)
+        local hm = BindCheck(L, d, "dmfHideMine", "Not while I have the fortune myself",
+            "Hides the marks while you have Sayge's Dark Fortune of Damage on you, so they only show when others "
+            .. "have it and you don't.",
+            function() if Meter.DMFScan then Meter.DMFScan() end if Meter.DirtyAll then Meter.DirtyAll() end MeterRefresh() end)
+        UI.SetEnabled(hm, d.dmfIcon ~= false, 'Needs "Mark who has the Darkmoon Faire damage buff" turned on.')
         if Meter.DMF_WORLD_BUFFS ~= false then
             local ob = BindCheck(L, d, "dmfOnlyBuffed", "Only while I have my world buffs on",
                 "Rallying Cry, Warchief's Blessing, Zandalar, Songflower or a Dire Maul buff.",

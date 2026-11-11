@@ -156,6 +156,10 @@ function TR.Refresh()
     local n = on and TR.Unspent() or nil
     -- the Test button: a sample count while nothing real is there to show
     if GetTime() < testUntil and (n == nil or n == 0) then n = 3 end
+    -- (2026-11-10) switched on = there is a frame, even with no points
+    -- to spend: Edit Mode places what exists and reads a missing frame
+    -- as "switched off".
+    if on then Live() end
     if n and n > 0 then
         local f = Live()
         TR.Style(f, n)

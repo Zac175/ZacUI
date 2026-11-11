@@ -7,6 +7,7 @@
 
 local ns = _G.ZacUI
 if not ns or not ns.HUD or not ns.HUD.DefineClass then return end
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 ns.HUD.DefineClass({
     class = "SHAMAN", className = "Shaman", label = "Shaman HUD", store = "shaman",
@@ -25,7 +26,7 @@ ns.HUD.DefineClass({
         windfuryWeapon = 16362, frostbrand = 16356,
         chainLightning = 10605, searingTotem = 10438, stoneclaw = 10428, strengthOfEarth = 25361,
         manaSpring = 10497, healingStream = 10463, poisonCleansing = 8166, diseaseCleansing = 8170,
-        curePoison = 526, cureDisease = 2870, astralRecall = 556,
+        curePoison = 526, cureDisease = 2870, astralRecall = 556, graceOfAir = 25359,
     },
 
     grid = {
@@ -43,6 +44,8 @@ ns.HUD.DefineClass({
         { key = "earthbind",     kind = "spell", spell = "earthbind",     label = "Earthbind Totem", noRange = true },
         { key = "fireNova",      kind = "spell", spell = "fireNova",      label = "Fire Nova Totem", noRange = true },
         { key = "reincarnation", kind = "spell", spell = "reincarnation", label = "Reincarnation", noRange = true },
+        -- (a cooldown the Elemental rotation presses; off at the class baseline)
+        { key = "chainLightning", kind = "spell", spell = "chainLightning", label = "Chain Lightning", defaultHidden = true },
         { key = "potion",        kind = "itemPotion", label = "Potion" },
         { key = "rune",          kind = "itemRune",   label = "Rune" },
     },
@@ -85,12 +88,12 @@ ns.HUD.DefineClass({
 
     -- Class HUD v2: the utility row, the roles, TBC's additions
     utility = {
-        { key = "chainLightning",  kind = "spell", spell = "chainLightning",  label = "Chain Lightning" },
         { key = "lightningShield", kind = "spell", spell = "lightningShield", label = "Lightning Shield", noRange = true },
         { key = "ghostWolf",       kind = "spell", spell = "ghostWolf",       label = "Ghost Wolf", noRange = true },
         { key = "searingTotem",    kind = "spell", spell = "searingTotem",    label = "Searing Totem", noRange = true },
         { key = "stoneclaw",       kind = "spell", spell = "stoneclaw",       label = "Stoneclaw Totem", noRange = true },
         { key = "strengthOfEarth", kind = "spell", spell = "strengthOfEarth", label = "Strength of Earth Totem", noRange = true },
+        { key = "graceOfAir",      kind = "spell", spell = "graceOfAir",      label = "Grace of Air Totem", noRange = true },
         { key = "manaSpring",      kind = "spell", spell = "manaSpring",      label = "Mana Spring Totem", noRange = true },
         { key = "healingStream",   kind = "spell", spell = "healingStream",   label = "Healing Stream Totem", noRange = true },
         { key = "poisonCleansing", kind = "spell", spell = "poisonCleansing", label = "Poison Cleansing Totem", noRange = true },
@@ -101,36 +104,55 @@ ns.HUD.DefineClass({
     },
     -- Spec presets (HUD_V2_Specs): each spec's default HUD, from what top
     -- players press and track (sources in CLASSHUD_V2_DESIGN_1107.md
-    -- section 13: Icy Veins' Classic / TBC shaman guides). The base lists
-    -- are Classic Era's (WoW Forever plays them too); a spec's tbc block
-    -- replaces the rows it names on TBC.
+    -- section 13: Icy Veins' Classic / TBC shaman guides; WoW Forever:
+    -- wowtbc.gg's and Warcraft Tavern's Forever shaman guides). The base
+    -- lists are Classic Era's; a spec's tbc / forever block replaces the
+    -- rows it names on that game. WoW Forever (1.60): Elemental Mastery is
+    -- Lightning Mastery (same id) and Flame Shock is kept up; Enhancement
+    -- spends Maelstrom Weapon stacks and has Rage of the Farseer;
+    -- Restoration has Riptide and Water Shield.
     roles = {
         { key = "elemental", label = "Elemental", tab = 1, aux = true, res = { regen = true }, show = {
-            main = { "elemMastery", "ns", "earthShock", "manaTide", "reincarnation", "potion", "rune" },
-            utility = { "chainLightning", "lightningShield", "manaSpring", "searingTotem", "ghostWolf", "poisonCleansing", "diseaseCleansing" },
+            main = { "elemMastery", "chainLightning", "ns", "earthShock", "manaTide", "reincarnation", "potion", "rune" },
+            utility = { "lightningShield", "manaSpring", "searingTotem", "ghostWolf", "poisonCleansing", "diseaseCleansing" },
             buffs = { "elemMastery", "clearcasting", "ns", "zhc" },
             debuffs = {} },
           glows = { elemMastery = { { when = "ready", style = "edge", combatOnly = true } },
                     ["buffs:clearcasting"] = { { when = "active", style = "shine" } } },
           tbc = { show = {
-              main = { "elemMastery", "bloodlust", "heroism", "fireElemental", "earthShock", "flameShock", "reincarnation", "potion", "rune" },
-              buffs = { "elemMastery", "clearcasting", "waterShieldBuff", "zhc" },
+              main = { "elemMastery", "chainLightning", "bloodlust", "heroism", "fireElemental", "ns", "earthShock", "flameShock", "reincarnation", "potion", "rune" },
+              utility = { "totemOfWrath", "wrathOfAir", "waterShield", "manaSpring", "searingTotem", "earthElemental", "ghostWolf", "poisonCleansing", "diseaseCleansing" },
+              buffs = { "elemMastery", "clearcasting", "totemOfWrathBuff", "waterShieldBuff", "zhc" },
+              debuffs = { "flameShock" } },
+            glows = { elemMastery = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["debuffs:flameShock"] = { { when = "anticlip", style = "solid" } },
+                      ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } },
+          forever = { show = {
+              main = { "elemMastery", "chainLightning", "flameShock", "earthShock", "ns", "reincarnation", "potion", "rune" },
               debuffs = { "flameShock" } },
             glows = { elemMastery = { { when = "ready", style = "edge", combatOnly = true } },
                       ["debuffs:flameShock"] = { { when = "anticlip", style = "solid" } },
                       ["buffs:clearcasting"] = { { when = "active", style = "shine" } } } } },
         { key = "enhancement", label = "Enhancement", tab = 2, aux = true, res = { rangeDim = true }, show = {
             main = { "stormstrike", "earthShock", "reincarnation", "potion", "rune" },
-            utility = { "lightningShield", "strengthOfEarth", "searingTotem", "ghostWolf", "poisonCleansing", "diseaseCleansing" },
+            utility = { "lightningShield", "strengthOfEarth", "graceOfAir", "searingTotem", "ghostWolf", "poisonCleansing", "diseaseCleansing" },
             buffs = { "flurry", "windfury", "zhc" },
             debuffs = { "stormstrike" } },
           glows = { stormstrike = { { when = "ready", style = "edge", combatOnly = true } } },
           tbc = { show = {
               main = { "stormstrike", "earthShock", "flameShock", "shamanisticRage", "bloodlust", "heroism", "reincarnation", "potion", "rune" },
-              buffs = { "flurry", "windfury", "shamRageBuff", "lightningShield", "zhc" },
+              utility = { "waterShield", "lightningShield", "strengthOfEarth", "graceOfAir", "searingTotem", "earthElemental", "ghostWolf", "poisonCleansing", "diseaseCleansing" },
+              buffs = { "flurry", "windfury", "shamRageBuff", "waterShieldBuff", "lightningShield", "zhc" },
               debuffs = { "stormstrike", "flameShock" } },
             glows = { stormstrike = { { when = "ready", style = "edge", combatOnly = true } },
-                      shamanisticRage = { { when = "ready", style = "edge", combatOnly = true } } } } },
+                      shamanisticRage = { { when = "ready", style = "edge", combatOnly = true } } } },
+          forever = { show = {
+              main = { "stormstrike", "rageOfFarseer", "flameShock", "earthShock", "reincarnation", "potion", "rune" },
+              buffs = { "maelstrom", "rageOfFarseerBuff", "flurry", "windfury", "zhc" },
+              debuffs = { "stormstrike", "flameShock" } },
+            glows = { stormstrike = { { when = "ready", style = "edge", combatOnly = true } },
+                      rageOfFarseer = { { when = "ready", style = "edge", combatOnly = true } },
+                      ["buffs:maelstrom"] = { { when = "stacks", stacksOp = ">=", stacksN = 5, style = "shine" } } } } },
         { key = "restoration", label = "Restoration", tab = 3, aux = true, res = { regen = true }, show = {
             main = { "ns", "manaTide", "earthShock", "reincarnation", "potion", "rune" },
             utility = { "healingStream", "manaSpring", "poisonCleansing", "diseaseCleansing", "curePoison", "cureDisease", "ghostWolf" },
@@ -140,6 +162,11 @@ ns.HUD.DefineClass({
                     manaTide = { { when = "ready", style = "edge", combatOnly = true } } },
           tbc = { show = {
               main = { "ns", "manaTide", "earthShield", "bloodlust", "heroism", "earthShock", "reincarnation", "potion", "rune" },
+              utility = { "waterShield", "healingStream", "manaSpring", "wrathOfAir", "earthElemental", "poisonCleansing", "diseaseCleansing", "curePoison", "cureDisease", "ghostWolf" },
+              buffs = { "ns", "manaTide", "waterShieldBuff", "zhc" } } },
+          forever = { show = {
+              main = { "riptide", "ns", "manaTide", "earthShock", "reincarnation", "potion", "rune" },
+              utility = { "waterShield", "healingStream", "manaSpring", "poisonCleansing", "diseaseCleansing", "curePoison", "cureDisease", "ghostWolf" },
               buffs = { "ns", "manaTide", "waterShieldBuff", "zhc" } } } },
     },
     flavors = {
@@ -154,6 +181,18 @@ ns.HUD.DefineClass({
             { key = "waterShieldBuff", id = 24398, label = "Water Shield", row = "buffs" },
             { key = "earthShieldBuff", id = 32594, label = "Earth Shield", row = "buffs" },
             { key = "shamRageBuff",    id = 30823, label = "Shamanistic Rage", row = "buffs" },
+            { key = "totemOfWrath",    kind = "spell", spell = "totemOfWrath",    spellId = 30706, label = "Totem of Wrath", noRange = true, row = "utility" },
+            { key = "wrathOfAir",      kind = "spell", spell = "wrathOfAir",      spellId = 3738,  label = "Wrath of Air Totem", noRange = true, row = "utility" },
+            { key = "totemOfWrathBuff", id = 30706, label = "Totem of Wrath", row = "buffs" },
+        } },
+        -- WoW Forever's own talents (ids: warcraft.wiki.gg's Forever pages)
+        forever = { add = {
+            { key = "rageOfFarseer",   kind = "spell", spell = "rageOfFarseer",   spellId = 425336,  label = "Rage of the Farseer", noRange = true },
+            { key = "riptide",         kind = "spell", spell = "riptide",         spellId = 1239243, label = "Riptide" },
+            { key = "waterShield",     kind = "spell", spell = "waterShield",     spellId = 408510,  label = "Water Shield", noRange = true, row = "utility" },
+            { key = "waterShieldBuff", id = 408510, label = "Water Shield", row = "buffs" },
+            { key = "maelstrom",       id = 408498, label = "Maelstrom Weapon", row = "buffs" },
+            { key = "rageOfFarseerBuff", id = 425336, label = "Rage of the Farseer", row = "buffs" },
         } },
     },
     buffBars = { "lightningShield", "flurry", "ns" },

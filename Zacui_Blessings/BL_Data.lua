@@ -104,3 +104,5 @@ D.PRIORITY = {
 D.AURA_PRIORITY = { 1, 2, 3, 6, 5, 4, 7 }
 
 D.GREATER_DURATION = 900   -- 15 minutes
+-- (2026-11-10, options audit: TBC's greater blessings last 30 minutes)
+if ns.Flavor and ns.Flavor() == "tbc" then D.GREATER_DURATION = 1800 end

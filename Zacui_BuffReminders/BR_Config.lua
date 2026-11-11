@@ -126,7 +126,12 @@ local function ShowIn(L, tbl)
         function(v) tbl.visibilityMode = v Fresh() ns.RefreshConfig() end)
     if RAID_MODES[tbl.visibilityMode or "raids"] then
         local boxes = {}
-        for _, name in ipairs(D.RAIDS) do
+        local raids = D.Raids and D.Raids() or D.RAIDS
+        if #raids == 0 then
+            L:Desc("This game version's raids are not listed yet, so it counts every raid.")
+            return
+        end
+        for _, name in ipairs(raids) do
             local n = name
             boxes[#boxes + 1] = UI.Checkbox(L.current, n, type(tbl.visibilityRaids) == "table" and tbl.visibilityRaids[n] or false,
                 function(v)

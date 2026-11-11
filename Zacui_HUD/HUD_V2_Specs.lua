@@ -27,6 +27,8 @@ local GetTime = GetTime
 local SETTLE = 0.5
 local SPEC_EVENTS = { "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE", "ACTIVE_TALENT_GROUP_CHANGED",
     "TRAIT_CONFIG_UPDATED", "PLAYER_LEVEL_UP" }
+-- (Retail plays by spec: its own event for a spec swap, watched there only)
+if HUD.RETAIL then SPEC_EVENTS[#SPEC_EVENTS + 1] = "PLAYER_SPECIALIZATION_CHANGED" end
 
 -- ------------------------------------------------------------
 -- the spec in force
@@ -72,7 +74,19 @@ end
 function Engine:V2Off(row, hidden, def)
     local v = hidden and hidden[def.key]
     if v ~= nil then return v and true or false end
-    if not def.fromGame then
+    if def.fromGame and self.def.retail then
+        -- Retail: every entry is the game's, and the spec's preset TICKS
+        -- the ones it names (by the entry's own id, its override or a
+        -- linked one); the rest keep their own default
+        local role = self:V2SpecRole()
+        local set = role and role.show[row]
+        if set then
+            if set[def.key] then return false end
+            for _, k in ipairs(def.altKeys or {}) do
+                if set[k] then return false end
+            end
+        end
+    elseif not def.fromGame then
         local role = self:V2SpecRole()
         local set = role and role.show[row]
         if set then return not set[def.key] end

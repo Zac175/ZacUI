@@ -233,12 +233,17 @@ local function BuildBuyWindow()
     -- stack warning when there is one, then ONE full-width price button.
     -- The footer's two buttons split the same width, so every edge lines
     -- up. Built on the popup shell (UIF_Dialogs UI.Popup).
-    local W = 300
-    local win = UI.Popup("ZacUIAuctionBuy", W, 228, "Buying")
+    -- (2026-11-10, Zac: "this window is still just too big") Compact: a
+    -- tiny popup (13 title, 12 margins, 24 px footer buttons), 260 wide,
+    -- a 30 icon, tighter gaps, a 26 px price button; and with the progress
+    -- bar up, the rows it already says (bought, left) are not said twice.
+    local W = 260
+    local win = UI.Popup("ZacUIAuctionBuy", W, 190, "Buying", { size = "tiny" })
     win._zMapOwn = true
     local POP = UI.POP
     local IW = W - 2 * win.pad
-    local ICON, ROW_H, GAP = 38, 16, 10
+    local ICON, ROW_H, GAP = 30, 15, 6
+    local BUY_H = 26
     local fallbackIcon = "Interface\\Icons\\INV_Misc_QuestionMark"
 
     local function Hair()
@@ -262,7 +267,7 @@ local function BuildBuyWindow()
     win.item = UI.PopupText(win, "title", { width = NW })
     win.item:SetJustifyH("LEFT")
     if win.item.SetWordWrap then win.item:SetWordWrap(true) end
-    if win.item.SetMaxLines then win.item:SetMaxLines(2) end
+    if win.item.SetMaxLines then win.item:SetMaxLines(3) end   -- (the narrower window: a very long name gets a third line)
     win.item._zPaint = function(self)
         local c = GetColor("text", "gold")
         self:SetTextColor(c.r, c.g, c.b, 1)
@@ -271,6 +276,57 @@ local function BuildBuyWindow()
     win.sub = UI.PopupText(win, "hint", { width = NW })
     win.sub:SetJustifyH("LEFT")
     win.rule1 = Hair()
+
+    -- (2026-11-09, Zac: both mock ideas, "give users the option to
+    -- choose") THE PROGRESS BAR under the card: how many of the run's
+    -- auctions are bought. And THE LIST (the "list" layout, in place of
+    -- the three rows): what was bought, what the next click buys, what
+    -- waits behind it - seller, stack, price each.
+    win.bar = CreateFrame("Frame", nil, win)
+    win.bar:SetSize(IW, 7)
+    UI.Fill(win.bar, "ui", "elementBg")
+    UI.Border(win.bar, "ui", "border", 0.9)
+    win.bar._zPaint = UI.PaintBox
+    win.bar:_zPaint()
+    win.barFill = win.bar:CreateTexture(nil, "ARTWORK")
+    win.barFill._zui_own = true
+    win.barFill:SetTexture(FLAT)
+    win.barFill:SetPoint("TOPLEFT", 1, -1)
+    win.barFill:SetPoint("BOTTOMLEFT", 1, 1)
+    win.barLeft = UI.PopupText(win, "hint")
+    win.barLeft:SetJustifyH("LEFT")
+    win.barRight = UI.PopupText(win, "hint")
+    win.barRight:SetJustifyH("RIGHT")
+
+    local LIST_ROW, LIST_MAX = 18, 6
+    win.listRows = {}
+    for i = 1, LIST_MAX do
+        local r = CreateFrame("Frame", nil, win)
+        r:SetSize(IW, LIST_ROW)
+        r.bg = r:CreateTexture(nil, "BACKGROUND")
+        r.bg._zui_own = true
+        r.bg:SetTexture(FLAT)
+        r.bg:SetAllPoints()
+        r.edge = r:CreateTexture(nil, "ARTWORK")
+        r.edge._zui_own = true
+        r.edge:SetTexture(FLAT)
+        r.edge:SetPoint("TOPLEFT", 0, 0)
+        r.edge:SetPoint("BOTTOMLEFT", 0, 0)
+        r.edge:SetWidth(2)
+        r.who = UI.PopupText(r, "body", { alpha = 1, width = IW - 8 - 44 - 96 })
+        r.who:SetJustifyH("LEFT")
+        r.who:SetPoint("LEFT", r, "LEFT", 8, 0)
+        if r.who.SetWordWrap then r.who:SetWordWrap(false) end
+        r.price = UI.PopupText(r, "body", { alpha = 1, width = 96 })
+        r.price:SetJustifyH("RIGHT")
+        r.price:SetPoint("RIGHT", r, "RIGHT", -4, 0)
+        r.n = UI.PopupText(r, "hint", { width = 40 })
+        r.n:SetJustifyH("RIGHT")
+        r.n:SetPoint("RIGHT", r.price, "LEFT", -4, 0)
+        r:Hide()
+        win.listRows[i] = r
+    end
+    win._zListRow = LIST_ROW
 
     -- the rows: a dim label left, the value right
     local function Row(label)
@@ -296,7 +352,7 @@ local function BuildBuyWindow()
 
     -- The button is the engine: the window's full inner width.
     win.buy = UI.PopupButton(win, "waiting for the auction house...", {
-        kind = "primary", width = IW, onClick = function()
+        kind = "primary", width = IW, height = BUY_H, onClick = function()
             -- THE HARDWARE EVENT. This click is the only thing the client
             -- will accept as authority to spend money.
             local ok, why = AH.BuyNext()
@@ -360,15 +416,50 @@ local function BuildBuyWindow()
         self.sub:SetPoint("TOPLEFT", self, "TOPLEFT", tx, Y(ty + nameH + 3))
         self.sub:SetShown(subH > 0)
         local y = cardH + GAP
+        -- the progress bar, its two captions under it
+        if self._zBarOn then
+            self.bar:ClearAllPoints()
+            self.bar:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(y))
+            self.bar:Show()
+            y = y + 7 + 4
+            self.barLeft:ClearAllPoints()
+            self.barLeft:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(y))
+            self.barRight:ClearAllPoints()
+            self.barRight:SetPoint("TOPRIGHT", self, "TOPRIGHT", -pad, Y(y))
+            self.barLeft:Show() self.barRight:Show()
+            y = y + TextH(self.barLeft, POP.HINT) + GAP - 2
+        else
+            self.bar:Hide() self.barLeft:Hide() self.barRight:Hide()
+        end
         self.rule1:ClearAllPoints()
         self.rule1:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(y))
         self.rule1:SetWidth(IW)
         y = y + 1 + GAP - 2
+        -- the list layout: its rows, in place of Bought and Left
+        local listN = self._zListN or 0
+        for i, r in ipairs(self.listRows) do
+            if i <= listN then
+                r:ClearAllPoints()
+                r:SetPoint("TOPLEFT", self, "TOPLEFT", pad, Y(y))
+                r:Show()
+                y = y + self._zListRow + 2
+            else
+                r:Hide()
+            end
+        end
+        if listN > 0 then y = y + 4 end
         -- the rows
         for _, r in ipairs({ { self.progressLabel, self.progress }, { self.spentLabel, self.spent },
                              { self.leftLabel, self.left } }) do
             local l, v = r[1], r[2]
-            local on = (v:GetText() or "") ~= ""
+            local on = (v:GetText() or "") ~= "" and not (listN > 0 and v ~= self.spent)
+            -- the bar's captions already say "n of m bought" and "n to
+            -- go": Left goes, and Bought stays only when it says more
+            -- (a stack: items are not auctions)
+            if on and self._zBarOn then
+                if v == self.left then on = false
+                elseif v == self.progress and not self._zStacks then on = false end
+            end
             l:SetShown(on) v:SetShown(on)
             if on then
                 l:ClearAllPoints()
@@ -423,6 +514,16 @@ local function BuildBuyWindow()
         local name = st.nextName or self._zLastName or ""
         if st.nextName then self._zLastName = st.nextName end
         self.item:SetText(name)
+        -- the item's quality on its name and its icon's edge
+        do
+            local okq, _, _, q = pcall(GetItemInfo, name)
+            local qc = okq and type(q) == "number" and q > 1 and _G.ITEM_QUALITY_COLORS and _G.ITEM_QUALITY_COLORS[q]
+            self._zQ = qc or (name ~= "" and self._zQ) or nil
+            local c = self._zQ or GetColor("text", "gold")
+            self.item:SetTextColor(c.r, c.g, c.b, 1)
+            local e = self._zQ or GetColor("ui", "border")
+            for _, t in ipairs(self.iconHost._zBorder or {}) do t:SetVertexColor(e.r, e.g, e.b, self._zQ and 0.9 or 0.9) end
+        end
         self.icon:SetTexture(IconOf(name) or self._zLastIcon or fallbackIcon)
         self._zLastIcon = IconOf(name) or self._zLastIcon
         local n = st.nextCount or 1
@@ -440,6 +541,55 @@ local function BuildBuyWindow()
         self.spent:SetText(Money(st.spent, true)
             .. (st.missed > 0 and ("  |cff888888(" .. st.missed .. " gone)|r") or ""))
         self.left:SetText(st.remaining .. (st.remaining == 1 and " auction" or " auctions"))
+        self._zStacks = units ~= st.bought
+        -- the progress bar: auctions bought of the run's auctions
+        local total = tonumber(st.total) or ((st.bought or 0) + (st.remaining or 0) + (st.missed or 0))
+        local settled = (st.bought or 0) + (st.missed or 0)
+        self._zBarOn = total > 1
+        if self._zBarOn then
+            local frac = math.max(0, math.min(1, settled / total))
+            local a = GetColor("ui", "accent")
+            self.barFill:SetVertexColor(a.r, a.g, a.b, 1)
+            self.barFill:SetWidth(math.max(0.01, (IW - 2) * frac))
+            self.barFill:SetShown(frac > 0)
+            self.barLeft:SetText(st.bought .. " of " .. total .. " bought")
+            self.barRight:SetText(st.remaining > 0 and (st.remaining .. " to go") or "none left")
+        end
+        -- the list layout (Bags & maps > Auction house > Buy window)
+        local listN = 0
+        if ((ZacUIDB and ZacUIDB.bags and ZacUIDB.bags.ahBuyLayout) or "card") == "list"
+            and type(st.queue) == "table" then
+            local rows = {}
+            local done = type(st.done) == "table" and st.done or {}
+            for i = math.max(1, #done - 1), #done do rows[#rows + 1] = { done[i], "done" } end
+            for i = 1, #st.queue do
+                if #rows >= #self.listRows then break end
+                rows[#rows + 1] = { st.queue[i], i == 1 and "next" or "wait" }
+            end
+            local good, acc, dim = GetColor("text", "green"), GetColor("ui", "accent"), GetColor("text", "gray")
+            for i, e in ipairs(rows) do
+                local r, it, kind = self.listRows[i], e[1], e[2]
+                local n = it.count or 1
+                r.who:SetText(it.owner or "?")
+                r.n:SetText("x" .. n)
+                r.price:SetText(Money(math.floor((it.buyout or 0) / math.max(1, n) + 0.5), true))
+                if kind == "done" then
+                    r.bg:SetVertexColor(1, 1, 1, 0.02)
+                    r.edge:SetVertexColor(good.r, good.g, good.b, 1)
+                    r.who:SetTextColor(dim.r, dim.g, dim.b, 1)
+                elseif kind == "next" then
+                    r.bg:SetVertexColor(acc.r, acc.g, acc.b, 0.16)
+                    r.edge:SetVertexColor(acc.r, acc.g, acc.b, 1)
+                    r.who:SetTextColor(1, 1, 1, 1)
+                else
+                    r.bg:SetVertexColor(1, 1, 1, 0.03)
+                    r.edge:SetVertexColor(0, 0, 0, 0)
+                    r.who:SetTextColor(1, 1, 1, 0.85)
+                end
+            end
+            listN = #rows
+        end
+        self._zListN = listN
         local note = ""
         local primary = "buy"
         if st.waiting then

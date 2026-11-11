@@ -18,6 +18,10 @@
 --   phase calls                     the boss's health crossing a line
 --   form / phase cycles             timed swaps (Nalorakk, Netherspite)
 --   raid marks                      raid leader only, as on Era
+--   cast bars                       a boss's cast or channel, as long as it runs
+--   lists                           who has a debuff, with stacks or time
+--   tank icons / co-tank icons      the tank debuff on you, and on the other tank
+--   "move" alarms                   standing in something (damage on you)
 --
 -- A raid's behaviour file (Own\<RAID>.lua) hands T.Build anything that
 -- raid needs on top. Only the facts in the _Data files are per raid; no
@@ -194,12 +198,31 @@ function T.Ability(boss, a)
     local gap = a.gap or 2
     local PREWARN = "WA_" .. key .. "_PREWARN"
     local stopOn = K.Set(a.stopOn)
+    -- restart = { { spells / names, sub / subs, secs }, ... }: other
+    -- lines that set this countdown (Shatter ten seconds after a Ground
+    -- Slam, the next Ground Slam a minute after the Shatter); they are
+    -- not counted as the ability going off.
+    local restarts = {}
+    for _, r in ipairs(a.restart or {}) do
+        restarts[#restarts + 1] = { m = Matcher(r), subs = K.Set(r.subs or { r.sub or "SPELL_CAST_SUCCESS" }), secs = r.secs, stop = r.stop }
+    end
+    -- a restart line with stop = true ends the countdown for the rest of
+    -- the fight (M'uru's adds stop when Entropius comes).
+    -- loop = true: nothing in the log marks it (waves of adds), so the
+    -- countdown counts itself as gone when it runs out and starts again.
+    -- atPhase = n: starts when the boss's health crosses its nth line
+    -- (T.Health's WA_TBC_PHASE_<BOSS> n); stopPhase = n: stops there.
+    -- phases = { [n] = { secs = ..., every = ... } }: at the nth line the
+    -- countdown is set to secs and / or the gap between casts changes.
+    local phaseEvent = (a.atPhase or a.stopPhase or a.phases) and ("WA_TBC_PHASE_" .. boss.key) or nil
     local function Countdown(secs, count, guid)
         RM.Fire("WA_NUMEN_TIMER", key, secs, count, guid)
     end
     local function Quiet(env)
         if env.headsTimer then env.headsTimer:Cancel() env.headsTimer = nil end
+        if env.loopTimer then env.loopTimer:Cancel() env.loopTimer = nil end
     end
+    local Went
     local function Schedule(env, secs)
         Quiet(env)
         if not secs or secs <= 0 then return end
@@ -216,6 +239,12 @@ function T.Ability(boss, a)
             end
         end
         Countdown(secs, count)
+        if a.loop then
+            env.loopTimer = C_Timer.NewTimer(secs, function()
+                env.loopTimer = nil
+                if env.running then Went(env) end
+            end)
+        end
     end
     local function Stop(env)
         env.running = false
@@ -225,9 +254,9 @@ function T.Ability(boss, a)
     end
     local function NextGap(env)
         if a.steps then return a.steps[env.count - 1] end
-        return a.every
+        return env.every or a.every
     end
-    local function Went(env, guid)
+    Went = function(env, guid)
         local now = GetTime()
         if now - (env.last or 0) < gap then return false end
         env.last = now
@@ -249,9 +278,20 @@ function T.Ability(boss, a)
         if event == "ENCOUNTER_START" then
             local encId, encName = ...
             if not T.IsBoss(boss, encId, encName) then return false end
-            env.count, env.last, env.running = 1, 0, true
+            env.count, env.last, env.running, env.every = 1, 0, true, nil
             wipe(env.known)
-            if a.first and not a.startOn then Schedule(env, a.first) end
+            if a.first and not (a.startOn or a.atPhase) then Schedule(env, a.first) end
+            return false
+        end
+        if phaseEvent and event == phaseEvent then
+            local n = ...
+            if a.stopPhase and n == a.stopPhase then Stop(env) env.running = true end
+            if a.atPhase and n == a.atPhase and env.running then Schedule(env, a.first) end
+            local ph = a.phases and a.phases[n]
+            if ph and env.running then
+                if ph.every then env.every = ph.every end
+                if ph.secs then Schedule(env, ph.secs) end
+            end
             return false
         end
         if event == "ENCOUNTER_END" or event == "WA_FJI_ENCOUNTER_END" or stopOn[event] then
@@ -270,13 +310,25 @@ function T.Ability(boss, a)
         end
         if event == "COMBAT_LOG_EVENT_UNFILTERED" then
             local _, sub, _, srcGUID, srcName, _, _, dstGUID, dstName, _, _, spellId, spellName = ...
+            for i = 1, #restarts do
+                local r = restarts[i]
+                if r.subs[sub] and r.m.Line(env, sub, srcGUID, srcName, dstGUID, dstName, spellId, spellName) then
+                    if r.stop then Stop(env) else Schedule(env, r.secs) end
+                    return false
+                end
+            end
             local hit, guid = m.Line(env, sub, srcGUID, srcName, dstGUID, dstName, spellId, spellName)
             if hit then Went(env, guid) end
         end
         return false
     end
     map["actions.finish.custom"] = function(env) Stop(env) end
-    return map, Subs(a, "SPELL_CAST_SUCCESS"), m.wantsPlates
+    local subs = Subs(a, "SPELL_CAST_SUCCESS")
+    local have = K.Set(subs)
+    for _, r in ipairs(restarts) do
+        for sb in pairs(r.subs) do if not have[sb] then have[sb] = true subs[#subs + 1] = sb end end
+    end
+    return map, subs, m.wantsPlates, phaseEvent
 end
 
 -- A CYCLE: timed phases that follow each other (Netherspite's portals
@@ -367,7 +419,9 @@ end
 -- (and out loud). Spec: the matcher's fields, text (what it says),
 -- target (add "on <name>"), me / sayMe (what it says when it is you),
 -- say (spoken for everyone), onlyMe, dur (default 3), gap (default 1),
--- once (once per pull: a phase that shows itself by its first spell).
+-- once (once per pull: a phase that shows itself by its first spell),
+-- stacks (only from this many stacks of a stacking debuff or buff on;
+-- the number is added to the text).
 function T.Alert(boss, s)
     local m = Matcher(s)
     -- a cast with no sub-event given: its start or, for an instant one,
@@ -400,14 +454,16 @@ function T.Alert(boss, s)
             return K.Drop(allstates, "")
         end
         if not env.running or env.done then return false end
-        local hit, guid, who
+        local hit, guid, who, amount
         if event == "NAME_PLATE_UNIT_ADDED" then
             hit = m.Plate(env, (...))
         elseif event == "COMBAT_LOG_EVENT_UNFILTERED" then
-            local _, sub, _, srcGUID, srcName, _, _, dstGUID, dstName, _, _, spellId, spellName = ...
+            local _, sub, _, srcGUID, srcName, _, _, dstGUID, dstName, _, _, spellId, spellName, _, _, amt = ...
             hit, guid, who = m.Line(env, sub, srcGUID, srcName, dstGUID, dstName, spellId, spellName)
+            amount = (sub == "SPELL_AURA_APPLIED_DOSE") and tonumber(amt) or 1
         end
         if not hit then return false end
+        if s.stacks and (amount or 1) < s.stacks then return false end
         local now = GetTime()
         if now - env.last < gap then return false end
         env.last = now
@@ -415,6 +471,7 @@ function T.Alert(boss, s)
         local mine = guid ~= nil and guid == RM.myGUID
         if mine and s.me then return Show(allstates, s.me, s.sayMe or s.say) end
         local text = s.text
+        if s.stacks and amount then text = text .. " x" .. amount end
         if s.target and who then text = text .. " on " .. Ambiguate(who, "short") end
         return Show(allstates, text, s.say)
     end
@@ -455,6 +512,95 @@ function T.Heads(a)
     end
     map["actions.start.custom"] = SayState
     return map, { on, cancel, "WA_NUMEN_TIMER", "ENCOUNTER_END", "WA_FJI_ENCOUNTER_END" }
+end
+
+-- CAST BARS: a boss's (or an add's) cast or channel as a bar for as
+-- long as it runs, one per caster. Each entry: spells, text (default:
+-- the spell's own name), secs (how long; without it the client's own
+-- cast time for that spell is used, and an instant cast shows nothing),
+-- sub (default SPELL_CAST_START; a channel is seen by its
+-- SPELL_CAST_SUCCESS or the aura it puts on the caster), kick ("KICK:"
+-- in front of its name). The bar goes when the cast is interrupted, when
+-- the aura is removed, or when the caster dies.
+local function CastTime(spellId)
+    if not GetSpellInfo then return nil end
+    local _, _, _, ms = GetSpellInfo(spellId)
+    ms = tonumber(ms)
+    if ms and ms > 0 then return ms / 1000 end
+    return nil
+end
+function T.Casts(boss, casts)
+    local by, subs, have = {}, {}, {}
+    local function Want(sb) if not have[sb] then have[sb] = true subs[#subs + 1] = sb end end
+    for _, c in ipairs(casts) do
+        c.sub = c.sub or "SPELL_CAST_START"
+        Want(c.sub)
+        for _, id in ipairs(c.spells) do by[id] = c end
+    end
+    Want("SPELL_INTERRUPT") Want("SPELL_AURA_REMOVED") Want("UNIT_DIED")
+    local first = casts[1]
+    local map = {}
+    map["init"] = function(env)
+        env.running = boss.enc ~= nil and RM.encounterId == boss.enc
+    end
+    local function DropAll(allstates, guid)
+        local any = false
+        for key, st in pairs(allstates) do
+            if st.show and (guid == nil or st.casterGUID == guid) then
+                st.show, st.changed = false, true
+                any = true
+            end
+        end
+        return any
+    end
+    map["triggers.1.trigger"] = function(env, allstates, event, ...)
+        if event == "OPTIONS" then
+            K.Put(allstates, "", K.Timed(first.secs or 3, { name = first.text or first.name, icon = IconOf(first.spells, first.icon), autoHide = true }))
+            return true
+        end
+        if event == "ENCOUNTER_START" then
+            local encId, encName = ...
+            if T.IsBoss(boss, encId, encName) then env.running = true end
+            return false
+        end
+        if event == "ENCOUNTER_END" or event == "WA_FJI_ENCOUNTER_END" then
+            env.running = false
+            return DropAll(allstates)
+        end
+        if not env.running or event ~= "COMBAT_LOG_EVENT_UNFILTERED" then return false end
+        local _, sub, _, srcGUID, srcName, _, _, dstGUID, _, _, _, spellId, spellName, _, extraId = ...
+        if sub == "UNIT_DIED" then return DropAll(allstates, dstGUID) end
+        if sub == "SPELL_INTERRUPT" then
+            -- (the interrupted caster is the line's target; the spell cut short its extra id)
+            local st = allstates[tostring(dstGUID) .. ":" .. tostring(extraId)]
+            if st and st.show then st.show, st.changed = false, true return true end
+            return false
+        end
+        local c = by[spellId]
+        if not c then return false end
+        local key = tostring(srcGUID) .. ":" .. tostring(spellId)
+        if sub == "SPELL_AURA_REMOVED" then
+            local st = allstates[key]
+            if st and st.show then st.show, st.changed = false, true return true end
+            return false
+        end
+        if sub ~= c.sub then return false end
+        local secs = c.secs or CastTime(spellId)
+        if not secs or secs < 1 then return false end
+        local label = c.text or spellName or c.name
+        if c.kick then label = "KICK: " .. label end
+        local st = K.Put(allstates, key, K.Timed(secs, { name = label, icon = IconOf({ spellId }, c.icon), autoHide = true }))
+        st.casterGUID = srcGUID
+        return true
+    end
+    return map, subs
+end
+
+-- THE "MOVE" ALARM: damage on you from something you are standing in.
+-- The piece's own option switches it off; the sound is the Era one.
+local function GtfoAlarm(env)
+    local opt = env.config and env.config.option
+    if opt and opt.enable ~= false then RM.RaidSound(opt.gtfoSound or "ui:Alarm") end
 end
 
 -- PHASE CALLS: the boss's health, read twice a second while its fight
@@ -628,12 +774,15 @@ end
 -- ============================================================
 local FONT = "Barlow Semi Condensed Black"
 local P_FMT = { format = "timed", time_dynamic_threshold = 5, time_format = 0, time_legacy_floor = false, time_mod_rate = true, time_precision = 1 }
-local function Sub(point, text, size, color, x, y)
+local UNIT_FMT = { format = "Unit", abbreviate = true, abbreviate_max = 8, color = "class", realm_name = "never" }
+local function Sub(point, text, size, color, x, y, unitFmt)
+    local fmt = { p = P_FMT, s = { format = "none" }, n = { format = "none" } }
+    if unitFmt then fmt.unit = UNIT_FMT end
     return { type = "subtext", anchor_point = point, text_text = text, text_font = FONT, text_fontSize = size or 12,
         text_fontType = "OUTLINE", text_color = color or { 1, 1, 1, 1 }, text_shadowColor = { 0, 0, 0, 1 },
         text_shadowXOffset = 1, text_shadowYOffset = -1, text_anchorXOffset = x or 0, text_anchorYOffset = y or 0,
         text_automaticWidth = "Auto", text_fixedWidth = 64, text_justify = "CENTER", text_selfPoint = "AUTO",
-        text_visible = true, text_wordWrap = "WordWrap", rotateText = "NONE", fmt = { p = P_FMT, s = { format = "none" }, n = { format = "none" } } }
+        text_visible = true, text_wordWrap = "WordWrap", rotateText = "NONE", fmt = fmt }
 end
 local function Border(area, color)
     return { type = "subborder", anchor_area = area, border_color = color or { 0, 0, 0, 1 }, border_edge = "Square Full White",
@@ -700,6 +849,27 @@ function D.Plate()
         subRegions = { { type = "subbackground" }, Border(nil, { 1, 0.98, 0.66, 1 }), Sub("CENTER", "%p", 16, { 1, 0.84, 0, 1 }) } }
 end
 
+-- a row of a list: whose debuff it is (class colour), its stacks or its time
+function D.List(color, stacks)
+    return BarD(120, 16, color or { 1, 0.64, 0.65, 1 }, { { type = "subbackground" }, { type = "subforeground" }, Border("bar"), Border("icon"),
+        Sub("LEFT", "%unit", 12, nil, 4, 0, true), Sub("RIGHT", stacks and "%s" or "%p", stacks and 13 or 12) })
+end
+-- a boss's cast: the spell on the left, the time left on the right
+function D.Cast()
+    return BarD(240, 26, { 0, 0.94, 1, 1 }, { { type = "subbackground" }, { type = "subforeground" },
+        Border("bar"), Border("icon"), Sub("RIGHT", "%p", 13), Sub("LEFT", "%n", 13, nil, 5) })
+end
+-- the tank's debuff: time, stacks, a word under it (the co-tank's: whose it is, on top)
+function D.Tank(label, other)
+    local subs = { { type = "subbackground" }, Border(nil), Sub("CENTER", "%p", other and 16 or 14),
+        Sub("INNER_BOTTOMRIGHT", "%s", 24, nil, 4), Sub("OUTER_BOTTOM", label or "", 12, nil, 0, -6) }
+    if other then subs[#subs + 1] = Sub("TOP", "%unit", 12, nil, 0, 0, true) end
+    return { regionType = "icon", anchorFrameType = "SCREEN", anchorPoint = "CENTER", selfPoint = "CENTER",
+        width = 60, height = 60, icon = true, iconSource = -1, displayIcon = "", zoom = 0.24, keepAspectRatio = false,
+        cooldown = true, cooldownSwipe = true, cooldownEdge = false, cooldownTextDisabled = true, color = { 1, 1, 1, 1 },
+        frameStrata = 1, alpha = 1, animation = FADE, xOffset = 0, yOffset = 0, subRegions = subs }
+end
+
 -- the colours of the boss-timer list (0-255, as K.TimerBars takes them)
 local BAR_COLOR = { 78, 167, 255, 0.75 }
 local TANK_COLOR = { 255, 150, 80, 0.75 }
@@ -756,6 +926,19 @@ function T.Build(raidKey, extras)
     local gAuto = Group({ key = name .. ": Automation", kind = "group" })
     local gPlates = Group({ key = name .. ": Nameplates", kind = "group" })
     local gRFParent = Group({ key = name .. ": Raid Frames", kind = "group" })
+    -- the Era raids' other lists, made the first time a boss needs one
+    local lazy = {}
+    local function Lazy(which)
+        if lazy[which] then return lazy[which] end
+        local g
+        if which == "lists" then g = List(name .. ": Lists [Sorted]", "Lists", "TOP", "DOWN", 8, "ascending")
+        elseif which == "tank" then g = List(name .. ": Tank Icons", "TankIcons", "RIGHT", "LEFT", 2)
+        elseif which == "cotank" then g = List(name .. ": Co-Tank Icons", "CoTankIcons", "TOP", "DOWN", 2, "descending")
+        elseif which == "casts" then g = List(name .. ": Progress Bars [Center]", "ProgressCenter", "TOP", "DOWN", 4)
+        elseif which == "gtfo" then g = Group({ key = name .. ": GTFO", kind = "group" }) end
+        lazy[which] = g
+        return g
+    end
     local gRF = Group({ key = "RF:" .. name .. " Debuffs", kind = "dynamicgroup", anchorPerUnit = "UNITFRAME", useAnchorPerUnit = true,
         grow = "HORIZONTAL", align = "CENTER", sort = "none", space = 0, limit = 5, useLimit = false, parent = gRFParent,
         gridType = "RD", gridWidth = 5, rowSpace = 1, columnSpace = 1, stagger = 0 })
@@ -808,8 +991,9 @@ function T.Build(raidKey, extras)
         -- timed abilities: a controller, a bar, a heads-up
         for _, a in ipairs(boss.timers or {}) do
             a.key = Key(boss.key, a.id or a.name)
-            local map, subs, plates = T.Ability(boss, a)
+            local map, subs, plates, phaseEv = T.Ability(boss, a)
             local extraEv = {}
+            if phaseEv then extraEv[#extraEv + 1] = phaseEv end
             if a.startOn then extraEv[#extraEv + 1] = a.startOn end
             for _, e in ipairs(a.stopOn or {}) do extraEv[#extraEv + 1] = e end
             Piece("CT:" .. tag .. a.name, "text", gCtl, D.Silent(), boss, Events(subs, extraEv, plates), map)
@@ -842,6 +1026,78 @@ function T.Build(raidKey, extras)
         for _, s in ipairs(boss.alerts or {}) do
             local map, subs, plates = T.Alert(boss, s)
             Piece("SA:" .. tag .. s.name, "text", gAlert, D.Text("%i %n", 22, s.color or { 1, 0.82, 0, 1 }), boss, Events(subs, nil, plates), map)
+        end
+
+        -- cast bars: the entries of boss.casts, and every call-out or timer
+        -- that says cast = true (the client's cast time) or cast = seconds
+        do
+            local casts = {}
+            for _, c in ipairs(boss.casts or {}) do casts[#casts + 1] = c end
+            for _, list in ipairs({ boss.alerts or {}, boss.timers or {} }) do
+                for _, e in ipairs(list) do
+                    if e.cast and e.spells then
+                        casts[#casts + 1] = { name = e.name, spells = e.spells, text = e.castText or e.name,
+                            secs = type(e.cast) == "number" and e.cast or nil, sub = e.castSub, kick = e.kick, icon = e.icon }
+                    end
+                end
+            end
+            if #casts > 0 then
+                local map, subs = T.Casts(boss, casts)
+                Piece("PC:" .. tag .. "Casts", "aurabar", Lazy("casts"), D.Cast(), boss, Events(subs), map)
+            end
+        end
+
+        -- lists: who has a debuff (boss.lists, and a raid-frame debuff that says list = true)
+        do
+            local lists = {}
+            for _, l in ipairs(boss.lists or {}) do lists[#lists + 1] = l end
+            for _, r in ipairs(boss.raid or {}) do if r.list then lists[#lists + 1] = r end end
+            for _, l in ipairs(lists) do
+                local names = {}
+                for _, id in ipairs(l.spells or {}) do names[#names + 1] = tostring(id) end
+                for _, n in ipairs(l.names or {}) do names[#names + 1] = n end
+                Unit({ id = "L:" .. tag .. l.name, kind = "aurabar", group = Lazy("lists"),
+                    display = D.List(l.listColor, l.stacks), load = Load(boss),
+                    triggers = { { kind = "aura", filter = l.filter or "HARMFUL", names = names, unit = "group", clones = true } } })
+            end
+        end
+
+        -- the tank's debuffs: on you (tanks only), and on the other tank
+        for _, t in ipairs(boss.tank or {}) do
+            local names = {}
+            for _, id in ipairs(t.spells or {}) do names[#names + 1] = tostring(id) end
+            for _, n in ipairs(t.names or {}) do names[#names + 1] = n end
+            local load = Load(boss)
+            load.role = { TANK = true }
+            local act = {}
+            if t.say then act.sound = "tts:" .. t.say end
+            Unit({ id = "TI:" .. tag .. t.name, kind = "icon", group = Lazy("tank"), display = D.Tank(t.label), load = load,
+                actions = { start = act },
+                triggers = { { kind = "aura", filter = "HARMFUL", names = names, unit = "player" } } })
+            local load2 = Load(boss)
+            load2.role = { TANK = true }
+            Unit({ id = "CTI:" .. tag .. t.name, kind = "icon", group = Lazy("cotank"), display = D.Tank(t.label, true), load = load2,
+                triggers = { { kind = "aura", filter = "HARMFUL", names = names, unit = "group", ignoreSelf = true, clones = true } } })
+        end
+
+        -- standing in something: damage on you (and, for aura = true, the debuff itself)
+        for _, g in ipairs(boss.gtfo or {}) do
+            local trigs = {}
+            if g.aura then
+                local names = {}
+                for _, id in ipairs(g.spells) do names[#names + 1] = tostring(id) end
+                trigs[#trigs + 1] = { kind = "aura", filter = "HARMFUL", names = names, unit = "player" }
+            else
+                trigs[#trigs + 1] = { kind = "combatlog", prefix = "SPELL_PERIODIC", suffix = "_DAMAGE", destUnit = "player", spellId = g.spells, duration = 1.5 }
+                trigs[#trigs + 1] = { kind = "combatlog", prefix = "SPELL", suffix = "_DAMAGE", destUnit = "player", spellId = g.spells, duration = 1.5 }
+            end
+            local id = "GTFO:" .. tag .. g.name
+            Unit({ id = id, kind = "text", group = Lazy("gtfo"), display = D.Text("%i MOVE %i", 32, { 1, 0.25, 0.25, 1 }), load = Load(boss),
+                actions = { start = { custom = C } }, config = { option = { enable = true, gtfoSound = "ui:Alarm" } },
+                options = { { type = "group", key = "option", name = "Standing in " .. g.name, subOptions = {
+                    { type = "toggle", key = "enable", name = "Sound the alarm", default = true } } } },
+                triggers = trigs })
+            B[id] = { ["actions.start.custom"] = GtfoAlarm }
         end
 
         -- phase calls from the boss's health
@@ -917,6 +1173,27 @@ function T.Build(raidKey, extras)
     end
     if next(berserkKeys) then
         local bm = K.Berserk({ keys = berserkKeys })
+        -- (a raid whose pieces stay loaded for the whole zone - Zul'Aman,
+        -- no encounter ids - has to take the bar down itself when the
+        -- fight ends, without that counting as the berserk)
+        do
+            local trig, fin = bm["triggers.1.trigger"], bm["actions.finish.custom"]
+            bm["triggers.1.trigger"] = function(env, allstates, event, key, secs)
+                if event == "WA_NUMEN_TIMER" and berserkKeys[key] and secs == nil then
+                    local st = allstates[""]
+                    if st and st.show then
+                        env.stopped = true
+                        return K.Drop(allstates, "")
+                    end
+                    return false
+                end
+                return trig(env, allstates, event, key, secs)
+            end
+            bm["actions.finish.custom"] = function(env)
+                if env and env.stopped then env.stopped = nil return end
+                return fin(env)
+            end
+        end
         Piece("BT:" .. shared .. "Berserk Timer", "aurabar", gBerserk, D.Berserk(), nil, { "WA_NUMEN_TIMER" }, bm,
             { activeTrigger = 1, conditions = {
                 { check = { trigger = 1, variable = "expirationTime", op = "==", value = "30" }, changes = { { property = "customcode", value = C } } },

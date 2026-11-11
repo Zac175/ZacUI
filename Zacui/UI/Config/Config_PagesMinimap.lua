@@ -484,6 +484,10 @@ RegisterPage("Minimap", function(L)
         Bind(L, "check", "groupNameDeclutter", "Leave off names that would overlap")
         L:EndCard()
 
+        -- (options audit 2026-11-09) the markers are Classic Era's Azeroth
+        -- data (Core_Flavor's "maps_data" row): not shown where it is off
+        local pinsOn = not (ns.FeatureOn and not ns.FeatureOn("maps_data"))
+        if pinsOn then
         L:Card("Markers on the minimap")
         L:Desc("The same icons the world map uses, drawn where they are "
             .. "relative to you. Nothing here takes the mouse, so they cannot "
@@ -503,6 +507,7 @@ RegisterPage("Minimap", function(L)
         L:Desc("If you see none at all, /zui minimapinfo says why - most "
             .. "often nothing of yours is inside the minimap's current zoom.")
         L:EndCard()
+        end
 
         L:Card("ZacUI's button")
         local MB = ns.MinimapButton
@@ -589,9 +594,11 @@ RegisterPage("Minimap", function(L)
         end
         L:EndCard()
 
+        if not (ns.FeatureOn and not ns.FeatureOn("maps_data")) then
         L:Card("Markers")
         Bind(L, "slider", "pinSize", "Marker size", nil, { min = 8, max = 24, step = 1 })
         L:EndCard()
+        end
     end
 
     local function Tab_text(L)

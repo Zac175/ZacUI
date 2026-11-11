@@ -24,6 +24,10 @@ local V2 = HUD.V2
 
 local GetSpellInfo = HUD.GetSpellInfo
 local IsSecret = ns.IsSecret
+-- Retail (HUD_Retail.lua's class HUD is the list): each entry also keeps
+-- the game's flags, and the list is read again when the spec changes.
+-- Forever reads exactly what it always read.
+local RETAIL = HUD.RETAIL and true or false
 
 -- Enum.CooldownViewerCategory: Essential 0, Utility 1, TrackedBuff 2,
 -- TrackedBar 3 (the rest are retail's spec-agnostic / equipment sets)
@@ -40,6 +44,18 @@ end
 local function Plain(v)
     if v == nil or IsSecret(v) then return nil end
     return v
+end
+
+-- Retail: is the game's "hidden by default" flag set on an entry
+-- (Enum.CooldownSetSpellFlags.HideByDefault, a bit in info.flags; no
+-- maths unless both are plain numbers). No enum on the client: not hidden.
+local function HideByDefault(flags)
+    local e = Enum and Enum.CooldownSetSpellFlags
+    local bitv = e and e.HideByDefault
+    if type(flags) ~= "number" or type(bitv) ~= "number" or IsSecret(flags) or IsSecret(bitv) or bitv <= 0 then
+        return false
+    end
+    return math.floor(flags / bitv) % 2 == 1
 end
 
 local cache, dirty = nil, true
@@ -81,6 +97,13 @@ local function Read()
                                 name = sname, icon = icon,
                                 hasRange = (type(maxR) == "number" and maxR > 0) or false,
                             }
+                            if RETAIL then
+                                local e = out[#out]
+                                e.defaultHidden = HideByDefault(info.flags) or nil
+                                e.hasAura = Plain(info.hasAura) == true or nil
+                                e.selfAura = Plain(info.selfAura) == true or nil
+                                e.charges = Plain(info.charges) == true or nil
+                            end
                         end
                     end
                 end
@@ -104,4 +127,13 @@ function V2.CatalogueDirty() dirty = true end
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("SPELLS_CHANGED")
 pcall(ev.RegisterEvent, ev, "LEARNED_SPELL_IN_SKILL_LINE")
+if RETAIL then
+    -- the list is the spec's: read again when the spec changes and when
+    -- the game says its Cooldown Manager data arrived (events a client
+    -- lacks are asked about first; registering one throws)
+    local valid = C_EventUtils and C_EventUtils.IsEventValid
+    for _, e in ipairs({ "PLAYER_SPECIALIZATION_CHANGED", "COOLDOWN_VIEWER_DATA_LOADED" }) do
+        if not valid or valid(e) then pcall(ev.RegisterEvent, ev, e) end
+    end
+end
 ev:SetScript("OnEvent", function() dirty = true end)

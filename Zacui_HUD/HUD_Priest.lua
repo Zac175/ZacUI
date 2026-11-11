@@ -3,6 +3,14 @@
 -- HUD framework: the WA's per-spec bars become one cooldown grid with
 -- per-icon toggles, plus target debuffs (own only), reminders, and
 -- mana / five-second-rule / wand bars.
+-- 2026-11-09: on the per-spec presets (Class HUD v2's shape and storage,
+-- HUD_V2_Sources / HUD_V2_Specs): Discipline / Holy / Shadow each start as
+-- a strong player of that spec sets the HUD up, per game version (Classic
+-- Era, TBC, WoW Forever); a self-buff row and the trinkets joined; every
+-- entry is a tick. A save that was already in use keeps exactly what it
+-- showed (frozen once, see Freeze below). The file stays hand-written:
+-- its store's shape, its anchors and PR.LIVE are read elsewhere
+-- (HUD_PreviewDrag, ZacLayout), so they are as they were.
 -- Part of ZacUI; load order is set by the TOC.
 -- Perf rules: events set flags/timestamps only; scans in the 0.2s core
 -- ticker; countdown texts on the 0.1s text ticker.
@@ -11,6 +19,7 @@ local ADDON_NAME = ...
 local ns = _G.ZacUI
 if not ns then return end
 if not ns.HUD then return end   -- (the part stands down on this game version: HUD_Shared, Core_Flavor)
+if ns.HUD.RETAIL then return end   -- (Retail: its own class HUD, HUD_Retail.lua; this Classic one never loads there)
 
 -- a value WoW Forever hands back hidden (a secret value: no maths on it)
 local function Hidden(v) return ns.IsSecret ~= nil and ns.IsSecret(v) or false end
@@ -49,11 +58,19 @@ local DEFAULTS = {
         x = 0, y = -120, iconSize = 26, spacing = 4,
         hidden = {},
     },
+    -- the self-buff row (2026-11-09; the class HUDs' auraRow)
+    auraRow = {
+        enabled = true,
+        x = 0, y = -150, iconSize = 25, spacing = 4,
+        hidden = {},
+    },
+    -- (shadowform has no default here: nil follows the spec - on for
+    -- Shadow, off otherwise, as it always was; a tick is yours)
     reminders = {
         enabled = true,
         x = 0, y = 150, iconSize = 40, spacing = 6,
         innerFire = true, fort = true, spirit = true,
-        shadowform = false, candles = true,
+        candles = true,
     },
     resources = {
         manaBar = true,
@@ -64,9 +81,7 @@ local DEFAULTS = {
     },
 }
 
-function PR.Store()
-    return HUD.Store("priest", DEFAULTS)
-end
+-- (PR.Store is further down, after the lists the freeze reads)
 
 -- Static data (from the decoded WA)
 local SPELL_IDS = {
@@ -79,15 +94,66 @@ local SPELL_IDS = {
     divineSpirit = 14752, shadowform  = 15473, mindFlay     = 15407,
 }
 
--- Target debuff row (WA "Priest - Debuffs", own debuffs only)
-local DEBUFF_DEFS = {
+-- The game version this runs as ("era" / "tbc" / "forever"): an entry
+-- with `flavors` exists only on the versions it names.
+local FLAVOR = ns.Flavor and ns.Flavor() or "era"
+
+-- Spells only some game versions have (ids: TBC from Wowhead's TBC
+-- tooltips, WoW Forever from warcraft.wiki.gg's per-spell pages). Aura-only
+-- keys (the buff and debuff rows read them by name) sit here too.
+local FLAVOR_SPELLS = {
+    era = {},
+    tbc = {
+        prayerOfMending = 33076, circleOfHealing = 34861, shadowfiend = 34433,
+        painSuppression = 33206, swDeath = 32379, symbolOfHope = 32548,
+        vampiricTouch = 34914,
+    },
+    forever = {
+        penance = 402174, prayerOfMending = 401859, swDeath = 1309595,
+    },
+}
+-- (every version: the debuff Shadow Weaving leaves on the target - named
+-- Shadow Vulnerability on Classic Era, read by the id's own name)
+SPELL_IDS.shadowWeaving = 15258
+for key, id in pairs(FLAVOR_SPELLS[FLAVOR] or {}) do SPELL_IDS[key] = id end
+
+local function ForFlavor(list)
+    local out = {}
+    for _, e in ipairs(list) do
+        if not e.flavors or e.flavors[FLAVOR] then out[#out + 1] = e end
+    end
+    return out
+end
+
+-- Target debuff row (WA "Priest - Debuffs", own debuffs only). The first
+-- six are the row as it always was; `new` entries came with the spec
+-- presets (off in the class baseline; their icons are made when first on).
+local DEBUFF_ALL = {
     { key = "swp",          id = 589,   label = "Shadow Word: Pain" },
     { key = "hexWeakness",  id = 9035,  label = "Hex of Weakness" },
     { key = "devouring",    id = 2944,  label = "Devouring Plague" },
     { key = "psychicScream", id = 8122, label = "Psychic Scream" },
     { key = "vampiric",     id = 15286, label = "Vampiric Embrace" },
     { key = "shackle",      id = 9484,  label = "Shackle Undead" },
+    { key = "shadowWeaving", id = 15258, label = "Shadow Weaving (stacks)", new = true, stacks = true },
+    { key = "vampiricTouch", id = 34914, label = "Vampiric Touch", new = true, flavors = { tbc = true } },
 }
+local DEBUFF_DEFS = ForFlavor(DEBUFF_ALL)
+
+-- Self-buff row (2026-11-09): your own buffs by the id's name; `harmful`
+-- reads your debuffs instead (Weakened Soul after your own shield).
+local BUFF_ALL = {
+    { key = "innerFocus",     id = 14751, label = "Inner Focus", new = true },
+    { key = "powerInfusion",  id = 10060, label = "Power Infusion", new = true },
+    { key = "painSuppression", id = 33206, label = "Pain Suppression", new = true, flavors = { tbc = true } },
+    { key = "weakenedSoul",   id = 6788,  label = "Weakened Soul", new = true, harmful = true },
+    { key = "surgeOfLight",   id = 33151, label = "Surge of Light", new = true, flavors = { tbc = true } },
+    { key = "clearcasting",   id = 34754, label = "Clearcasting (Holy Concentration)", new = true, flavors = { tbc = true } },
+    { key = "spiritTap",      id = 15271, label = "Spirit Tap", new = true },
+    { key = "zhc",            id = 24659, label = "Zandalarian Hero Charm", new = true, flavors = { era = true, forever = true } },
+}
+local BUFF_DEFS = ForFlavor(BUFF_ALL)
+PR.DebuffList, PR.BuffList, PR.Flavor = DEBUFF_DEFS, BUFF_DEFS, FLAVOR
 
 -- Grenade priority (WA Engi Nade custom list)
 local NADE_LIST = {
@@ -103,7 +169,8 @@ local SHOOT_ID = 5019              -- wand Shoot
 
 -- One spell id per race; only the id matching the player's own race
 -- resolves a name, so ResolveSpells' first hit is the only hit.
-local RACIAL_IDS = { 20594, 20589, 20600, 20580, 7744, 20554 }
+-- (28880 Gift of the Naaru, 28730 Arcane Torrent: the TBC races)
+local RACIAL_IDS = { 20594, 20589, 20600, 20580, 7744, 20554, 28880, 28730 }
 
 local RED_OOR = { 1, 0.2431, 0.2275 }
 local GOLD_COUNT = { 1, 0.82, 0, 1 }
@@ -129,6 +196,9 @@ PR.State = {
     items     = {},
     racial    = nil,
     candles   = 0,
+    auraNames = {}, auraIcons = {},   -- the buff row's entries by key
+    selfDebuffs = {},                 -- player HARMFUL by lower(name), read only while the buff row asks
+    trinkets  = {},                   -- [13] / [14] = { texture, start, duration }, read only while a trinket icon is on
 }
 local S = PR.State
 
@@ -148,6 +218,10 @@ local function ResolveSpells()
             icon = tex or (GetSpellTexture_C and GetSpellTexture_C(id))
         end
         S.spells[key] = { name = name, known = known, icon = icon }
+    end
+    for _, e in ipairs(BUFF_DEFS) do
+        local name, _, icon = GetSpellInfo and GetSpellInfo(e.id)
+        S.auraNames[e.key], S.auraIcons[e.key] = name, icon
     end
     S.racial = nil
     for _, id in ipairs(RACIAL_IDS) do
@@ -199,6 +273,17 @@ local function ScanPlayerBuffs()
         end
     end
     DropUnseen(S.buffs, pass)
+    -- your own debuffs, only while a buff row entry reads them
+    if PR.wantSelfDebuffs then
+        local dl = ns.PlayerAuras.Debuffs()
+        for i = 1, #dl do
+            local a = dl[i]
+            if a.name then
+                PutAura(S.selfDebuffs, a.name:lower(), pass, a.name, a.icon, a.count, a.duration, a.expirationTime)
+            end
+        end
+        DropUnseen(S.selfDebuffs, pass)
+    end
 end
 
 local function ScanTargetDebuffs()
@@ -304,6 +389,20 @@ end
 local function UpdateMisc()
     S.targetAttackable = (UnitExists("target") and UnitCanAttack("player", "target")
         and not UnitIsDeadOrGhost("target")) and true or false
+    -- the equipped trinkets, only while a trinket icon is on the grid
+    if PR.wantTrinkets then
+        for slotIdx = 13, 14 do
+            local t = S.trinkets[slotIdx]
+            if not t then t = {} S.trinkets[slotIdx] = t end
+            t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", slotIdx) or nil
+            if GetInventoryItemCooldown then
+                local start, duration = HUD.PlainCD(GetInventoryItemCooldown("player", slotIdx))
+                t.start, t.duration = start or 0, duration or 0
+            else
+                t.start, t.duration = 0, 0
+            end
+        end
+    end
 end
 
 -- Events: five-second rule + wand (timestamp writes only)
@@ -379,8 +478,9 @@ DEFAULTS.colors = COLOR_DEFAULTS
 local function NewView(state)
     return {
         S = state,
-        memo = { main = {}, debuff = {}, remind = {} },
+        memo = { main = {}, debuff = {}, remind = {}, buff = {} },
         mainIcons = {}, mainActive = {}, debuffIcons = {}, debuffActive = {}, remindIcons = {},
+        buffIcons = {}, buffActive = {},
     }
 end
 local LIVE = NewView(S)
@@ -409,8 +509,37 @@ local function ApplyAnchorPositions()
     HUD.PlaceAnchor("prReminders", holders.Reminders, cfg.reminders)
     HUD.PlaceAnchor("prMana", holders.Mana, cfg.resources.mana)
     HUD.PlaceAnchor("prWand", holders.Wand, cfg.resources.wand)
+    if holders.AuraRow then HUD.PlaceAnchor("prAuraRow", holders.AuraRow, cfg.auraRow) end
     if cfg.group then HUD.PlaceAnchor("prGroup", holders.GroupHandle, cfg.group) end
     LIVE.Main:SetScale(cfg.mainRow.scale or 1)
+end
+
+-- The "move all" handle's members; the buff row joins when it is made.
+local groupMembers = {}
+local moversDone = false
+local function RegisterBuffMover(cfg)
+    if not holders.AuraRow or holders.AuraRow._prMover then return end
+    holders.AuraRow._prMover = true
+    HUD.RegisterMover("prAuraRow", "Priest HUD Active Buffs", holders.AuraRow, cfg.auraRow)
+    groupMembers[#groupMembers + 1] = { key = "prAuraRow", holder = holders.AuraRow }
+end
+
+-- The buff row's anchor exists only once the row has something to show
+-- (a save frozen as it was never makes it): the live one a named holder
+-- with its own mover, a sample's a plain frame on the canvas.
+local function EnsureBuffAnchor(V)
+    if V.Buffs then return V.Buffs end
+    if V.sample then
+        V.Buffs = HUD.SampleAnchor(V.canvas, 25, 25)
+    elseif V == LIVE and LIVE.Main then
+        V.Buffs = MakeAnchor("AuraRow", 25, 25)
+        local cfg = PR.Store()
+        if cfg then
+            HUD.PlaceAnchor("prAuraRow", holders.AuraRow, cfg.auraRow)
+            if moversDone then RegisterBuffMover(cfg) end
+        end
+    end
+    return V.Buffs
 end
 
 local function RegisterMovers()
@@ -433,13 +562,16 @@ local function RegisterMovers()
     cfg.group = cfg.group or { x = (cfg.mainRow.x or 0),
                                y = (cfg.mainRow.y or -208) + 50 }
     HUD.PlaceAnchor("prGroup", holders.GroupHandle, cfg.group)
-    HUD.RegisterGroup("prGroup", "Priest HUD: move all", holders.GroupHandle, cfg.group, {
+    for _, m in ipairs({
         { key = "prMainRow",   holder = holders.Main },
         { key = "prDebuffs",   holder = holders.Debuffs },
         { key = "prReminders", holder = holders.Reminders },
         { key = "prMana",      holder = holders.Mana },
         { key = "prWand",      holder = holders.Wand },
-    })
+    }) do groupMembers[#groupMembers + 1] = m end
+    HUD.RegisterGroup("prGroup", "Priest HUD: move all", holders.GroupHandle, cfg.group, groupMembers)
+    moversDone = true
+    RegisterBuffMover(cfg)
     HUD.Debug("PriestHUD anchors registered with the mover registry")
 end
 C_Timer.After(2, function()
@@ -468,7 +600,268 @@ local MAIN_DEFS = {
     { key = "nade",         kind = "itemNade",   label = "Dynamite/Grenade" },
     { key = "sapper",       kind = "itemSapper", label = "Sapper" },
 }
+-- What came with the spec presets (2026-11-09), after the seventeen above
+-- so everything that walks the list meets those first, as before. `new`:
+-- off in the class baseline, its icon made the first time it is on.
+local MAIN_NEW = {
+    { key = "penance",         kind = "spell", spell = "penance",         label = "Penance", new = true, flavors = { forever = true } },
+    { key = "prayerOfMending", kind = "spell", spell = "prayerOfMending", label = "Prayer of Mending", new = true, flavors = { tbc = true, forever = true } },
+    { key = "circleOfHealing", kind = "spell", spell = "circleOfHealing", label = "Circle of Healing", new = true, flavors = { tbc = true } },
+    { key = "painSuppression", kind = "spell", spell = "painSuppression", label = "Pain Suppression", new = true, flavors = { tbc = true } },
+    { key = "swDeath",         kind = "spell", spell = "swDeath",         label = "Shadow Word: Death", new = true, flavors = { tbc = true, forever = true } },
+    { key = "shadowfiend",     kind = "spell", spell = "shadowfiend",     label = "Shadowfiend", new = true, flavors = { tbc = true } },
+    { key = "symbolOfHope",    kind = "spell", spell = "symbolOfHope",    label = "Symbol of Hope", new = true, noRange = true, flavors = { tbc = true } },
+    { key = "trinket1",        kind = "trinket", slot = 13, label = "Trinket slot 1", new = true },
+    { key = "trinket2",        kind = "trinket", slot = 14, label = "Trinket slot 2", new = true },
+}
+-- every entry of every game version (the freeze writes a tick for each)
+local MAIN_ALL = {}
+for _, def in ipairs(MAIN_DEFS) do MAIN_ALL[#MAIN_ALL + 1] = def end
+for _, def in ipairs(MAIN_NEW) do MAIN_ALL[#MAIN_ALL + 1] = def end
+for _, def in ipairs(ForFlavor(MAIN_NEW)) do MAIN_DEFS[#MAIN_DEFS + 1] = def end
 PR.MainIconList = MAIN_DEFS
+
+-- The grid's fill order: the seventeen in the order they always had, the
+-- new ones among them (rotation first, then cooldowns, racial, trinkets,
+-- items).
+local MAIN_ORDER = {}
+do
+    local byKey = {}
+    for _, def in ipairs(MAIN_DEFS) do byKey[def.key] = def end
+    for _, key in ipairs({ "penance", "prayerOfMending", "circleOfHealing", "painSuppression",
+        "pws", "innerFocus", "fade", "psychicScream", "mindBlast", "swDeath", "silence", "vampiric",
+        "devouring", "shadowfiend", "desperate", "fearWard", "feedback", "powerInfusion", "lightwell",
+        "symbolOfHope", "racial", "trinket1", "trinket2", "potion", "nade", "sapper" }) do
+        local def = byKey[key]
+        if def then
+            MAIN_ORDER[#MAIN_ORDER + 1] = def
+            byKey[key] = nil
+        end
+    end
+    -- (anything the order above forgot goes last, in list order)
+    for _, def in ipairs(MAIN_DEFS) do
+        if byKey[def.key] then MAIN_ORDER[#MAIN_ORDER + 1] = def end
+    end
+end
+
+-- ------------------------------------------------------------
+-- Spec presets (the class HUDs' shape: HUD_V2_Sources' roles). Each spec's
+-- default HUD - what a strong player of it presses and tracks; `show`
+-- names the entries on per row (main = the grid, buffs, debuffs), the base
+-- lists are Classic Era's and a spec's tbc / forever block replaces the
+-- rows it names on that game. A spell the character does not know never
+-- shows, so a list may name another build's talents. Sources: the audit
+-- of 2026-11-09 (guide-based) and wowtbc.gg's Forever priest guides.
+--   Healers lose the damage spells, the engineering items and the target
+--   debuffs; they gain Inner Focus / Power Infusion / Weakened Soul on the
+--   buff row. Shadow keeps Shadow Word: Pain and Shadow Weaving's stacks
+--   on the target, drops Vampiric Embrace and Devouring Plague on Classic
+--   Era (raid debuff slots) and gets the Shadowform reminder.
+--   WoW Forever: Penance (Discipline), Prayer of Mending (Holy), Shadow
+--   Word: Death and Devouring Plague for every race (Shadow). Binding Heal
+--   has no cooldown and Litany of Light is passive: nothing to draw.
+-- ------------------------------------------------------------
+local ROLE_DEFS = {
+    { key = "discipline", label = "Discipline", tab = 1, show = {
+          main = { "pws", "innerFocus", "powerInfusion", "fade", "desperate", "fearWard", "psychicScream",
+                   "racial", "trinket1", "trinket2", "potion" },
+          buffs = { "innerFocus", "powerInfusion", "weakenedSoul", "zhc" },
+          debuffs = {} },
+      tbc = { show = {
+          main = { "painSuppression", "powerInfusion", "innerFocus", "shadowfiend", "pws", "prayerOfMending",
+                   "fade", "desperate", "fearWard", "psychicScream", "symbolOfHope",
+                   "racial", "trinket1", "trinket2", "potion" },
+          buffs = { "innerFocus", "powerInfusion", "painSuppression", "weakenedSoul" } } },
+      forever = { show = {
+          main = { "penance", "powerInfusion", "innerFocus", "pws", "desperate", "fearWard", "fade",
+                   "psychicScream", "racial", "trinket1", "trinket2", "potion" } } } },
+    { key = "holy", label = "Holy", tab = 2, show = {
+          main = { "pws", "innerFocus", "fade", "desperate", "fearWard", "lightwell", "psychicScream",
+                   "racial", "trinket1", "trinket2", "potion" },
+          buffs = { "innerFocus", "weakenedSoul", "zhc" },
+          debuffs = {} },
+      tbc = { show = {
+          main = { "prayerOfMending", "circleOfHealing", "shadowfiend", "innerFocus", "pws", "fade",
+                   "desperate", "fearWard", "lightwell", "psychicScream", "symbolOfHope",
+                   "racial", "trinket1", "trinket2", "potion" },
+          buffs = { "innerFocus", "surgeOfLight", "clearcasting", "weakenedSoul" } } },
+      forever = { show = {
+          main = { "prayerOfMending", "innerFocus", "pws", "fade", "desperate", "fearWard", "lightwell",
+                   "psychicScream", "racial", "trinket1", "trinket2", "potion" } } } },
+    { key = "shadow", label = "Shadow", tab = 3, reminders = { shadowform = true }, show = {
+          main = { "mindBlast", "pws", "innerFocus", "fade", "silence", "psychicScream", "desperate", "fearWard",
+                   "racial", "trinket1", "trinket2", "potion", "nade", "sapper" },
+          buffs = { "innerFocus", "powerInfusion", "zhc" },
+          debuffs = { "swp", "shadowWeaving" } },
+      tbc = { show = {
+          main = { "mindBlast", "swDeath", "shadowfiend", "innerFocus", "fade", "silence", "pws",
+                   "psychicScream", "devouring", "desperate", "fearWard", "symbolOfHope",
+                   "racial", "trinket1", "trinket2", "potion" },
+          buffs = { "innerFocus", "powerInfusion" },
+          debuffs = { "vampiricTouch", "swp", "vampiric", "shadowWeaving", "devouring" } } },
+      forever = { show = {
+          main = { "mindBlast", "swDeath", "devouring", "innerFocus", "pws", "fade", "silence", "psychicScream",
+                   "desperate", "fearWard", "racial", "trinket1", "trinket2", "potion", "nade", "sapper" },
+          debuffs = { "swp", "devouring", "vampiric", "shadowWeaving" } } } },
+}
+PR.RoleDefs = ROLE_DEFS
+
+-- the presets for this game version: per row a set of keys
+local ROLES = {}
+for i, r in ipairs(ROLE_DEFS) do
+    local over = type(r[FLAVOR]) == "table" and r[FLAVOR] or nil
+    local rows = {}
+    for row, keys in pairs(r.show or {}) do rows[row] = keys end
+    if over then for row, keys in pairs(over.show or {}) do rows[row] = keys end end
+    local show = {}
+    for row, keys in pairs(rows) do
+        local set = {}
+        for _, k in ipairs(keys) do set[k] = true end
+        show[row] = set
+    end
+    ROLES[i] = { key = r.key, label = r.label, tab = r.tab, show = show,
+        reminders = (over and over.reminders) or r.reminders }
+end
+PR.Roles = ROLES
+local ROLE_HOLDER = { roles = ROLES }   -- (the shape HUD.V2.GuessRole reads)
+
+local function RoleByKey(key)
+    for _, r in ipairs(ROLES) do if r.key == key then return r end end
+    return nil
+end
+
+-- The spec the talents point at (HUD_V2_Sources reads them: the tree with
+-- most points; WoW Forever: the trait group with most ranks), nil = none:
+-- the class baseline. The talent events only note the time; the 0.2s tick
+-- reads half a second after the last one and never in a fight.
+local spec = { key = nil, at = nil }
+local function ReadSpec()
+    local V2 = HUD.V2
+    if not (V2 and V2.GuessRole) then return nil end
+    local ok, key = pcall(V2.GuessRole, ROLE_HOLDER)
+    return ok and key or nil
+end
+function PR.DetectedSpec() return spec.key end
+
+-- The spec in force for a view: the preview's pick (a sample only), your
+-- pick on the page (cfg.v2.role; "baseline" = none), else the talents'.
+-- nil = the class baseline: the HUD as it always was.
+local function RoleFor(V, cfg)
+    local pick = V and V.sample and V.previewSpec or nil
+    if pick == nil then
+        local v = cfg and cfg.v2
+        pick = type(v) == "table" and v.role or nil
+    end
+    if pick == "baseline" then return nil end
+    local r = pick and RoleByKey(pick)
+    if r then return r end
+    return spec.key and RoleByKey(spec.key) or nil
+end
+
+-- An entry off its row: your tick (true = off, false = on) first, then the
+-- spec's preset for that row, then the entry's own default (the seventeen
+-- and the six debuffs on, everything newer off).
+local function Off(role, row, hidden, def)
+    local v = hidden and hidden[def.key]
+    if v ~= nil then return v and true or false end
+    local set = role and role.show[row]
+    if set then return not set[def.key] end
+    return def.new and true or false
+end
+
+-- a reminder on: your tick, else the spec's (Shadowform), else off
+local function RemindOn(role, r, option)
+    local v = r[option]
+    if v ~= nil then return v and true or false end
+    local rr = role and role.reminders
+    return (rr and rr[option]) and true or false
+end
+
+-- ------------------------------------------------------------
+-- Storage, and the one-time freeze. A save this HUD was already in use on
+-- keeps exactly what it showed: every entry gets an explicit tick (the
+-- ones that showed on, everything that came with the presets off) and the
+-- Shadowform reminder its old "off", so no spec moves anything until
+-- "Reset to spec defaults". cfg.presets marks a save as done, frozen or
+-- fresh.
+--   In use = the HUD is switched on, or it carries a tick of your own.
+--   A save the HUD never read (ZacLayout writes spots into it) or one
+--   that is off with nothing ticked has nothing on screen to keep: it
+--   starts on the presets, keeping every position and size it holds.
+-- ------------------------------------------------------------
+local function InUse(raw)
+    if type(raw) ~= "table" or raw.enabled == nil then return false end
+    if raw.enabled then return true end
+    for _, k in ipairs({ "mainRow", "debuffRow" }) do
+        local t = raw[k]
+        if type(t) == "table" and type(t.hidden) == "table" and next(t.hidden) ~= nil then return true end
+    end
+    local r = raw.reminders
+    return (type(r) == "table" and r.shadowform) and true or false
+end
+PR.SaveInUse = InUse
+
+local function Freeze(cfg)
+    local function Ticks(hidden, list)
+        for _, e in ipairs(list) do
+            if e.new then
+                hidden[e.key] = true
+            elseif hidden[e.key] == nil then
+                hidden[e.key] = false
+            end
+        end
+    end
+    Ticks(cfg.mainRow.hidden, MAIN_ALL)
+    Ticks(cfg.debuffRow.hidden, DEBUFF_ALL)
+    Ticks(cfg.auraRow.hidden, BUFF_ALL)
+    if cfg.reminders.shadowform == nil then cfg.reminders.shadowform = false end
+end
+
+function PR.Store()
+    local root = type(ZacUIDB) == "table" and ZacUIDB.hud or nil
+    local raw = type(root) == "table" and root.priest or nil
+    if type(raw) == "table" and raw.presets then return HUD.Store("priest", DEFAULTS) end
+    local inUse = InUse(raw)
+    local cfg = HUD.Store("priest", DEFAULTS)
+    if cfg and not cfg.presets then
+        if inUse then Freeze(cfg) end
+        cfg.presets = 1
+    end
+    return cfg
+end
+
+-- "Reset to spec defaults": every tick of yours on the three rows and the
+-- Shadowform reminder go, so the spec in force decides them again. The
+-- spec pick, positions, sizes, colours and every other switch stay.
+function PR:ResetToSpec()
+    local cfg = PR.Store()
+    if not cfg then return false end
+    wipe(cfg.mainRow.hidden)
+    wipe(cfg.debuffRow.hidden)
+    wipe(cfg.auraRow.hidden)
+    cfg.reminders.shadowform = nil
+    for _, m in pairs(PR.LIVE.memo) do HUD.ForgetLayout(m) end
+    if ns.SettingsChanged then ns.SettingsChanged("hud.role") end
+    PR.Display:Refresh()
+    return true
+end
+
+-- your spec pick: a preset's key, "baseline", or nil = follow the talents
+function PR:SetSpecPick(key)
+    local cfg = PR.Store()
+    if not cfg then return end
+    if key == nil or key == "auto" then
+        if type(cfg.v2) == "table" then
+            cfg.v2.role = nil
+            if next(cfg.v2) == nil then cfg.v2 = nil end
+        end
+    else
+        if type(cfg.v2) ~= "table" then cfg.v2 = {} end
+        cfg.v2.role = key
+    end
+    for _, m in pairs(PR.LIVE.memo) do HUD.ForgetLayout(m) end
+    PR.Display:Refresh()
+end
 
 -- The colour settings as { r, g, b, a } arrays, onto every piece of one
 -- view that carries one; re-read whenever any setting changed.
@@ -489,10 +882,11 @@ local function Colors(V)
         end
         if V.fsrBar then V.fsrBar:SetBarColor(unpack(col.fsr)) end
         if V.wandBar then V.wandBar:SetBarColor(unpack(col.wand)) end
-        for _, set in ipairs({ V.mainIcons, V.remindIcons }) do
+        for _, set in ipairs({ V.mainIcons, V.remindIcons, V.debuffIcons, V.buffIcons }) do
             for _, icon in pairs(set) do
                 local t = icon.texts
                 if t.p then t.p:SetTextColor(unpack(col.timer)) end
+                if t.s then t.s:SetTextColor(unpack(col.timer)) end
                 if t.count then t.count:SetTextColor(unpack(col.count)) end
             end
         end
@@ -500,37 +894,78 @@ local function Colors(V)
     return col
 end
 
+local function NewMainIcon(V, def)
+    local icon = W.CreateIcon(V.Main, {
+        width = 30, height = 30, zoom = W.ICON_ZOOM, keepAspect = true,
+        inverse = true,
+    })
+    icon:SetFrameStrata(HUD_STRATA)
+    icon:Hide()
+    icon.def = def
+    icon:AddText("p", "CENTER", 14, { 1, 1, 1, 1 })
+    icon:SetText("p", "")
+    if def.kind == "itemPotion" or def.kind == "itemNade" or def.kind == "itemSapper" then
+        icon:AddText("count", "INNER_BOTTOMRIGHT", 12, GOLD_COUNT, 0, 0)
+    end
+    V.mainIcons[def.key] = icon
+    return icon
+end
+
+-- The icons the HUD always had are made with the view; one that came
+-- with the presets (def.new) is made the first time it is on, so a HUD
+-- that never shows it carries no frame for it.
 local function BuildMainIcons(V)
     for _, def in ipairs(MAIN_DEFS) do
-        local icon = W.CreateIcon(V.Main, {
-            width = 30, height = 30, zoom = W.ICON_ZOOM, keepAspect = true,
-            inverse = true,
-        })
-        icon:SetFrameStrata(HUD_STRATA)
-        icon:Hide()
-        icon.def = def
-        icon:AddText("p", "CENTER", 14, { 1, 1, 1, 1 })
-        icon:SetText("p", "")
-        if def.kind == "itemPotion" or def.kind == "itemNade" or def.kind == "itemSapper" then
-            icon:AddText("count", "INNER_BOTTOMRIGHT", 12, GOLD_COUNT, 0, 0)
-        end
-        V.mainIcons[def.key] = icon
+        if not def.new then NewMainIcon(V, def) end
     end
+end
+
+local function NewDebuffIcon(V, def, size)
+    local icon = W.CreateIcon(V.Debuffs, {
+        width = size, height = size, zoom = W.ICON_ZOOM, keepAspect = true,
+        inverse = true,
+    })
+    icon:SetFrameStrata(HUD_STRATA)
+    icon:Hide()
+    icon.def = def
+    -- (Shadow Weaving: its stacks in the corner)
+    if def.stacks then icon:AddText("count", "INNER_BOTTOMRIGHT", 12, GOLD_COUNT, 0, 0) end
+    V.debuffIcons[def.key] = icon
+    return icon
 end
 
 local function BuildDebuffIcons(V)
     local cfg = PR.Store()
     local size = (cfg and cfg.debuffRow.iconSize) or 26
     for _, def in ipairs(DEBUFF_DEFS) do
-        local icon = W.CreateIcon(V.Debuffs, {
-            width = size, height = size, zoom = W.ICON_ZOOM, keepAspect = true,
-            inverse = true,
-        })
-        icon:SetFrameStrata(HUD_STRATA)
-        icon:Hide()
-        icon.def = def
-        V.debuffIcons[def.key] = icon
+        if not def.new then NewDebuffIcon(V, def, size) end
     end
+end
+
+-- a buff row icon: time left under it, stacks in the corner (the class
+-- HUDs' active buff row)
+local function NewBuffIcon(V, def, size)
+    local icon = W.CreateIcon(V.Buffs, {
+        width = size, height = size, zoom = W.ICON_ZOOM, keepAspect = true,
+        inverse = true,
+    })
+    icon:SetFrameStrata(HUD_STRATA)
+    icon:Hide()
+    icon.def = def
+    icon:AddText("p", "BELOW", 14, { 1, 1, 1, 1 }, 0, 0)
+    icon:AddText("s", "INNER_TOPRIGHT", 14, { 1, 1, 1, 1 }, 0, 0)
+    V.buffIcons[def.key] = icon
+    return icon
+end
+
+-- a lazily made icon takes the colour settings the others already carry
+local function PaintIcon(V, icon)
+    local col = V.col
+    if not col then return end
+    local t = icon.texts
+    if t.p then t.p:SetTextColor(unpack(col.timer)) end
+    if t.s then t.s:SetTextColor(unpack(col.timer)) end
+    if t.count then t.count:SetTextColor(unpack(col.count)) end
 end
 
 -- Reminder icons: shown when something is missing (the WA's 46x46 reminder group).
@@ -670,7 +1105,11 @@ local function UpdateMainIcon(V, icon, def)
     local VS = V.S
     if def.kind == "spell" then
         local sp = VS.spells[def.spell]
-        if not (sp and sp.known) then return false end
+        if not (sp and sp.known) then
+            local st = sp and sp.name and PR.Store and PR.Store()
+            if st and st.showUnlearned then return HUD.Ghost(icon, sp) end
+            return false
+        end
         local cd = VS.cds[def.spell]
         local us = VS.usable[def.spell] or {}
         local inRange = (not def.noRange) and VS.inRange[def.spell] or nil
@@ -695,6 +1134,13 @@ local function UpdateMainIcon(V, icon, def)
         local start, duration = RacialCD(V)
         icon:SetSwipe(start, duration)
         icon:SetDesat(duration > GCD_MAX)
+        return true
+    elseif def.kind == "trinket" then
+        local t = VS.trinkets[def.slot]
+        if not (t and t.texture) then return false end
+        icon:SetIconTexture(t.texture)
+        icon:SetSwipe(t.start or 0, t.duration or 0)
+        icon:SetDesat((t.duration or 0) > GCD_MAX)
         return true
     elseif def.kind == "itemPotion" then
         local cfg = PR.Store()
@@ -744,14 +1190,22 @@ local function RefreshMainRow(V, cfg)
     local VS = V.S
     wipe(V.mainActive)
     local m = cfg.mainRow
-    for _, def in ipairs(MAIN_DEFS) do
+    local role, trinkets = V.role, false
+    for _, def in ipairs(MAIN_ORDER) do
         local icon = V.mainIcons[def.key]
         local shown = false
-        if On(V, cfg) and not m.hidden[def.key] then
+        if On(V, cfg) and not Off(role, "main", m.hidden, def) then
+            if not icon then
+                icon = NewMainIcon(V, def)
+                PaintIcon(V, icon)
+            end
+            if def.kind == "trinket" then trinkets = true end
             if V.preview then
                 local sp = def.spell and VS.spells[def.spell]
+                local tr = def.slot and VS.trinkets[def.slot]
                 icon:SetIconTexture((sp and sp.icon)
                     or (def.kind == "racial" and VS.racial and VS.racial.icon)
+                    or (tr and tr.texture)
                     or (def.kind == "itemPotion" and 134856)
                     or (def.kind == "itemNade" and 133714)
                     or (def.kind == "itemSapper" and 135826) or 134400)
@@ -762,9 +1216,13 @@ local function RefreshMainRow(V, cfg)
                 shown = UpdateMainIcon(V, icon, def)
             end
         end
-        W.SetShownAnimated(icon, shown)
-        if shown then V.mainActive[#V.mainActive + 1] = icon end
+        if icon then
+            W.SetShownAnimated(icon, shown)
+            if shown then V.mainActive[#V.mainActive + 1] = icon end
+        end
     end
+    -- (the equipped trinkets are read only while one is on the grid)
+    if V == LIVE then PR.wantTrinkets = trinkets end
     HUD.LayoutGrid(V.memo.main, V.mainActive, V.Main, m.rows or DEFAULTS.mainRow.rows,
         m.spacing or 4)
 end
@@ -778,16 +1236,32 @@ local function RefreshDebuffRow(V, cfg)
     -- apart). nil on every other client.
     local extra = VS.targetHidden
     if extra and (#extra == 0 or V.preview or not On(V, cfg) or not d.enabled) then extra = nil end
+    local role = V.role
+    -- (a spec that watches no debuff - the healers' presets - shows none of
+    -- these either; a row with any entry on, or any tick of yours, takes
+    -- them as it always did)
+    if extra then
+        local used = false
+        for _, def in ipairs(DEBUFF_DEFS) do
+            if d.hidden[def.key] ~= nil or not Off(role, "debuffs", d.hidden, def) then used = true break end
+        end
+        if not used then extra = nil end
+    end
     local free = extra and (V._freeIcons or {}) or nil
     if free then V._freeIcons = free wipe(free) end
     for _, def in ipairs(DEBUFF_DEFS) do
         local icon = V.debuffIcons[def.key]
         local shown = false
-        if On(V, cfg) and d.enabled and not d.hidden[def.key] then
+        if On(V, cfg) and d.enabled and not Off(role, "debuffs", d.hidden, def) then
+            if not icon then
+                icon = NewDebuffIcon(V, def, d.iconSize or 26)
+                PaintIcon(V, icon)
+            end
             if V.preview then
                 local sp = VS.spells[def.key]
                 icon:SetIconTexture(sp and sp.icon or 134400)
                 icon:ClearSwipe()
+                if def.stacks then icon:SetText("count", "") end
                 shown = true
             else
                 local sp = VS.spells[def.key]
@@ -796,6 +1270,7 @@ local function RefreshDebuffRow(V, cfg)
                 if b and b.hidden then
                     icon:SetHiddenTexture(b.icon)
                     icon:SetHiddenSwipe("target", b.hidden)
+                    if def.stacks then icon:SetHiddenCount("count", "target", b.hidden) end
                     shown = true
                 elseif b then
                     icon:SetIconTexture(b.icon or (sp and sp.icon))
@@ -804,11 +1279,14 @@ local function RefreshDebuffRow(V, cfg)
                     else
                         icon:ClearSwipe()
                     end
+                    if def.stacks then icon:SetText("count", (b.count or 0) > 0 and tostring(b.count) or "") end
                     shown = true
                 end
             end
         end
-        if free and not shown then
+        if not icon then
+            -- (an entry of the presets never switched on: no frame for it)
+        elseif free and not shown then
             free[#free + 1] = icon
         else
             W.SetShownAnimated(icon, shown)
@@ -832,6 +1310,68 @@ local function RefreshDebuffRow(V, cfg)
     HUD.LayoutRow(V.memo.debuff, V.debuffActive, V.Debuffs, size, size, d.spacing or 4)
 end
 
+-- The self-buff row: your buffs (and, for a `harmful` entry, your own
+-- debuffs) by name, with the time left and stacks. Nothing of it exists
+-- until an entry is on.
+local function RefreshBuffRow(V, cfg)
+    local VS = V.S
+    local a = cfg.auraRow
+    local role = V.role
+    local on = On(V, cfg) and a.enabled ~= false
+    local any, harmful = false, false
+    if on then
+        for _, def in ipairs(BUFF_DEFS) do
+            if not Off(role, "buffs", a.hidden, def) then
+                any = true
+                if def.harmful then harmful = true end
+            end
+        end
+    end
+    if V == LIVE and PR.wantSelfDebuffs ~= harmful then
+        PR.wantSelfDebuffs = harmful
+        if harmful then dirty.auras = true end
+    end
+    if any then EnsureBuffAnchor(V) end
+    if not V.Buffs then return end
+    wipe(V.buffActive)
+    local size = a.iconSize or 25
+    for _, def in ipairs(BUFF_DEFS) do
+        local icon = V.buffIcons[def.key]
+        local shown = false
+        if on and not Off(role, "buffs", a.hidden, def) then
+            if not icon then
+                icon = NewBuffIcon(V, def, size)
+                PaintIcon(V, icon)
+            end
+            if V.preview then
+                icon:SetIconTexture(VS.auraIcons[def.key] or 134400)
+                icon:ClearSwipe()
+                icon.auraRef = nil
+                shown = VS.auraNames[def.key] ~= nil
+            else
+                local name = VS.auraNames[def.key]
+                local src = def.harmful and VS.selfDebuffs or VS.buffs
+                local b = name and src[name:lower()] or nil
+                if b then
+                    icon:SetIconTexture(b.icon or VS.auraIcons[def.key])
+                    if (b.duration or 0) > 0 then
+                        icon:SetSwipe(b.expirationTime - b.duration, b.duration)
+                    else
+                        icon:ClearSwipe()
+                    end
+                    icon.auraRef = b
+                    shown = true
+                end
+            end
+        end
+        if icon then
+            W.SetShownAnimated(icon, shown)
+            if shown then V.buffActive[#V.buffActive + 1] = icon end
+        end
+    end
+    HUD.LayoutRow(V.memo.buff, V.buffActive, V.Buffs, size, size, a.spacing or 4)
+end
+
 local function BuffUp(V, spellKey)
     local VS = V.S
     local sp = VS.spells[spellKey]
@@ -848,7 +1388,7 @@ local function RefreshReminders(V, cfg)
     for _, def in ipairs(REMIND_DEFS) do
         local icon = V.remindIcons[def.key]
         local shown = false
-        if On(V, cfg) and r.enabled and r[def.option] then
+        if On(V, cfg) and r.enabled and RemindOn(V.role, r, def.option) then
             if V.preview or V.sample then
                 local sp = def.spell and VS.spells[def.spell]
                 icon:SetIconTexture((sp and sp.icon) or 133750)
@@ -920,8 +1460,10 @@ local function RefreshView(V)
     local cfg = PR.Store()
     if not cfg then return end
     Colors(V)
+    V.role = RoleFor(V, cfg)
     RefreshMainRow(V, cfg)
     RefreshDebuffRow(V, cfg)
+    RefreshBuffRow(V, cfg)
     RefreshReminders(V, cfg)
     RefreshResources(V, cfg)
 end
@@ -956,6 +1498,7 @@ function PR.Display:HideAll()
     for _, icon in pairs(V.mainIcons) do icon:Hide() end
     for _, icon in pairs(V.debuffIcons) do icon:Hide() end
     for _, icon in pairs(V.remindIcons) do icon:Hide() end
+    for _, icon in pairs(V.buffIcons) do icon:Hide() end
     if V.manaBar then V.manaBar:Hide() end
     if V.fsrBar then V.fsrBar:Hide() end
     if V.wandBar then V.wandBar:Hide() end
@@ -992,7 +1535,24 @@ local function TextTickView(V)
                 remaining = math.max(0, start + duration - GetTime())
             end
             icon:SetText("p", remaining > 0 and W.FormatTime(remaining, 0) or "")
+        elseif def.kind == "trinket" then
+            local t = VS.trinkets[def.slot]
+            local remaining = 0
+            if t and (t.duration or 0) > GCD_MAX then
+                remaining = math.max(0, t.start + t.duration - GetTime())
+            end
+            icon:SetText("p", remaining > 0 and W.FormatTime(remaining, 0) or "")
         end
+    end
+    -- the buff row: time left under the icon, stacks in its corner
+    for _, icon in ipairs(V.buffActive) do
+        local b = icon.auraRef
+        if b and (b.expirationTime or 0) > 0 then
+            icon:SetText("p", W.FormatTime(math.max(0, b.expirationTime - GetTime()), 0))
+        else
+            icon:SetText("p", "")
+        end
+        icon:SetText("s", (b and (b.count or 0) > 1) and tostring(b.count) or "")
     end
 end
 
@@ -1013,6 +1573,7 @@ local function NewSampleView(canvas)
         targetDebuffs = {}, targetAttackable = true,
         fsr = { start = 0, duration = 0 }, wand = { start = 0, duration = 0, active = false },
         items = {}, itemCDs = {}, racial = nil, candles = 6,
+        auraNames = {}, auraIcons = {}, selfDebuffs = {}, trinkets = {},
     }
     local V = NewView(VS)
     V.sample, V.canvas = true, canvas
@@ -1052,16 +1613,45 @@ local function FillSample(V, mode)
             VS.inRange[def.spell] = (combat and i == 5) and 0 or nil
         end
     end
+    -- the first three debuffs of the list, as before, plus the ones that
+    -- came with the presets where they are on; then the first three buffs
+    local cfg = PR.Store()
+    local role = RoleFor(V, cfg)
+    V.role = role
     wipe(VS.targetDebuffs)
+    wipe(VS.buffs)
+    wipe(VS.selfDebuffs)
+    for _, e in ipairs(BUFF_DEFS) do
+        local name, _, icon = GetSpellInfo and GetSpellInfo(e.id)
+        VS.auraNames[e.key] = name or e.label
+        VS.auraIcons[e.key] = icon or (GetSpellTexture_C and GetSpellTexture_C(e.id)) or 134400
+    end
     if combat then
-        for k, def in ipairs(DEBUFF_DEFS) do
-            if k > 3 then break end
-            local sp = VS.spells[def.key]
-            local n = sp and sp.name or def.label
-            VS.targetDebuffs[n:lower()] = { name = n, icon = sp and sp.icon, count = 0,
-                duration = 24, expirationTime = now + 24 - 5 * k }
+        local k = 0
+        for i, def in ipairs(DEBUFF_DEFS) do
+            if (not def.new and i <= 3) or (def.new and cfg and not Off(role, "debuffs", cfg.debuffRow.hidden, def)) then
+                k = k + 1
+                local sp = VS.spells[def.key]
+                local n = sp and sp.name or def.label
+                -- (k = 1..3 as before; later ones go round the same three ends)
+                VS.targetDebuffs[n:lower()] = { name = n, icon = sp and sp.icon, count = def.stacks and 5 or 0,
+                    duration = 24, expirationTime = now + 24 - 5 * ((k - 1) % 3 + 1) }
+            end
+        end
+        k = 0
+        for _, def in ipairs(BUFF_DEFS) do
+            if cfg and not Off(role, "buffs", cfg.auraRow.hidden, def) then
+                k = k + 1
+                if k > 3 then break end
+                local n = VS.auraNames[def.key]
+                local out = def.harmful and VS.selfDebuffs or VS.buffs
+                out[n:lower()] = { name = n, icon = VS.auraIcons[def.key], count = 0,
+                    duration = 15, expirationTime = now + 15 - 3 * k }
+            end
         end
     end
+    VS.trinkets[13] = { texture = 133447, start = combat and (now - 40) or 0, duration = combat and 120 or 0 }
+    VS.trinkets[14] = { texture = 133434, start = 0, duration = 0 }
     wipe(VS.items)
     wipe(VS.itemCDs)
     local pot = WH and WH.POTION_LIST and WH.POTION_LIST[1]
@@ -1082,13 +1672,47 @@ end
 -- the pieces exactly where the HUD puts them on screen (HUD.RealSample)
 local function LayoutSample(V, cfg)
     local r = cfg.resources
-    HUD.RealSample(V.canvas, {
+    local pieces = {
         { a = V.Main, mover = "prMainRow", store = cfg.mainRow, scale = cfg.mainRow.scale or 1, on = true },
         { a = V.Debuffs, mover = "prDebuffs", store = cfg.debuffRow, on = cfg.debuffRow.enabled },
         { a = V.Reminders, mover = "prReminders", store = cfg.reminders, on = cfg.reminders.enabled },
         { a = V.Mana, mover = "prMana", store = r.mana, on = r.manaBar or r.fsrBar },
         { a = V.Wand, mover = "prWand", store = r.wand, on = r.wandBar },
-    })
+    }
+    -- (the buff row, once this sample has one)
+    if V.Buffs then
+        pieces[#pieces + 1] = { a = V.Buffs, mover = "prAuraRow", store = cfg.auraRow,
+            on = cfg.auraRow.enabled ~= false and #V.buffActive > 0 }
+    end
+    HUD.RealSample(V.canvas, pieces)
+end
+
+-- the preview strip's spec picker (never saved): this HUD's spec, each
+-- preset, the class baseline
+local function PreviewControls(holder, P)
+    if not (ns.UI and ns.UI.Dropdown) then return end
+    local items = {}
+    local function Items()
+        wipe(items)
+        items[1] = { value = "current", text = "This HUD's spec" }
+        for _, r in ipairs(ROLES) do items[#items + 1] = { value = r.key, text = r.label } end
+        items[#items + 1] = { value = "baseline", text = "Class baseline" }
+        return items
+    end
+    local function Text()
+        local cur = P.store.v2spec or "current"
+        for _, it in ipairs(Items()) do if it.value == cur then return it.text end end
+        return "This HUD's spec"
+    end
+    local dd = ns.UI.Dropdown(holder, { width = 150, items = Items, selected = Text,
+        selectedValue = function() return P.store.v2spec or "current" end,
+        onSelect = function(v)
+            P.store.v2spec = (v ~= "current") and v or nil
+            if P.Update then P.Update() end
+        end })
+    dd:SetPoint("LEFT", holder, "LEFT", 0, 0)
+    if dd.SetText then dd:SetText(Text()) end
+    P.store.v2specDropdown = dd
 end
 
 local function PreviewSpec()
@@ -1096,11 +1720,16 @@ local function PreviewSpec()
         key = "hud.priest", title = "Priest HUD",
         width = SAMPLE_W, height = SAMPLE_H,
         modes = { { id = "combat", label = "In combat" }, { id = "ready", label = "Out of combat" } },
+        controls = PreviewControls,
         build = function(canvas, P) P.store.view = NewSampleView(canvas) end,
         update = function(canvas, P)
             local V = P.store.view
             local cfg = PR.Store()
             if not (V and cfg) then return end
+            if V.previewSpec ~= P.store.v2spec then
+                V.previewSpec = P.store.v2spec
+                for _, m in pairs(V.memo) do HUD.ForgetLayout(m) end
+            end
             HUD.CheckLook()
             FillSample(V, P.mode or "combat")
             RefreshView(V)
@@ -1115,7 +1744,7 @@ local function PreviewSpec()
         replay = function(canvas, P)
             local V = P.store.view
             if not (V and V.built) then return end
-            HUD.ReplayIcons({ V.mainIcons, V.debuffIcons, V.remindIcons }, true)
+            HUD.ReplayIcons({ V.mainIcons, V.debuffIcons, V.remindIcons, V.buffIcons }, true)
         end,
     }
 end
@@ -1135,6 +1764,15 @@ local function CoreTick()
     local cfg = PR.Store()
     if not cfg or not cfg.enabled or not S.isPriest then return end
     if dirty.spells then dirty.spells = false ResolveSpells() end
+    -- the spec, half a second after the last talent event, never in a fight
+    if spec.at and not S.inCombat and GetTime() - spec.at >= 0.5 then
+        spec.at = nil
+        local key = ReadSpec()
+        if key ~= spec.key then
+            spec.key = key
+            for _, m in pairs(LIVE.memo) do HUD.ForgetLayout(m) end
+        end
+    end
     if dirty.bags then dirty.bags = false ScanItems() end
     if dirty.auras then dirty.auras = false ScanPlayerBuffs() end
     UpdateMisc()
@@ -1221,6 +1859,17 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2, arg3)
         -- UNIT_POWER_FREQUENT / UNIT_SPELLCAST_SUCCEEDED /
         -- BAG_UPDATE_DELAYED register in StartTicker, only while enabled.
 
+        -- the spec: read now when out of combat (else at the fight's end),
+        -- then whenever the talents move (the events only note the time)
+        local sf = CreateFrame("Frame")
+        local valid = C_EventUtils and C_EventUtils.IsEventValid
+        for _, e in ipairs({ "CHARACTER_POINTS_CHANGED", "PLAYER_TALENT_UPDATE", "ACTIVE_TALENT_GROUP_CHANGED",
+            "TRAIT_CONFIG_UPDATED", "PLAYER_LEVEL_UP" }) do
+            if not valid or valid(e) then pcall(sf.RegisterEvent, sf, e) end
+        end
+        sf:SetScript("OnEvent", function() spec.at = spec.at or GetTime() end)
+        if S.inCombat then spec.at = GetTime() else spec.key = ReadSpec() end
+
         local cfg = PR.Store()
         if cfg and cfg.enabled then StartTicker() end
         HUD.Debug("PriestHUD core initialized")
@@ -1265,6 +1914,12 @@ end)
 local Check, SliderPair, CheckGrid = HUD.CheckIndent, HUD.SliderPair, HUD.CheckGrid
 local function Px(v) return v .. " px" end
 local function Refresh() PR.Display:Refresh() end
+-- Edit Mode shows the HUD itself while its boxes are placed
+if HUD.EditPreview then
+    HUD.EditPreview(function() local c = PR.Store() return c and c.enabled and true or false end,
+        function() return PR.preview end,
+        function(v) PR.preview = v and true or false LIVE.preview = PR.preview Refresh() end)
+end
 
 local function Tab_General(L, cfg)
     L:Card("Priest HUD")
@@ -1281,13 +1936,53 @@ local function Tab_General(L, cfg)
     end, nil, "Forces every enabled piece visible where it sits, to line things up. Not saved.")
     L:EndCard()
 
+    -- the spec in force for the ticks below (your pick, else the talents')
+    local function Role() return RoleFor(LIVE, cfg) end
+
+    L:Card("Spec defaults")
+    L:Desc("The HUD starts the way a strong player of your spec sets it up: the icons, buffs, debuffs and "
+        .. "trinkets that spec watches. Anything you tick or untick stays yours.")
+    -- (the talents read here too, so the page names the spec with the HUD
+    -- off; never in a fight - the tick reads at its end)
+    if IS_PRIEST and spec.at == nil and not (InCombatLockdown and InCombatLockdown()) then
+        spec.key = ReadSpec()
+    end
+    local items = {}
+    do
+        local d = spec.key and RoleByKey(spec.key)
+        items[1] = { value = "auto", text = d and ("Automatic (" .. d.label .. ")") or "Automatic (class baseline)" }
+        for _, r in ipairs(ROLES) do items[#items + 1] = { value = r.key, text = r.label } end
+        items[#items + 1] = { value = "baseline", text = "Class baseline" }
+    end
+    HUD.Dropdown(L, 240, items,
+        function()
+            local pick = type(cfg.v2) == "table" and cfg.v2.role or "auto"
+            for _, it in ipairs(items) do if it.value == pick then return it.text end end
+            return items[1].text
+        end,
+        function(val)
+            PR:SetSpecPick(val)
+            HUD.RefreshPage()
+        end, "Automatic follows your talents; Class baseline shows everything the HUD always showed.")
+    HUD.Check(L, HUD.UNLEARNED_LABEL, cfg.showUnlearned, function(v)
+        cfg.showUnlearned = v or nil
+        HUD.RefreshPage()
+    end, HUD.UNLEARNED_DESC)
+    HUD.Button(L, "Reset to spec defaults", 200, function()
+        PR:ResetToSpec()
+        HUD.RefreshPage()
+    end, "Clears your own ticks on the grid, the buff row and the debuff row (and the Shadowform reminder's), "
+        .. "so the spec decides them again.")
+    L:EndCard()
+
     L:Card("Cooldown grid")
-    L:Desc("Untick an icon to remove it from the grid.")
+    L:Desc("Untick an icon to remove it from the grid, tick one to add it.")
     CheckGrid(L, MAIN_DEFS,
         function(def) return def.label end,
-        function(def) return not cfg.mainRow.hidden[def.key] end,
+        function(def) return not Off(Role(), "main", cfg.mainRow.hidden, def) end,
         function(def, v)
-            cfg.mainRow.hidden[def.key] = (not v) and true or nil
+            -- a tick is yours for good: true = off, false = on
+            cfg.mainRow.hidden[def.key] = not v
             Refresh()
         end)
     HUD.Label(L, "Potion icon")
@@ -1300,14 +1995,30 @@ local function Tab_General(L, cfg)
             .. "bags, in the standard priority order.")
     L:EndCard()
 
+    L:Card("Active buff row")
+    L:Desc("Your own buffs with the time left (Weakened Soul: after your own shield). Its spot is "
+        .. "under Position once something on it is ticked.")
+    Check(L, "Show the active buff row", cfg.auraRow.enabled ~= false, function(v)
+        cfg.auraRow.enabled = v
+        Refresh()
+    end)
+    CheckGrid(L, BUFF_DEFS,
+        function(def) return def.label end,
+        function(def) return not Off(Role(), "buffs", cfg.auraRow.hidden, def) end,
+        function(def, v)
+            cfg.auraRow.hidden[def.key] = not v
+            Refresh()
+        end)
+    L:EndCard()
+
     L:Card("Target debuffs")
     Check(L, "Show my debuffs on the target", cfg.debuffRow.enabled, function(v)
         cfg.debuffRow.enabled = v
         Refresh()
     end)
     for _, def in ipairs(DEBUFF_DEFS) do
-        Check(L, def.label, not cfg.debuffRow.hidden[def.key], function(v)
-            cfg.debuffRow.hidden[def.key] = (not v) and true or nil
+        Check(L, def.label, not Off(Role(), "debuffs", cfg.debuffRow.hidden, def), function(v)
+            cfg.debuffRow.hidden[def.key] = not v
             Refresh()
         end, 16)
     end
@@ -1319,8 +2030,8 @@ local function Tab_General(L, cfg)
         Refresh()
     end)
     for _, def in ipairs(REMIND_DEFS) do
-        Check(L, def.label, cfg.reminders[def.option], function(v)
-            cfg.reminders[def.option] = v
+        Check(L, def.label, RemindOn(Role(), cfg.reminders, def.option), function(v)
+            cfg.reminders[def.option] = v and true or false
             Refresh()
         end, 16)
     end
@@ -1360,6 +2071,9 @@ local function Tab_Look(L, cfg)
     SliderPair(L,
         { "Target debuff icon size", 16, 48, cfg.debuffRow.iconSize, function(v) cfg.debuffRow.iconSize = v Refresh() end, Px },
         { "Target debuff spacing", 0, 12, cfg.debuffRow.spacing or 4, function(v) cfg.debuffRow.spacing = v Refresh() end, Px })
+    SliderPair(L,
+        { "Active buff icon size", 14, 48, cfg.auraRow.iconSize or 25, function(v) cfg.auraRow.iconSize = v Refresh() end, Px },
+        { "Active buff spacing", 0, 12, cfg.auraRow.spacing or 4, function(v) cfg.auraRow.spacing = v Refresh() end, Px })
     SliderPair(L,
         { "Reminder icon size", 20, 64, cfg.reminders.iconSize, function(v) cfg.reminders.iconSize = v Refresh() end, Px },
         { "Reminder spacing", 0, 16, cfg.reminders.spacing or 6, function(v) cfg.reminders.spacing = v Refresh() end, Px })
@@ -1413,8 +2127,8 @@ end
 
 local function BuildPage(L)
     L:Header("Priest HUD",
-        "WeakAura port: cooldown grid, target debuffs, reminders, mana + "
-        .. "five-second-rule bars and a wand swing bar")
+        "Cooldown grid, your buffs, target debuffs, reminders, mana + "
+        .. "five-second-rule bars and a wand swing bar, set up for your spec")
     local cfg = PR.Store()
     if not cfg then
         L:Notice("missing", "The HUD settings are not available yet.")
@@ -1435,6 +2149,8 @@ end
 HUD.RegisterPage("priest", "Priest HUD",
     "priest hud class pack weakaura cooldown grid shield power word "
     .. "inner fire fortitude spirit shadowform wand five second rule fsr "
-    .. "mana bar candles debuffs reminders potion grenade sapper " .. HUD.PAGE_KEYWORDS,
+    .. "mana bar candles debuffs reminders potion grenade sapper "
+    .. "spec defaults discipline holy shadow buffs inner focus power infusion weakened soul "
+    .. "shadow weaving trinkets penance prayer of mending shadowfiend " .. HUD.PAGE_KEYWORDS,
     { PRIEST = true },
     BuildPage)

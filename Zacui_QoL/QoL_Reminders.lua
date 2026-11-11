@@ -285,6 +285,10 @@ function R.Apply()
         if icons_ then pcall(ev.RegisterEvent, ev, e) else pcall(ev.UnregisterEvent, ev, e) end
     end
     if mana then ev:RegisterEvent("READY_CHECK") else ev:UnregisterEvent("READY_CHECK") end
+    -- (2026-11-10) switched on = there is a frame, even while nothing
+    -- calls for it: Edit Mode places what exists and reads a missing
+    -- frame as "switched off".
+    if icons_ then Strip() end
     if icons_ then Schedule() elseif strip then strip:Hide() end
 end
 function R.Registered(e) return ev ~= nil and ev:IsEventRegistered(e) or false end

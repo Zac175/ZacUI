@@ -187,6 +187,20 @@ local function FitMainlineButton(btn, icon)
         ac:SetAllPoints(btn)
     end
     if btn.NewActionTexture then btn.NewActionTexture:SetAlpha(0) end
+    -- (2026-11-10, Zac on Retail: "the action bar thing is not covering
+    -- the entire icon") the slot's own dark backing and the cooldown
+    -- swipes are 45 px pieces too: the backing goes, the swipes are put
+    -- on the button (unprotected children: out of combat only)
+    if btn.SlotBackground and btn.SlotBackground.SetAlpha then btn.SlotBackground:SetAlpha(0) end
+    if not InCombat() then
+        for _, k in ipairs({ "cooldown", "chargeCooldown", "lossOfControlCooldown" }) do
+            local cd = btn[k]
+            if type(cd) == "table" and cd.SetAllPoints and cd.ClearAllPoints then
+                cd:ClearAllPoints()
+                cd:SetAllPoints(btn)
+            end
+        end
+    end
     -- the rounded corner mask is for Blizzard's 45px frame art; on a
     -- square cropped icon it only nicks the corners
     if icon and btn.IconMask and icon.RemoveMaskTexture then
@@ -312,9 +326,17 @@ local function SkinSecureIcon(btn, opts)
     -- grey slot round ZacUI's border (Zac on TBC Anniversary, 2026-11-08).
     -- Hidden by alpha, never emptied: the picture is the icon. The key
     -- ring (its NormalTexture is its picture, no icon) keeps it.
-    if normal and opts.keepNormal and type(icon) == "table" and icon ~= normal
-        and icon.SetTexCoord and normal.SetAlpha then
+    -- (2026-11-10, Retail: the backpack has an icon region with nothing in
+    -- it and its picture is the NormalTexture's atlas - hiding that left an
+    -- invisible button with only its free-slot count. An empty icon does
+    -- not count as a picture, and an atlas is never cropped.)
+    local iconHasArt = type(icon) == "table" and icon ~= normal and icon.SetTexCoord
+        and ((icon.GetTexture and icon:GetTexture()) or (icon.GetAtlas and icon:GetAtlas())) and true or false
+    local normalAtlas = normal and normal.GetAtlas and normal:GetAtlas() or nil
+    if normal and opts.keepNormal and iconHasArt and normal.SetAlpha then
         normal:SetAlpha(0)
+    elseif normal and opts.keepNormal and normalAtlas and normalAtlas ~= "" then
+        normal:SetAlpha(1)
     elseif normal then
         if opts.keepNormal then
             if normal.SetTexCoord then ns.Look.CropIcon(normal, nil, nil, { border = false }) end

@@ -340,7 +340,14 @@ RegisterPage("Colors", function(L)
     L:Row(row, M.BUTTON_H + 4)
     L:EndCard()
 
+    -- (the map's two colours belong to map features Retail does not run)
+    local order = {}
     for _, cat in ipairs(PALETTE_ORDER) do
+        if not (cat.key == "map" and ns.FeatureOn and not ns.FeatureOn("maps_data")) then
+            order[#order + 1] = cat
+        end
+    end
+    for _, cat in ipairs(order) do
         L:Card(cat.label)
         -- the Reset buttons and hex values in one column, right of the
         -- longest name in the card (never at a fixed x a bigger font runs into)

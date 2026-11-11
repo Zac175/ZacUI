@@ -133,21 +133,24 @@ local S = {
     F_TITLE = 36, F_DESC = 14, F_TAB = 16, F_NAV = 14, F_GROUP = 15, F_SECTION = 12,
     F_LABEL = 14, F_VALUE = 13, F_HINT = 12,
     -- colours and alphas
-    BG = { r = 0.069, g = 0.058, b = 0.047 },
+    -- (2026-11-10, Zac: "the color of the filter mock ... none of this ugly
+    -- full black") the mock's neutral charcoal, #1C1C1C, and the tones
+    -- that sit on it made neutral and lifted with it
+    BG = { r = 0.110, g = 0.110, b = 0.110 },
     BORDER_A = 0.05, DIM_A = 0.53, SECTION_A = 0.41, OFF_A = 0.3,
     ROW_ODD = 0.10, ROW_EVEN = 0.20, SIDEBAR_A = 0.20, HEAD_BAND_A = 0.10, HEAD_DIV_A = 0.06,
     SECTION_RULE_A = 0.02,
     NAV_EN = 0.60, NAV_HOVER = 0.86, NAV_OFF = 0.11, NAV_OFF_HOVER = 0.39, NAV_HL = 0.06,
     NAV_GLOW = 0.15, NAV_HOVER_GLOW = 0.03, NAV_HOVER_IND = 0.25, NAV_EDGE = 0.5,
     HOVER_TINT = { r = 0.85, g = 0.95, b = 0.90 }, EDGE_TINT = { r = 0.7, g = 0.7, b = 0.7 },
-    INPUT = { r = 0.030, g = 0.023, b = 0.018 }, INPUT_A = 0.35, INPUT_BRD_A = 0.10,
+    INPUT = { r = 0.024, g = 0.024, b = 0.024 }, INPUT_A = 0.35, INPUT_BRD_A = 0.10,
     SL_TRACK_A = 0.22, SL_FILL_A = 0.75, SL_INPUT_A = 0.40, SL_INPUT_BRD_A = 0.12,
     TG_OFF = { r = 0.267, g = 0.267, b = 0.267 }, TG_OFF_A = 0.65, TG_ON_A = 0.75, KNOB_OFF_A = 0.5,
-    CB_BOX = { r = 0.112, g = 0.105, b = 0.098 }, CB_BRD_A = 0.05, CB_ACT_BRD_A = 0.15, CB_REST = 0.8,
-    BTN_BG = { r = 0.089, g = 0.080, b = 0.072 }, BTN_BG_A = 0.6, BTN_BG_HA = 0.65,
+    CB_BOX = { r = 0.160, g = 0.160, b = 0.160 }, CB_BRD_A = 0.05, CB_ACT_BRD_A = 0.15, CB_REST = 0.8,
+    BTN_BG = { r = 0.160, g = 0.160, b = 0.160 }, BTN_BG_A = 0.6, BTN_BG_HA = 0.65,
     BTN_BRD_A = 0.30, BTN_BRD_HA = 0.45, BTN_TXT_A = 0.55, BTN_TXT_HA = 0.70,
     FOOT_BG_A = 0.92, FOOT_BRD_A = 0.4, FOOT_BRD_HA = 0.6, FOOT_TXT_A = 0.5, FOOT_TXT_HA = 0.7, CLOSE_A = 0.7,
-    DD_BG = { r = 0.103, g = 0.095, b = 0.088 }, DD_BG_A = 0.9, DD_BG_HA = 0.98,
+    DD_BG = { r = 0.150, g = 0.150, b = 0.150 }, DD_BG_A = 0.9, DD_BG_HA = 0.98,
     DD_BRD_A = 0.20, DD_BRD_HA = 0.30, DD_TXT_A = 0.50, DD_TXT_HA = 0.60, DD_HL_A = 0.08, DD_SEL_A = 0.04,
     SCROLL_TRACK_A = 0.02, SCROLL_THUMB_A = 0.27, NAV_TRACK_A = 0.03, NAV_THUMB_A = 0.25,
     -- the window follows ZacUI's one font option; true locks it to the HD face
@@ -571,6 +574,84 @@ end
 -- box, a 16 px label at three alphas and a 2 px accent line text + 14
 -- wide under the open one.
 local function Lerp(a, b, t) return a + (b - a) * t end
+
+-- THE PLATE (2026-11-09, Zac: "buttons that look nice ... not too big of a
+-- fan of the text just sitting there"): a raised button face for the
+-- settings window - a fill shaded top to bottom, a one-pixel edge all
+-- round and a pale line along the inside of its top. Made once per frame
+-- (rawget "_zPlate"), inset from it by l / r / t / b, drawn under the
+-- frame's own text. :Paint(top, bot, edge, sheen) colours it
+-- ({ r, g, b, a } each, sheen an alpha); :SetShown hides all of it.
+local function VGrad(tex, lo, hi)
+    if CreateColor and tex.SetGradient then
+        tex:SetVertexColor(1, 1, 1, 1)
+        tex:SetGradient("VERTICAL", CreateColor(lo.r, lo.g, lo.b, lo.a or 1), CreateColor(hi.r, hi.g, hi.b, hi.a or 1))
+    elseif tex.SetGradientAlpha then
+        tex:SetVertexColor(1, 1, 1, 1)
+        tex:SetGradientAlpha("VERTICAL", lo.r, lo.g, lo.b, lo.a or 1, hi.r, hi.g, hi.b, hi.a or 1)
+    else
+        tex:SetVertexColor((lo.r + hi.r) / 2, (lo.g + hi.g) / 2, (lo.b + hi.b) / 2, ((lo.a or 1) + (hi.a or 1)) / 2)
+    end
+end
+function UI.Plate(f, l, r, t, b)
+    local p = rawget(f, "_zPlate")
+    if p then return p end
+    l, r, t, b = l or 0, r or 0, t or 0, b or 0
+    p = { parts = {} }
+    local function T(layer, sub)
+        local x = f:CreateTexture(nil, layer, nil, sub)
+        x._zui_own = true
+        x:SetTexture(FLAT)
+        p.parts[#p.parts + 1] = x
+        return x
+    end
+    p.fill = T("BACKGROUND", 0)
+    p.fill:SetPoint("TOPLEFT", f, "TOPLEFT", l, -t)
+    p.fill:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -r, b)
+    p.edges = {}
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local e = T("BORDER", 3)
+        if side == "TOP" or side == "BOTTOM" then
+            if ns.Pixel then ns.Pixel.Edge(e, side, f) else e:SetHeight(1) end
+            e:ClearAllPoints()
+            e:SetPoint(side .. "LEFT", p.fill, side .. "LEFT", 0, 0)
+            e:SetPoint(side .. "RIGHT", p.fill, side .. "RIGHT", 0, 0)
+        else
+            if ns.Pixel then ns.Pixel.Edge(e, side, f) else e:SetWidth(1) end
+            e:ClearAllPoints()
+            e:SetPoint("TOP" .. side, p.fill, "TOP" .. side, 0, 0)
+            e:SetPoint("BOTTOM" .. side, p.fill, "BOTTOM" .. side, 0, 0)
+        end
+        p.edges[#p.edges + 1] = e
+    end
+    p.sheen = T("BORDER", 2)
+    if ns.Pixel then ns.Pixel.Edge(p.sheen, "TOP", f) else p.sheen:SetHeight(1) end
+    p.sheen:ClearAllPoints()
+    p.sheen:SetPoint("TOPLEFT", p.fill, "TOPLEFT", 1, -1)
+    p.sheen:SetPoint("TOPRIGHT", p.fill, "TOPRIGHT", -1, -1)
+    function p:Paint(top, bot, edge, sheen)
+        VGrad(self.fill, bot, top)
+        for _, e in ipairs(self.edges) do e:SetVertexColor(edge.r, edge.g, edge.b, edge.a or 1) end
+        self.sheen:SetVertexColor(1, 1, 1, sheen or 0)
+    end
+    function p:SetShown(on)
+        for _, x in ipairs(self.parts) do x:SetShown(on and true or false) end
+        self.shown = on and true or false
+    end
+    p.shown = true
+    rawset(f, "_zPlate", p)
+    return p
+end
+-- the plate's shades (the settings window)
+local PL = {
+    TOP = { r = 0.205, g = 0.200, b = 0.195, a = 1 }, BOT = { r = 0.140, g = 0.136, b = 0.132, a = 1 },
+    TOP_H = { r = 0.250, g = 0.232, b = 0.195, a = 1 }, BOT_H = { r = 0.165, g = 0.152, b = 0.125, a = 1 },
+    EDGE = 0.13, EDGE_H = 0.70, SHEEN = 0.10, SHEEN_H = 0.16,
+}
+UI.PL = PL
+local function MixC(a, b, t) return { r = Lerp(a.r, b.r, t), g = Lerp(a.g, b.g, t), b = Lerp(a.b, b.b, t), a = Lerp(a.a or 1, b.a or 1, t) } end
+UI.MixC = MixC
+
 local function Strips(self, r, g, b, a)
     if self._zBorder then for _, t in ipairs(self._zBorder) do t:SetVertexColor(r, g, b, a) end end
 end
@@ -580,18 +661,31 @@ local function PaintSetButton(self)
     if self._zTab then
         if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
         Strips(self, 0, 0, 0, 0)
+        -- (2026-11-09) the open tab is a raised plate with the accent line
+        -- along its top; a closed one lifts a little under the mouse
+        local pl = UI.Plate(self, 0, 0, 5, 5)
+        local act = self._zActive and true or false
+        if act then
+            pl:SetShown(true)
+            pl:Paint(PL.TOP, PL.BOT, { r = 1, g = 1, b = 1, a = PL.EDGE }, 0)
+        elseif t > 0 then
+            pl:SetShown(true)
+            pl:Paint({ r = 1, g = 1, b = 1, a = 0.06 * t }, { r = 1, g = 1, b = 1, a = 0.03 * t },
+                { r = 1, g = 1, b = 1, a = 0.09 * t }, 0)
+        else
+            pl:SetShown(false)
+        end
         local u = self._zUnderline
         if u then
             local a = Accent()
             u:SetVertexColor(a.r, a.g, a.b, 1)
-            u:SetShown(self._zActive and true or false)
-            local tw = fs and math.ceil(fs:GetStringWidth() or 0) or 0
+            u:SetShown(act)
             u:ClearAllPoints()
-            u:SetPoint("BOTTOM", self, "BOTTOM", 0, 0)
-            u:SetWidth(tw + 14)
+            u:SetPoint("TOPLEFT", pl.fill, "TOPLEFT", 1, -1)
+            u:SetPoint("TOPRIGHT", pl.fill, "TOPRIGHT", -1, -1)
         end
         if fs then
-            local ta = self._zDisabled and S.OFF_A or self._zActive and 1 or Lerp(S.DIM_A, S.NAV_HOVER, t)
+            local ta = self._zDisabled and S.OFF_A or act and 1 or Lerp(S.DIM_A, S.NAV_HOVER, t)
             fs:SetTextColor(1, 1, 1, ta)
         end
         return
@@ -614,9 +708,30 @@ local function PaintSetButton(self)
         br, tr = WHITE, WHITE
         bb, tc = Lerp(S.BTN_BRD_A, S.BTN_BRD_HA, t), Lerp(S.BTN_TXT_A, S.BTN_TXT_HA, t)
     end
-    if self._zFill then self._zFill:SetVertexColor(bgc.r, bgc.g, bgc.b, ba) end
-    Strips(self, br.r, br.g, br.b, bb * k)
-    if fs then fs:SetTextColor(tr.r, tr.g, tr.b, tc * k) end
+    if st == "footer" or st == "close" then
+        if self._zFill then self._zFill:SetVertexColor(bgc.r, bgc.g, bgc.b, ba) end
+        Strips(self, br.r, br.g, br.b, bb * k)
+        if fs then fs:SetTextColor(tr.r, tr.g, tr.b, tc * k) end
+        return
+    end
+    -- (2026-11-09) a raised plate: the edge warms to the accent under the
+    -- mouse; a picked button keeps the accent on its edge and label
+    if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
+    Strips(self, 0, 0, 0, 0)
+    local pl = UI.Plate(self, 0, 0, 0, 0)
+    local edge
+    if self._zActive then
+        edge = { r = a.r, g = a.g, b = a.b, a = Lerp(0.85, 1, t) * k }
+    else
+        edge = MixC({ r = 1, g = 1, b = 1, a = PL.EDGE * k }, { r = a.r, g = a.g, b = a.b, a = PL.EDGE_H * k }, t)
+    end
+    local top, bot = MixC(PL.TOP, PL.TOP_H, t), MixC(PL.BOT, PL.BOT_H, t)
+    top.a, bot.a = k, k
+    pl:Paint(top, bot, edge, Lerp(PL.SHEEN, PL.SHEEN_H, t) * k)
+    if fs then
+        if self._zActive then fs:SetTextColor(a.r, a.g, a.b, k)
+        else fs:SetTextColor(1, 1, 1, Lerp(0.82, 1, t) * k) end
+    end
 end
 UI.PaintSetButton = PaintSetButton
 
@@ -1171,10 +1286,18 @@ local function SetSlider(parent, opts)
     slider:SetThumbTexture(thumb)
     UI.DiscArt(thumb, S.THUMB)
     -- the disc of window colour under the grip: hides the fill's end
-    local block = slider:CreateTexture(nil, "OVERLAY", nil, 1)
+    -- (2026-11-09, Zac: "zui has black ... slider thumbs" while Readycheck's
+    -- are gold: the client puts a slider's thumb on the ARTWORK layer when
+    -- it takes it, so this disc on OVERLAY drew over the accent grip. The
+    -- disc sits a layer down now and the grip is put back on top.)
+    local block = slider:CreateTexture(nil, "ARTWORK", nil, 6)
     block._zui_own = true
-    UI.DiscArt(block, S.THUMB)
-    block:SetAllPoints(thumb)
+    UI.DiscArt(block, S.THUMB + 2)
+    -- (2026-11-09, Zac: "the gold knobs need like a 1 px black border")
+    -- one pixel wider all round than the grip, and black
+    block:SetSize(S.THUMB + 2, S.THUMB + 2)
+    block:SetPoint("CENTER", thumb, "CENTER", 0, 0)
+    if thumb.SetDrawLayer then thumb:SetDrawLayer("OVERLAY", 2) end
 
     local label
     if opts.label then
@@ -1291,7 +1414,7 @@ local function SetSlider(parent, opts)
         fillPill:Color(a.r, a.g, a.b, S.SL_FILL_A)
         -- (the thumb stays the accent, hovered or not, as EllesmereUI's)
         thumb:SetVertexColor(a.r, a.g, a.b, 1)
-        block:SetVertexColor(S.BG.r, S.BG.g, S.BG.b, 1)
+        block:SetVertexColor(0, 0, 0, 1)
         local c = S.INPUT
         box._zFill:SetVertexColor(c.r, c.g, c.b, S.SL_INPUT_A)
         for _, s in ipairs(box._zBorder or {}) do s:SetVertexColor(1, 1, 1, S.SL_INPUT_BRD_A) end
@@ -1494,9 +1617,9 @@ function UI.Slider(parent, opts)
     -- the hover border's colour while it is dragged
     host._zPaint = function(self)
         PaintBox(self)
-        local t = GetColor("scrollbar", "thumb")
-        if self._zDrag then t = GetColor("ui", "borderHover")
-        elseif self._zHot then t = GetColor("ui", "accent") end
+        -- (2026-11-09: the accent at rest too, as Readycheck's grips)
+        local t = GetColor("ui", "accent")
+        if self._zDrag then t = GetColor("ui", "borderHover") end
         thumb:SetVertexColor(t.r, t.g, t.b, 1)
         local a = GetColor("ui", "accent")
         fill:SetVertexColor(a.r, a.g, a.b, 0.55)
@@ -2293,14 +2416,29 @@ function UI.ScrollArea(parent, opts)
     end
     track:SetFrameLevel(math.max(0, bar:GetFrameLevel() - 1))
     UI.Fill(track, "scrollbar", "track")
-    if not thin then UI.Border(track, "ui", "border", 0.4) end
+    -- (2026-11-09, Zac: "scroll thumb in readycheck is way better than zui")
+    -- outside the settings window the bar is Readycheck's: a faint rail
+    -- with no ring and a solid block of a thumb, 10 wide, that turns the
+    -- accent while the mouse is on it, while dragged and after a scroll
     track._zPaint = PaintBox
     track:_zPaint()
+    if not thin then
+        track:ClearAllPoints()
+        track:SetPoint("TOPLEFT", 3, 0)
+        track:SetPoint("BOTTOMRIGHT", -3, 0)
+        local base = track._zPaint
+        track._zPaint = function(self)
+            base(self)
+            local tc = GetColor("scrollbar", "track")
+            if self._zFill then self._zFill:SetVertexColor(tc.r, tc.g, tc.b, (tc.a or 1) * 0.45) end
+        end
+        track:_zPaint()
+    end
 
     local thumb = bar:CreateTexture(nil, "OVERLAY")
     thumb._zui_own = true
-    thumb:SetTexture(thin and FLAT or TEX_THUMB)
-    thumb:SetSize(thin or (M.SCROLL_W - 10), thin and 60 or 42)
+    thumb:SetTexture(FLAT)
+    thumb:SetSize(thin or (M.SCROLL_W - 6), thin and 60 or 42)
     bar:SetThumbTexture(thumb)
     local REST, LIT = 0.5, 1
     local lit, serial = false, 0
@@ -2312,9 +2450,9 @@ function UI.ScrollArea(parent, opts)
             thumb:SetVertexColor(1, 1, 1, (lit or bar._zHot or bar._zDrag) and math.min(1, ka + 0.2) or ka)
             return
         end
-        local tc = GetColor("scrollbar", "thumb")
         local on = lit or bar._zHot or bar._zDrag
-        thumb:SetVertexColor(tc.r, tc.g, tc.b, (tc.a or 1) * (on and LIT or REST))
+        local tc = on and GetColor("ui", "accent") or GetColor("scrollbar", "thumb")
+        thumb:SetVertexColor(tc.r, tc.g, tc.b, on and 1 or 0.6)
     end
     -- lit for a moment after a scroll (one timer, checked when it fires)
     local function Flash()
@@ -2365,6 +2503,18 @@ function UI.ScrollArea(parent, opts)
         else
             nv = v + (target - v) * (1 - math.exp(-(dt or 0.016) * 18))
         end
+        -- (2026-11-09, Zac: "as i get closer to the top or bottom the
+        -- scrolling becomes less responsive or slower") the glide covers a
+        -- share of what is left each frame, so near an end - where the
+        -- target stops running ahead - it crawled. It now never goes slower
+        -- than 1400 a second, so the last stretch arrives at once.
+        do
+            local left = target - v
+            local floor = 1400 * (dt or 0.016)
+            if math.abs(nv - v) < floor then
+                nv = v + ((left > 0) and 1 or -1) * math.min(math.abs(left), floor)
+            end
+        end
         own = true
         if math.abs(target - nv) < (thin and 0.3 or 0.5) then
             bar:SetValue(target)
@@ -2384,10 +2534,17 @@ function UI.ScrollArea(parent, opts)
         scroll:SetVerticalScroll(v)
     end)
     scroll:EnableMouseWheel(true)
+    -- notches that come fast travel further (as Readycheck's window does):
+    -- each one inside a fifth of a second of the last goes 1.5x the one
+    -- before, up to 4x a notch
+    local lastWheel, boost = 0, 1
     scroll:SetScript("OnMouseWheel", function(_, delta)
         local minV, maxV = bar:GetMinMaxValues()
         local from = target or bar:GetValue()
-        local v = math.max(minV, math.min(maxV, from - delta * (thin and S.WHEEL or M.WHEEL or 24)))
+        local now = GetTime and GetTime() or 0
+        if now - lastWheel < 0.2 then boost = math.min(4, boost * 1.5) else boost = 1 end
+        lastWheel = now
+        local v = math.max(minV, math.min(maxV, from - delta * (thin and S.WHEEL or M.WHEEL or 24) * boost))
         local Motion = ns.Motion
         if (Motion and Motion.Enabled and not Motion.Enabled()) or not scroll:IsVisible() then
             Stop()
@@ -2463,8 +2620,24 @@ local function SetCard(parent, title, y, opts)
         card._zTitleText = title
         -- (as written: other code and the suites read a card by its title)
         card._zTitle = UI.SFont(card, S.F_SECTION, { text = title, justify = "LEFT" })
-        card._zTitle._zPaint = function(self) self:SetTextColor(1, 1, 1, S.SECTION_A) end
-        card._zTitle:SetPoint("BOTTOMLEFT", card, "TOPLEFT", 1, -S.SECTION + 8)
+        card._zTitle._zPaint = function(self) self:SetTextColor(1, 1, 1, 0.92) end
+        card._zTitle:SetPoint("BOTTOMLEFT", card, "TOPLEFT", 11, -S.SECTION + 8)
+        -- (2026-11-09) a header, not a word: an accent tick before the
+        -- title and a line from it to the section's right edge
+        local tick = card:CreateTexture(nil, "ARTWORK")
+        tick._zui_own = true
+        tick:SetTexture(FLAT)
+        tick:SetSize(3, S.F_SECTION + 1)
+        tick:SetPoint("RIGHT", card._zTitle, "LEFT", -7, 0)
+        card._zTick = tick
+        local line = card:CreateTexture(nil, "ARTWORK")
+        line._zui_own = true
+        line:SetTexture(FLAT)
+        if ns.Pixel then ns.Pixel.Edge(line, "TOP", card) else line:SetHeight(1) end
+        line:ClearAllPoints()
+        line:SetPoint("LEFT", card._zTitle, "RIGHT", 10, 0)
+        line:SetPoint("RIGHT", card, "RIGHT", 0, 0)
+        card._zLine = line
         rule = card:CreateTexture(nil, "ARTWORK")
         rule._zui_own = true
         rule:SetTexture(FLAT)
@@ -2479,7 +2652,8 @@ local function SetCard(parent, title, y, opts)
             card._zTitle:SetWordWrap(true)
             card._zTitleExtra = math.max(0, math.ceil((card._zTitle:GetStringHeight() or one) - one))
             card._zTitle:ClearAllPoints()
-            card._zTitle:SetPoint("TOPLEFT", card, "TOPLEFT", 1, -(S.SECTION - 8 - one))
+            card._zTitle:SetPoint("TOPLEFT", card, "TOPLEFT", 11, -(S.SECTION - 8 - one))
+            card._zLine:Hide()
             rule:ClearAllPoints()
             rule:SetPoint("TOPLEFT", card, "TOPLEFT", 0, -(S.SECTION - 1 + card._zTitleExtra))
             rule:SetPoint("TOPRIGHT", card, "TOPRIGHT", 0, -(S.SECTION - 1 + card._zTitleExtra))
@@ -2506,6 +2680,18 @@ local function SetCard(parent, title, y, opts)
         self._zAccent:SetVertexColor(0, 0, 0, 0)
         if rule then rule:SetVertexColor(1, 1, 1, S.SECTION_RULE_A) end
         if self._zTitle then self._zTitle:_zPaint() end
+        if self._zTick then
+            local ac = Accent()
+            self._zTick:SetVertexColor(ac.r, ac.g, ac.b, 1)
+        end
+        if self._zLine then
+            if CreateColor and self._zLine.SetGradient then
+                self._zLine:SetVertexColor(1, 1, 1, 1)
+                self._zLine:SetGradient("HORIZONTAL", CreateColor(1, 1, 1, 0.22), CreateColor(1, 1, 1, 0.03))
+            else
+                self._zLine:SetVertexColor(1, 1, 1, 0.12)
+            end
+        end
     end
     -- rows meet the section's foot: no padding of its own
     function card:SetContentHeight(h)

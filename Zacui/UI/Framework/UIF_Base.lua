@@ -191,9 +191,36 @@ local function StripTextures(frame)
     end
 end
 
+-- (2026-11-10, Zac on Retail: "random gold line through the center" of
+-- the character pane - /fstack named CharacterFrame.NineSlice.TopEdge)
+-- The rim's own alpha was set to nothing once; Retail puts it back when a
+-- panel changes size or tab. So each piece is emptied too, and the rim is
+-- emptied again whenever the game shows it or gives it an alpha.
+local function QuietNineSlice(nine)
+    if type(nine) ~= "table" or not nine.SetAlpha then return end
+    local function Zero(self)
+        if rawget(self, "_zQuieting") then return end
+        rawset(self, "_zQuieting", true)
+        if (self:GetAlpha() or 0) > 0 then self:SetAlpha(0) end
+        if self.GetRegions then
+            for _, r in ipairs({ self:GetRegions() }) do
+                if r.SetAlpha and (r:GetAlpha() or 0) > 0 then r:SetAlpha(0) end
+            end
+        end
+        rawset(self, "_zQuieting", nil)
+    end
+    Zero(nine)
+    if not rawget(nine, "_zQuietHook") then
+        rawset(nine, "_zQuietHook", true)
+        hooksecurefunc(nine, "SetAlpha", Zero)
+        if nine.Show then hooksecurefunc(nine, "Show", Zero) end
+        if nine.HookScript then pcall(nine.HookScript, nine, "OnShow", Zero) end
+    end
+end
+
 local function StripFrameChrome(frame)
     if not frame then return end
-    if frame.NineSlice then frame.NineSlice:SetAlpha(0) end
+    if frame.NineSlice then QuietNineSlice(frame.NineSlice) end
     if frame.Bg then frame.Bg:Hide() end
     if frame.TitleBg then frame.TitleBg:Hide() end
     if frame.Inset then

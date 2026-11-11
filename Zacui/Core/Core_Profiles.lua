@@ -69,6 +69,9 @@ local SECTIONS = {
     { key = "windows",    label = "Game windows",      keys = { "windows" } },
     { key = "unitframes", label = "Unit frames",       keys = { "unitframes" },
       desc = "Every unit frame setting: frames, bars, text, auras, heals, party and raid layout." },
+    -- (2026-11-10) one filter for each list of buffs or debuffs (Core_AuraFilter)
+    { key = "aurafilters", label = "Aura filters",     keys = { "auraFilters" },
+      desc = "What each list of buffs and debuffs shows: its preset, the always and never lists, the advanced settings." },
     { key = "nameplates", label = "Nameplates",        keys = { "nameplates", "npScripts" },
       desc = "The nameplate engine and its scripts." },
     { key = "meter",      label = "Damage meter",      keys = { "meter" } },

@@ -255,7 +255,9 @@ ns.FEATURE_FLAVORS = {
                   .. "); a saved health-line format waits until the health reads again" } },
     { id = "tooltip_stats", part = "Zacui", name = "Short stat lines on item tooltips (\"+24 Attack Power\")",
       on = { forever = "Forever's items carry Classic's \"Equip:\" lines, the ones this shortens" },
-      changed = { retail = "Retail already writes its stat lines short; only Classic-style \"Equip:\" lines are rewritten" } },
+      -- (2026-11-09) Retail's items have no "Equip:" stat lines of this kind
+      off = { retail = "Retail already writes its stat lines short, and has no Classic-style \"Equip:\" lines to rewrite" },
+      kind = { retail = "not_needed" } },
     { id = "buffs", part = "Zacui", name = "Your buffs and debuffs" },
     { id = "lootroll", part = "Zacui", name = "Loot rolls" },
     { id = "settings", part = "Zacui", name = "Settings window, appearance, profiles, import, movers and Edit Mode" },
@@ -335,9 +337,10 @@ ns.FEATURE_FLAVORS = {
                   retail = "in a fight Retail hides an enemy's cast, and some cooldowns and ranges, from addons: a hidden one "
                   .. "reads as unknown and the bar keeps its normal colour" } },
     { id = "np_debuffs", part = "Zacui_Nameplates", name = "Nameplate debuffs, Sunder count and execute cue",
-      changed = { forever = "go quiet in combat: each is found by the debuff's name, which Forever hides from addons then "
-                  .. "(the plain debuff row above the plate still shows them)",
-                  retail = "go quiet in combat: each is found by the debuff's name, which Retail hides from addons then "
+      -- (2026-11-09, Zac: "hide for now") Forever's reworked spells are not listed yet
+      off = { forever = "Forever's reworked debuffs are not listed yet (the plain debuff row above the plate still shows them)" },
+      kind = { forever = "not_there" },
+      changed = { retail = "go quiet in combat: each is found by the debuff's name, which Retail hides from addons then "
                   .. "(the plain debuff row above the plate still shows them)" } },
     { id = "dodge_window", part = "Zacui_Nameplates", name = "Overpower window after a dodge, and the crosshair's miss marks",
       changed = { forever = "the Overpower window comes from the game's own Overpower button (Battle Stance, your target, "
@@ -381,10 +384,11 @@ ns.FEATURE_FLAVORS = {
                   retail = "built from the game's own damage meter: damage, healing and each ability's total; no hits a minute, "
                   .. "no what hit you, no death causes. Retail's raids end by the lockout (every boss down); /zacui raid opens it any time" } },
     { id = "meter_dmf", part = "Zacui_Meter", name = "Darkmoon Faire mark after names on the meter",
-      changed = { tbc = "marks Sayge's fortune in any raid: TBC is not raided on world buffs, so \"only while my world buffs are on\" is not asked" },
-      off = { forever = "whether Forever has the Darkmoon Faire and Sayge's fortunes is unconfirmed",
+      -- (2026-11-09, Zac: "configurable in the ui in the meter settings only for era")
+      off = { tbc = "TBC is not raided on world buffs, so there is nobody to catch with Sayge's fortune",
+              forever = "whether Forever has the Darkmoon Faire and Sayge's fortunes is unconfirmed",
               retail = "Retail's Darkmoon Faire has no Sayge's fortune buffs to mark" },
-      kind = { forever = "not_there", retail = "not_there" }, notes = { "meter" } },
+      kind = { tbc = "not_needed", forever = "not_there", retail = "not_there" }, notes = { "meter" } },
     { id = "clicks", part = "Zacui_Clicks", name = "Click casting",
       changed = { retail = "the game has click bindings of its own for Blizzard's frames; ZacUI's apply to ZacUI's unit frames" } },
     { id = "blessings", part = "Zacui_Blessings", whole = true, name = "Blessings: casting bar and assignments",
@@ -404,21 +408,26 @@ ns.FEATURE_FLAVORS = {
       off = { tbc = WB_TBC, forever = WB_FOREVER, retail = "Retail has no world buffs to store and no Chronoboon Displacer" },
       kind = { tbc = "not_there", forever = "not_needed", retail = "not_there" },
       notes = { "consbars" } },
+    -- (2026-11-09) the part loads on Retail: its Classic HUDs stay off there
+    -- (the rows below) and HUD_Retail.lua gives every class a HUD built on
+    -- the game's own Cooldown Manager list for the spec you play
     { id = "hud", part = "Zacui_HUD", whole = true, name = "Class HUDs, Drink Ticker and Hesitation alerts (the part)",
-      off = { retail = "every HUD is a Classic rotation (Classic spell ids, swing timers, the five-second rule), and Retail's "
-              .. "classes play by spec with the game's own Cooldown Manager; a Retail HUD on the Cooldown Manager is coming later" },
-      kind = { retail = "cant" } },
+      changed = { retail = "one HUD for every class, built from the game's own Cooldown Manager list for the spec you play: "
+                  .. "its cooldowns, a utility row, your tracked buffs and a plain power bar. No swing timers, "
+                  .. "five-second rule or mana ticks, and nothing is read off the target's debuffs in a fight" } },
     { id = "hud_warrior", part = "Zacui_HUD", name = "Warrior HUD",
       changed = { forever = "swing timers come from the game's own swing event; the Overpower window comes from the game's "
                   .. "Overpower button; in combat the execute cue asks the game's own health curve (" .. SECRET
                   .. "), and Hamstring's timer shows as the game hands it over while its name reads" },
-      off = { retail = "the Classic warrior rotation (Bloodthirst, Sunder, Overpower, swing timers) is not Retail's; " .. LATER_R },
+      off = { retail = "the Classic warrior rotation (Bloodthirst, Sunder, Overpower, swing timers) is not Retail's; "
+              .. "Retail's own class HUD takes its place" },
       kind = { retail = "cant" } },
     { id = "hud_classes", part = "Zacui_HUD", name = "Class HUDs (Paladin, Priest, Hunter, Rogue, Shaman, Mage, Warlock, Druid)",
       changed = { forever = "swing and Auto Shot bars come from the game's own swing event; your target debuffs show in combat "
                   .. "with their timers and stacks as the game hands them over (" .. SHOWN .. "); ones whose names are "
                   .. "hidden too fill the row in the game's order, past the per-debuff ticks" },
-      off = { retail = "the Classic class rotations and items (mana gems, runes, Classic potions) are not Retail's; " .. LATER_R },
+      off = { retail = "the Classic class rotations and items (mana gems, runes, Classic potions) are not Retail's; "
+              .. "Retail's own class HUD (every class, from the game's Cooldown Manager) takes their place" },
       kind = { retail = "cant" } },
     { id = "hud_swing", part = "Zacui_HUD", name = "Swing timers on the HUDs",
       changed = { forever = "from the game's own swing event (PLAYER_SWING) instead of the combat log: each swing restarts its "
@@ -485,8 +494,10 @@ ns.FEATURE_FLAVORS = {
                 retail = "the macro summons a random favourite mount through the game's mount journal (mounts are learned there, not carried)" }
           or nil },
     { id = "snowball", part = "Zacui_QoL", name = "Snowball button (throws only in the air)",
-      off = { forever = "the snowball trick isn't needed on Forever", retail = "the snowball trick isn't needed on Retail" },
-      kind = { forever = "not_needed", retail = "not_needed" }, notes = { "qol" } },
+      -- (2026-11-09, Zac: "remove the snowball tab on tbc")
+      off = { tbc = "the snowball trick isn't needed on TBC", forever = "the snowball trick isn't needed on Forever",
+              retail = "the snowball trick isn't needed on Retail" },
+      kind = { tbc = "not_needed", forever = "not_needed", retail = "not_needed" }, notes = { "qol" } },
     { id = "gcd_tracker", part = "Zacui_QoL", name = "GCD tracker (what you pressed, what went off)",
       changed = { forever = "in a fight Forever hides spell cooldowns from addons: the GCD swipe can read as ready while the icons of what you pressed still roll",
                   retail = "in a fight Retail hides spell cooldowns from addons: the GCD swipe can read as ready while the icons of what you pressed still roll" } },

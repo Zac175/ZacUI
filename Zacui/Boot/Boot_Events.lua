@@ -204,6 +204,10 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
             end
             ns.freshInstall = type(ZacUIDB) ~= "table" or next(ZacUIDB) == nil
             ZacUIDB = ZacUIDB or {}
+            -- an install made from here on starts on the new default spots
+            -- (UIF_Movers: NEW DEFAULT SPOTS); an existing one never does
+            if ns.freshInstall then ZacUIDB.defaultsGen = 2 end
+            if ns.MoversNewDefaults then ns.MoversNewDefaults() end
             ZacUIDB.modules = ZacUIDB.modules or {}
             -- the third-party skins are gone (2026-10-28): their switches too
             for _, m in ipairs({ "baganator", "syndicator", "auctionator", "prat", "bartender4" }) do

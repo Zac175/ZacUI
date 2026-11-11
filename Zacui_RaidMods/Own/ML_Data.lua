@@ -24,9 +24,16 @@ T.facts.ML = {
             { name = "Quake", spells = { 30571 }, first = 160, src = "WH-NPC (first 40 s after he is free; no repeat stated)", conf = "medium" },
           },
           alerts = {
-            { name = "Blast Nova", spells = { 30616 }, gap = 10, text = "BLAST NOVA - CLICK THE CUBES", say = "Cubes", src = "WH-NPC" },
-            { name = "Dark Mending", spells = { 30528 }, text = "INTERRUPT THE CHANNELER", src = "WH-NPC" },
+            { name = "Blast Nova", spells = { 30616 }, gap = 10, text = "BLAST NOVA - CLICK THE CUBES", say = "Cubes", cast = 12,
+              src = "WH-NPC; BW (a 12 s channel)" },
+            { name = "Dark Mending", spells = { 30528 }, text = "INTERRUPT THE CHANNELER", cast = true, kick = true, src = "WH-NPC" },
+            { name = "Shadow Cage", spells = { 30168 }, sub = "SPELL_AURA_APPLIED", gap = 5, text = "MAGTHERIDON CAGED - BURN", say = "Caged", src = "BW" },
+            { name = "Burning Abyssal", spells = { 30511 }, sub = "SPELL_SUMMON", gap = 3, text = "ABYSSAL", src = "BW" },
+            { name = "Debris", spells = { 36449 }, sub = "SPELL_AURA_APPLIED", onlyMe = true, gap = 3, text = "DEBRIS", me = "DEBRIS - MOVE", sayMe = "Move", src = "BW" },
           },
+          -- who has clicked a cube and cannot again yet
+          lists = { { name = "Mind Exhaustion", spells = { 44032 }, src = "BW" } },
+          gtfo = { { name = "Debris", spells = { 36449 }, aura = true, src = "BW" } },
           health = { npc = 17257, src = "WH-NPC (the ceiling comes down at 30%)",
             marks = { { at = 30, text = "CAVE-INS", say = "Cave ins", soon = true } } },
         },

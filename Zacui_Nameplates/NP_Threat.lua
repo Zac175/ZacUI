@@ -71,7 +71,15 @@ function NP.BuildThreat(f)
     -- edge, so half sits on the coloured fill and half hangs below - it
     -- reads as part of the bar, not a caption under it. The strip is too
     -- short for "Frosty 82%" to fit inside outright.
-    tb.text = tb:CreateFontString(nil, "OVERLAY")
+    -- (2026-11-09, Zac: "black line goes through the 100% it should be
+    -- behind it") the strip's border drew over the text: the text gets a
+    -- holder a level above the strip
+    local th = CreateFrame("Frame", nil, tb)
+    th:SetAllPoints(tb)
+    th:SetFrameLevel(tb:GetFrameLevel() + 2)
+    if th.EnableMouse then th:EnableMouse(false) end
+    tb.textHost = th
+    tb.text = th:CreateFontString(nil, "OVERLAY")
     SetNPFont(tb.text, 8)
     tb.text:SetPoint("RIGHT", tb, "BOTTOMRIGHT", -1, 0)
     tb.text:SetJustifyH("RIGHT")

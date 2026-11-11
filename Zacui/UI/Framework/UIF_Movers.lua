@@ -81,6 +81,9 @@ end
 
 local function Spec(h) return rawget(h, "_zMover") end
 
+-- the colour of a box that follows another (Edit Mode)
+Kit.LINK = { 0.47, 0.75, 1 }
+
 local function Label(h)
     local spec = Spec(h)
     local l = spec and spec.label
@@ -105,15 +108,61 @@ local function Paint(h)
     if spec.paint then
         spec.paint(h, { locked = locked, hover = hover and true or false })
     elseif h._zFill then
-        local c
-        if locked then c = ns.GetColor("text", "red")
-        elseif spec.color then c = spec.color
-        else c = Col("accent") end
-        h._zFill:SetColorTexture(c.r or c[1], c.g or c[2], c.b or c[3], hover and 0.5 or 0.3)
+        local edit = Kit.edit
+        local a = Col("accent")
+        local strips = rawget(h, "_zui_borderTex")
+        if edit and not locked then
+            -- EDIT MODE (2026-11-09 redesign): a dark box with a thin accent
+            -- edge, so the screen behind stays readable. The picked box is
+            -- lit; a box that follows another wears the link colour.
+            local sel = Kit.selected == h
+            local follows = edit.follows and edit.follows(h) or nil
+            local bg = ns.GetColor("ui", "windowBg")
+            if spec.clear then
+                -- a box over something that is drawn while Edit Mode is
+                -- open (a class HUD's row): the real thing shows through
+                h._zFill:SetColorTexture(bg.r + a.r * 0.14, bg.g + a.g * 0.14, bg.b + a.b * 0.14,
+                    sel and 0.30 or hover and 0.22 or 0.10)
+            elseif sel then
+                h._zFill:SetColorTexture(bg.r + a.r * 0.14, bg.g + a.g * 0.14, bg.b + a.b * 0.14, 0.86)
+            else
+                h._zFill:SetColorTexture(bg.r, bg.g, bg.b, hover and 0.82 or 0.70)
+            end
+            local er, eg, eb, ea = a.r, a.g, a.b, hover and 0.9 or 0.55
+            if follows then er, eg, eb, ea = Kit.LINK[1], Kit.LINK[2], Kit.LINK[3], 0.85
+            elseif sel then er, eg, eb, ea = math.min(1, a.r * 1.15), math.min(1, a.g * 1.15), math.min(1, a.b * 1.15), 1 end
+            if strips then for _, t in ipairs(strips) do t:SetColorTexture(er, eg, eb, ea) end end
+            rawset(h, "_zFollows", follows)
+        else
+            local c
+            if locked then c = ns.GetColor("text", "red")
+            elseif spec.color then c = spec.color
+            else c = a end
+            h._zFill:SetColorTexture(c.r or c[1], c.g or c[2], c.b or c[3], hover and 0.5 or 0.3)
+            if strips then for _, t in ipairs(strips) do t:SetColorTexture(a.r, a.g, a.b, 0.9) end end
+            rawset(h, "_zFollows", nil)
+        end
     end
     if h._zLabel then
         h._zLabel._zPaintKey = locked and "red" or "normal"
         h._zLabel:_zPaint()
+        -- a box that follows another: its name in the link colour and
+        -- what it follows written under it
+        local follows = rawget(h, "_zFollows")
+        local sub = rawget(h, "_zSub")
+        if follows and not locked then
+            h._zLabel:SetTextColor(Kit.LINK[1], Kit.LINK[2], Kit.LINK[3], 1)
+            if not sub then
+                sub = UI.Font(h, (UI.F and UI.F.SMALL) or 10, { cat = "text", key = "gray" })
+                rawset(h, "_zSub", sub)
+            end
+            sub:SetText("follows " .. tostring(follows))
+            sub:ClearAllPoints()
+            sub:SetPoint("TOP", h._zLabel, "BOTTOM", 0, -1)
+            sub:SetShown(rawget(h, "_zLabelInside") == true and (h:GetHeight() or 0) >= 30)
+        elseif sub then
+            sub:Hide()
+        end
     end
 end
 
@@ -182,7 +231,8 @@ function Kit.UpdateReadout(h)
     local ro = h._zReadout
     local spec = Spec(h)
     if not (ro and spec) then return end
-    local show = rawget(h, "_zHover") or rawget(h, "_zDragging")
+    -- (Edit Mode: the picked box keeps its numbers up)
+    local show = rawget(h, "_zHover") or rawget(h, "_zDragging") or (Kit.edit and Kit.selected == h)
     if not show then ro:Hide() return end
     local text = spec.coords and spec.coords(h)
     if not text or text == "" then ro:Hide() return end
@@ -344,8 +394,8 @@ end
 function Kit.Select(h)
     local old = Kit.selected
     Kit.selected = h
-    if old and old ~= h and Spec(old) then Paint(old) end
-    if h and Spec(h) then Paint(h) end
+    if old and old ~= h and Spec(old) then Paint(old) Kit.UpdateReadout(old) end
+    if h and Spec(h) then Paint(h) Kit.UpdateReadout(h) end
 end
 
 local function Hover(h, on)
@@ -371,7 +421,7 @@ local function Hover(h, on)
                     GameTooltip:AddLine("Arrow keys or mouse wheel nudge (Shift: 10, Ctrl + wheel: sideways).", 0.8, 0.8, 0.8, true)
                 end
                 if Kit.edit and Kit.edit.menu then
-                    GameTooltip:AddLine("Right-click: attach, match size, its settings, reset.", 0.8, 0.8, 0.8, true)
+                    GameTooltip:AddLine("Click it for its actions (attach, match size, reset, settings); right-click for the same as a menu.", 0.8, 0.8, 0.8, true)
                 elseif spec.reset then
                     GameTooltip:AddLine("Right-click: back to its default spot.", 0.8, 0.8, 0.8, true)
                 end
@@ -542,6 +592,58 @@ local pending = {}      -- [key] = "apply" | "reset": waits for combat to end
 --                    (Edit Mode's "Open its settings"; else guessed by key)
 --   off              fn() -> reason string when it is switched off, nil on
 -- Registering the same key again updates it in place (no second row).
+-- ============================================================
+-- NEW DEFAULT SPOTS (2026-11-10, Zac: "i dont want someone to turn a
+-- feature on and go wtf is this position")
+-- ============================================================
+-- Only an install made from now on gets them (ZacUIDB.defaultsGen = 2,
+-- stamped by Boot_Events on a fresh install or a full reset): a frame an
+-- existing player never moved stays exactly where it was. Each spot was
+-- checked against Blizzard's default layout on a 1920 x 1080 screen (the
+-- chat, the bars, the party frames, the quest tracker, the buffs) and
+-- against the other parts' default spots; where Zac's own Classic Era
+-- screen has the frame, his spot is the one taken.
+--   lootroll        was TOP 0,-220: under the scrolling text and the pull
+--                   timers. Zac's: left of centre, over the chat.
+--   snowball        was CENTER 776,254: on the quest tracker.
+--   qoldistance     was CENTER 0,-110: on the class HUD's debuff row.
+--   buffRemIcon     was CENTER 200,0: in the outgoing damage text.
+--   talentreminder  was TOPRIGHT -230,-12: on the buffs.
+--   qolalerts       was CENTER 0,169: on the raid warnings and the
+--                   hesitation alert.
+--   qolreminders    was CENTER 0,230: on the raid mods' text alerts.
+--   qolstats        was BOTTOMLEFT 300,220: on the chat's top corner.
+local GEN2 = {
+    lootroll       = { "LEFT", 405, 122 },
+    snowball       = { "BOTTOM", 330, 190 },
+    qoldistance    = { "CENTER", 0, -75 },
+    -- (right of the character, clear of the raid mods' alert text and
+    -- the range circle that share the centre column)
+    buffRemIcon    = { "CENTER", 150, 40 },
+    -- (above the flight timer and the scrolling text, under the top bars)
+    talentreminder = { "TOP", 0, -89 },
+    -- (off the class HUD: with the other reminders on the left)
+    qoljunk        = { "CENTER", -330, 208 },
+    qolalerts      = { "CENTER", 0, 132 },
+    qolreminders   = { "CENTER", -330, 170 },
+    qolstats       = { "BOTTOMLEFT", 30, 290 },
+}
+function ns.NewDefaults()
+    return type(ZacUIDB) == "table" and (tonumber(ZacUIDB.defaultsGen) or 1) >= 2
+end
+local function Gen2(m)
+    local g = GEN2[m.key]
+    if g and ns.NewDefaults() then
+        m.defPoint, m.defX, m.defY = g[1], g[2], g[3]
+        m._gen2 = true
+    end
+end
+-- the movers registered before the saved settings were there (Boot calls
+-- this once they are)
+function ns.MoversNewDefaults()
+    for _, m in ipairs(MOVERS) do Gen2(m) end
+end
+
 local function RegisterMover(key, label, getFrame, defPoint, defX, defY, reflow, opts)
     local m = MOVERS[key]
     if not m then
@@ -556,7 +658,13 @@ local function RegisterMover(key, label, getFrame, defPoint, defX, defY, reflow,
         m.get, m.set, m.reset = opts.get, opts.set, opts.reset
         m.secure, m.own = opts.secure, opts.own
         m.size, m.page, m.tab, m.off = opts.size, opts.page, opts.tab, opts.off
+        m.clear = opts.clear
+        m.exact = opts.exact
     end
+    Gen2(m)
+    -- (a part that put its frame on the old spot before registering: onto
+    -- the new one now, unless the player has a spot saved)
+    if m._gen2 and ns.ApplyMover then pcall(ns.ApplyMover, key) end
     local p = moverProxies[key]
     if p and p:IsShown() then Kit.Refresh(p) end
     return m
@@ -649,8 +757,13 @@ end
 -- scaled anchor, a bar's box), one box round them all, in UIParent units
 local function DrawnRect(f, l, b, w, h)
     local r, t = l + w, b + h
-    if f.GetChildren then
-        for _, c in ipairs({ f:GetChildren() }) do
+    -- (2026-11-10, Zac: "move ui for huds ... needs to reflect the actual
+    -- thing") a HUD holder holds one small anchor and the icons hang off
+    -- that, so one level saw a 26 px square. Three levels down takes in
+    -- the icons and bars themselves.
+    local function Take(frame, depth)
+        if not frame.GetChildren then return end
+        for _, c in ipairs({ frame:GetChildren() }) do
             if c.IsShown and c:IsShown() then
                 local cl, cb, cw, ch = FrameRect(c)
                 if cl then
@@ -659,9 +772,11 @@ local function DrawnRect(f, l, b, w, h)
                     if cl + cw > r then r = cl + cw end
                     if cb + ch > t then t = cb + ch end
                 end
+                if depth < 3 then Take(c, depth + 1) end
             end
         end
     end
+    Take(f, 1)
     return l, b, r - l, t - b
 end
 
@@ -674,6 +789,17 @@ local function ApplyMover(key)
     local m = MOVERS[key]
     local pos = m and SavedPos(m)
     local f = m and m.getFrame()
+    -- never moved, on an install with the new default spots: the part put
+    -- the frame on its old spot just before this call
+    if m and f and not pos and m._gen2 and m.defPoint and not m.reset then
+        if MoverBlocked(key, f) then return end
+        if InCombatLockdown() and IsSecure(m, f) then
+            pending[key] = pending[key] or "reset"
+            return
+        end
+        SetFramePos(f, m.defPoint, m.defX, m.defY)
+        return
+    end
     if not (pos and f) then return end
     if MoverBlocked(key, f) then return end
     if InCombatLockdown() and IsSecure(m, f) then
@@ -735,7 +861,7 @@ local function FitProxy(p)
     -- the box covers what is drawn; the numbers follow the frame itself,
     -- so the gap between the two centres is kept for the drop
     local dl, db, dw, dh = l, b, w, h
-    if f and FrameRect(f) then dl, db, dw, dh = DrawnRect(f, l, b, w, h) end
+    if f and FrameRect(f) and not m.exact then dl, db, dw, dh = DrawnRect(f, l, b, w, h) end
     p._fw, p._fh = w, h
     p._dw, p._dh = dw, dh
     p._ox, p._oy = (dl + dw / 2) - (l + w / 2), (db + dh / 2) - (b + h / 2)
@@ -822,6 +948,7 @@ local function NewProxy(key)
     p.moverKey = key
     local function M() return MOVERS[key] end
     Kit.Dress(p, {
+        clear = (M() and M().clear) or nil,
         label = function() local m = M() return m and m.label or key end,
         secure = function()
             local m = M()

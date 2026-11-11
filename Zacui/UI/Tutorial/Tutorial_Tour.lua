@@ -318,7 +318,12 @@ local function BuildSteps()
         { id = "reload", place = "below",
           title = "Reload",
           body = "A few settings say they need a reload - turning a part off, for one. This button does it.",
-          target = function(win) return TitleButton(win, "Reload") end },
+          target = function(win)
+              -- (the header's Reload is a drawn glyph, not a label)
+              local b = win and win.reloadButton
+              if b and Seen(b) then return b end
+              return TitleButton(win, "Reload")
+          end },
         OnPage("profiles_page", { id = "profiles", place = "right",
           title = "Profiles",
           body = "Each character wears a profile. Keep a second setup, copy one to an alt, "

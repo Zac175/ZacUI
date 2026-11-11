@@ -227,11 +227,20 @@ function NP.BuildHealth(f)
     f.raidIcon:SetSize(24, 24)
     f.raidIconShadow:SetSize(24, 24)
 
-    f.level = hb:CreateFontString(nil, "OVERLAY")
+    -- (2026-11-09, Zac: "black line goes through the 100% it should be
+    -- behind it") the bar's border is a child frame a level up, so text
+    -- made on the bar itself sat under it: the texts get a holder above
+    local th = CreateFrame("Frame", nil, hb)
+    th:SetAllPoints(hb)
+    th:SetFrameLevel((hb:GetFrameLevel() or 0) + 3)
+    if th.EnableMouse then th:EnableMouse(false) end
+    f.textHost = th
+
+    f.level = th:CreateFontString(nil, "OVERLAY")
     SetNPFont(f.level, 10)
     f.level:SetPoint("LEFT", hb, "LEFT", 1, 0)
 
-    f.percent = hb:CreateFontString(nil, "OVERLAY")
+    f.percent = th:CreateFontString(nil, "OVERLAY")
     SetNPFont(f.percent, 9)
     f.percent:SetPoint("RIGHT", hb, "RIGHT", -1, 0)
 end
