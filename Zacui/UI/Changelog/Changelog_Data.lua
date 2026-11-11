@@ -14,6 +14,44 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.9",
+        date = "2026-11-11",
+        title = "The old raid frames, and one look everywhere",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "With the Classic WoW UI style your raid uses the old Blizzard raid frames: class colours, groups four across, pets and main tanks. /orf opens their options.",
+                    "Edit Mode: a Previews button shows or hides what is drawn under the boxes, and each frame's preview can be switched on its own. Right-click a frame in the Frames list.",
+                    "Edit Mode: the party preview and the raid preview each have their own switch.",
+                    "The bags and the auction house show an icon on their title bar.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "The game's Options window matches ZacUI's settings window.",
+                    "Checkboxes, dropdowns, sliders, tabs and text boxes look the same everywhere, inside the settings window and out.",
+                    "Game windows that ZacUI restyles have their title at the left in ZacUI's font, over the same flat header as ZacUI's own windows.",
+                    "The bar under the chat and the button column beside it are solid. The chat itself stays see-through.",
+                    "The damage meter's menu page is the same grey as the other windows.",
+                    "Dark window colours saved by older versions give way to the new lighter ones. Colours you picked yourself are kept.",
+                    "The first-time tips in the settings window open beside it instead of over the tabs.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "Buff remover: going to Defensive Stance and straight back no longer cancels Salvation.",
+                    "Edit Mode: a small slip of the mouse while clicking a frame no longer moves it.",
+                    "The auction buying window keeps its size when you press Buy.",
+                    "The damage meter preview's size note no longer sits under the Layout button.",
+                    "The mail windows have ZacUI's scroll bars.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.8",
         date = "2026-11-10",
         title = "TBC raid mods, and class HUDs for your spec",

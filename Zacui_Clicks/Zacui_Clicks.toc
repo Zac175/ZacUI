@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Click casting|r
 ## Notes: ZacUI click casting: spells, macros, target and menu on any mouse button or key over your unit frames. Replaces Clique.
 ## Author: Zac
-## Version: 3.0.8
+## Version: 3.0.9
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

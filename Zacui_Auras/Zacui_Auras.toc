@@ -1,7 +1,7 @@
 ## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Auras|r
 ## Author: Zac
-## Version: 3.0.8
+## Version: 3.0.9
 ## IconTexture: Interface\Icons\Spell_Nature_WispSplode
 ## Notes: ZacUI's aura engine: runs auras in the WeakAuras format and imports their strings. Turn it on from ZacUI's Aura engine page.
 ## X-Category: Interface Enhancements

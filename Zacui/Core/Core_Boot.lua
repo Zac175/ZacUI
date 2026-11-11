@@ -50,7 +50,7 @@ local ADDON_NAME, ns = ...
 local ZUI = CreateFrame("Frame", "ZacUIFrame")
 ZUI.skinned = {}
 ZUI.panels  = {}
-ZUI.VERSION = "3.0.8"
+ZUI.VERSION = "3.0.9"
 
 local MEDIA      = "Interface\\AddOns\\ZacUI\\Media\\"
 local TEX_NORM   = MEDIA .. "normTex"
