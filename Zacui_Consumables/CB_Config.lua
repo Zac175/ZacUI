@@ -714,7 +714,7 @@ local function Colour(L, key, label)
         set = function(r, g, b, a)
             if r then
                 if type(c.colors) ~= "table" then c.colors = {} end
-                c.colors[key] = { r = r, g = g, b = b, a = a or 1 }
+                c.colors[key] = { r = r, g = g, b = b, a = a or 1, pick = true }
             elseif CB.T(c, "colors") then
                 c.colors[key] = nil
                 if next(c.colors) == nil then c.colors = nil end

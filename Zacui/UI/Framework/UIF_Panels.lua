@@ -327,6 +327,30 @@ local function FitPanelChrome(frame, lineY)
             -(frame._zui_lineRight or 1), lineY)
     end
 
+    -- THE TITLE (2026-11-11, the last of "every menu popup etc needs to
+    -- match"): at the left of the header in ZacUI's title font, where
+    -- ZacUI's own windows have theirs - it was the game's centred title in
+    -- the game's font. Not on a window wearing Blizzard's art (the Classic
+    -- look keeps its own header).
+    if not frame._zui_artbg and frame._zui_line then
+        local name = frame.GetName and frame:GetName()
+        local title = frame.TitleText
+            or (frame.TitleContainer and frame.TitleContainer.TitleText)
+            or (name and _G[name .. "TitleText"])
+        if title and title.SetPoint and title.SetJustifyH then
+            local U = ns.UI
+            if U and U._zFontDress and U.F and not rawget(title, "_zTitleFont") then
+                rawset(title, "_zTitleFont", true)
+                pcall(U._zFontDress, title, U.F.TITLE)
+            end
+            title:ClearAllPoints()
+            title:SetPoint("LEFT", target, "TOPLEFT", 12, lineY / 2)
+            title:SetPoint("RIGHT", target, "TOPRIGHT", -34, lineY / 2)
+            title:SetJustifyH("LEFT")
+            if title.SetWordWrap then title:SetWordWrap(false) end
+        end
+    end
+
     local close = frame._zui_close
     if close and close.SetPoint then
         local fit = math.max(14, math.min(bandH - 4, 22))
@@ -620,15 +644,17 @@ local function SkinPanel(frame, opts)
             :CreateTexture(nil, "BORDER")
         band._zui_own = true
         band:SetTexture(FLAT)
-        band:SetVertexColor(hb.r, hb.g, hb.b, hb.a or 1)
+        -- (2026-11-10, Zac: "literally every menu popup etc needs to
+        -- match") the header is the window itself, as on ZacUI's own
+        -- windows: the band stays (things anchor to it) and is not drawn
+        band:SetVertexColor(hb.r, hb.g, hb.b, 0)
         frame._zui_band = band
     end
 
     if frame._zui_artbg then
-        local a = Col("accent")
         local line = frame:CreateTexture(nil, "OVERLAY", nil, 6)
         line._zui_own = true
-        line:SetColorTexture(a.r, a.g, a.b, 0.6)
+        line:SetColorTexture(1, 1, 1, 0.08)
         if ns.Pixel then ns.Pixel.Edge(line, "TOP", frame) else line:SetHeight(1) end
         frame._zui_line = line
     else

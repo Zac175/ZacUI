@@ -71,20 +71,23 @@ Modules.gamemenu = function()
         -- windows read as one family. (It used to be a bespoke darker
         -- mix, which is exactly the inconsistency that got reported.)
         band:SetTexture(FLAT)
+        -- (2026-11-10, Zac: "literally every menu popup etc needs to
+        -- match") the header ZacUI's own windows wear now: the window
+        -- itself (the band is kept for the anchors, not drawn), the title
+        -- in the light text, a white 8% rule
         local h = Col("headerBg")
-        band:SetVertexColor(h.r, h.g, h.b, h.a or 1)
+        band:SetVertexColor(h.r, h.g, h.b, 0)
         GameMenuFrame._zui_band = band
 
-        local ac = Col("accent")
         local line = GameMenuFrame:CreateTexture(nil, "OVERLAY", nil, 6)
         line._zui_own = true
-        line:SetColorTexture(ac.r, ac.g, ac.b, 0.6)
+        line:SetColorTexture(1, 1, 1, 0.08)
         line:SetPoint("TOPLEFT",  band, "BOTTOMLEFT",  0, 0)
         line:SetPoint("TOPRIGHT", band, "BOTTOMRIGHT", 0, 0)
         line:SetHeight(1)
     end
 
-    local a = Col("accent")
+    local a = Col("text")
     if GameMenuFrame.Header then
         StripTextures(GameMenuFrame.Header)
         local htext = GameMenuFrame.Header.Text
@@ -152,6 +155,15 @@ Modules.gamemenu = function()
     local function Paint(b)
         local fs = b._zui_fs or (b.GetFontString and b:GetFontString())
         local enabled = b:IsEnabled()
+        -- (2026-11-10) the one button look (UIF_Base SkinButton's plate):
+        -- the main button keeps the accent, a switched-off one is dim
+        if b._zui_plate and b._zPaint then
+            b._zActive = (b._zRole == "primary" and enabled) or nil
+            b._zDisabled = (not enabled) or nil
+            b._zHot, b._zP = nil, 0
+            b:_zPaint()
+            return
+        end
         local bgKey = (b._zRole == "primary") and "activeBg" or "buttonBg"
         b._zui_bgKey = bgKey
         local c = Col(enabled and bgKey or "buttonBg")
@@ -179,6 +191,17 @@ Modules.gamemenu = function()
     -- stopped working after the first time the menu was opened.
     local function OnEnter(self)
         if not self:IsEnabled() then return end
+        if self._zui_plate and self._zPaint then
+            -- (Blizzard clears the scripts on every open, the plate's hover
+            -- fade with them: lit at once here)
+            self._zHot, self._zP = true, 1
+            self:_zPaint()
+            if self._zRole == "danger" and self._zui_fs then
+                local t = GetColor("text", "red")
+                self._zui_fs:SetTextColor(t.r, t.g, t.b, 1)
+            end
+            return
+        end
         local h = Col("hoverBg")
         if self._zui_bg then self._zui_bg:SetVertexColor(h.r, h.g, h.b, 1) end
         local fs = self._zui_fs

@@ -860,12 +860,17 @@ local editPreviews = {}
 function HUD.EditPreview(on, get, set)
     editPreviews[#editPreviews + 1] = { on = on, get = get, set = set }
 end
-if ns.WatchEditMode then
-    ns.WatchEditMode(function(open)
+-- (2026-11-10, Zac: "the ability to show previews or hide them") it follows
+-- Edit Mode's "Previews" switch (ns.WatchEditPreviews: told true when Edit
+-- Mode opens with previews on or they are switched on, false when they are
+-- switched off and when it closes)
+local watch = ns.WatchEditPreviews or ns.WatchEditMode
+if watch then
+    watch(function(open)
         for _, p in ipairs(editPreviews) do
             local ok, want = pcall(p.on)
             if open then
-                if ok and want then
+                if ok and want and not p.held then
                     p.was = p.get() and true or false
                     pcall(p.set, true)
                     p.held = true

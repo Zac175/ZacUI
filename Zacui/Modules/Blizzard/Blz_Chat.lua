@@ -720,9 +720,28 @@ local function PanelRGB(d)
         local r, g, b = ns.ColorOf(d.panelColor)
         return r, g, b
     end
-    if Match() then return REF.bg[1], REF.bg[2], REF.bg[3] end
+    -- (2026-11-10, Zac: "bags are black chat is black ... and then zui to
+    -- compare") ONE PANEL COLOUR: the chat's panel is the window colour
+    -- every ZacUI window wears (the palette's, so a picked one follows),
+    -- at the chat's own opacity. It was the reference chat's blue-black
+    -- (REF.bg), which read as black beside the windows.
+    if Match() then
+        local w = ns.GetColor and ns.GetColor("ui", "windowBg")
+        if w and w.r then return w.r, w.g, w.b end
+        return REF.bg[1], REF.bg[2], REF.bg[3]
+    end
     return nil
 end
+-- THE PANEL'S OPACITY: the Chat page's slider, as saved. (2026-11-10: for
+-- one build an opacity nobody had picked read as solid; Zac: "chat needs
+-- to be see through" - so it is the saved value again, always.)
+local function PanelOpacity(d)
+    return tonumber(d.opacity) or REF.bgA
+end
+Chat.PanelOpacity = PanelOpacity
+-- the chat's solid pieces (the bar under it, the button column beside it):
+-- the windows' own opacity
+Chat.SOLID_A = 0.97
 local function EdgeRGBA(d)
     if type(d.panelBorderColor) == "table" then return ns.ColorOf(d.panelBorderColor) end
     if Match() then return REF.edge[1], REF.edge[2], REF.edge[3], REF.edge[4] end
@@ -731,10 +750,11 @@ end
 local function PaintPanel(bg, d)
     d = d or DB()
     -- (the chat part's look: Core_Look, part "chat")
-    SkinBackdrop(bg, "windowBg", d.opacity, "chat")
+    local pa = PanelOpacity(d)
+    SkinBackdrop(bg, "windowBg", pa, "chat")
     local r, g, b = PanelRGB(d)
     if r and bg._zui_cbg then
-        bg._zui_cbg:SetVertexColor(r, g, b, d.opacity)
+        bg._zui_cbg:SetVertexColor(r, g, b, pa)
     end
     local er, eg, eb, ea = EdgeRGBA(d)
     if er and not (bg._zui_borderTex and bg._zui_borderTex._zEdge) then
@@ -760,10 +780,14 @@ local function MakeBarLook(bar)
     bar._zPaint = function(self)
         local d = DB()
         local match = Match()
-        -- (the match pass: the bar is the panel itself - no fill of its own -
-        -- under the reference's 6% divider)
+        -- (2026-11-10, Zac: "the bottom part thats s g p r rw bags dur gold
+        -- etc. is not a more solid style") the bar is SOLID: the panel's
+        -- colour at the windows' own 97%, whatever the see-through panel
+        -- behind the messages is set to. (It had no fill of its own - the
+        -- see-through panel carried on behind it.)
         if match and type(d.barColor) ~= "table" then
-            self._zFill:SetVertexColor(0, 0, 0, 0)
+            local r, g, b = PanelRGB(d)
+            self._zFill:SetVertexColor(r, g, b, Chat.SOLID_A)
         else
             local r, g, b, a = ColorOr(d.barColor, "ui", "headerBg")
             self._zFill:SetVertexColor(r, g, b, a)
@@ -798,7 +822,7 @@ local function MakeHeadLook(head)
         elseif match then
             -- (the match pass: the panel carried on behind the tabs)
             local r, g, b = PanelRGB(d)
-            self._zFill:SetVertexColor(r, g, b, tonumber(d.opacity) or REF.bgA)
+            self._zFill:SetVertexColor(r, g, b, PanelOpacity(d))
         end
         if match and self._zBorder then
             local er, eg, eb, ea = EdgeRGBA(d)
@@ -928,7 +952,14 @@ local function PaintChipState(chip, selected, hover, news, d)
         -- (the match pass: every tab a tile of the panel's colour, 44%,
         -- the one under the mouse 55%, the one you are on 65%)
         local r, g, b = PanelRGB(d)
-        chip.fill:SetVertexColor(r, g, b, selected and REF.tabActiveA or hover and REF.tabHoverA or REF.tabIdleA)
+        if PanelOpacity(d) >= 0.9 then
+            -- (on a solid panel a tile of the panel's own colour is not
+            -- there at all: the tabs are the faint raised plates every
+            -- ZacUI tab is - idle, under the mouse, the one you are on)
+            chip.fill:SetVertexColor(1, 1, 1, selected and 0.10 or hover and 0.07 or 0.035)
+        else
+            chip.fill:SetVertexColor(r, g, b, selected and REF.tabActiveA or hover and REF.tabHoverA or REF.tabIdleA)
+        end
         chip.fill:Show()
     elseif selected or hover then
         local r, g, b = ColorOr(d.tabFillColor, "button", "hover")

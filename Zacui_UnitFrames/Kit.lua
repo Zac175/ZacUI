@@ -24,8 +24,13 @@
 --             the client lacks wears the classic kit
 --   forever   the blizzard kit with Forever's own fits and its round level
 --             badge (UI-HUD-UnitFrame-SmallCircle)
--- Party, raid, tank and boss frames keep ZacUI's layout in the look's bar
+-- Party, tank and boss frames keep ZacUI's layout in the look's bar
 -- texture and border (the reference draws no kit for party / raid either).
+-- THE RAID UNDER CLASSIC WOW UI (2026-11-10, Zac: "if users pick that style
+-- it uses those frames"): the old compact raid frames themselves, Zac's own
+-- OldRaidFrames, run in place of ZacUI's raid header (OldRaid.lua,
+-- Core.lua). The raid kit further down was the first try at it (a kit over
+-- ZacUI's raid) and is retired.
 --
 -- Wired like Portrait.lua: StyleElements is wrapped (this file loads after
 -- Portrait.lua, so the kit pass runs last), the frame's colours come from
@@ -439,7 +444,193 @@ function ns.FollowLookDefaults()
     local Z = _G.ZacUI
     local L = Z and Z.Look
     if not (L and L.FollowDefaults and ns.db and ns.defaults) then return false end
-    return L.FollowDefaults(ns.db, ns.defaults, UF_STOCK, "unitframes")
+    local followed = L.FollowDefaults(ns.db, ns.defaults, UF_STOCK, "unitframes")
+    -- (the raid's own stock values, Classic WoW UI only: THE RAID KIT)
+    if ns.FollowRaidKitDefaults then ns.FollowRaidKitDefaults() end
+    return followed
+end
+
+-- ----------------------------------------------------------------------------
+-- THE RAID KIT (Classic WoW UI only): the old compact raid frames.
+-- Three pieces, all latched with the look (a change of look is a reload):
+--   1. the stock defaults (RAID_STOCK): like UF_STOCK, a raid setting still
+--      on ZacUI's shipped value takes the old raid frames' value, one set by
+--      hand never moves; back under another look the values still on the
+--      stock one go back. Its own mark in the save (_zRaidKit), so the
+--      other game looks - whose raid frames are not these - never apply it.
+--   2. the fills (K.ApplyRaid, after every restyle): Raid-Bar-Hp-Fill and
+--      Raid-Bar-Resource-Fill, the old frames' own bar art.
+--   3. the gold group titles over each group's column (K.RaidTitles, called
+--      by Groups.lua's grid; K.RaidTitleH is the room it leaves for them).
+-- ----------------------------------------------------------------------------
+local RAID_HP_FILL  = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill"
+local RAID_RES_FILL = "Interface\\RaidFrame\\Raid-Bar-Resource-Fill"
+local RAID_TITLE_H  = 14
+local RAID_STOCK = {
+    { "raid", "width", 72 },
+    { "raid", "height", 36 },
+    { "raid", "spacing", 2 },
+    { "raid", "maxColumns", 4 },
+    { "raid", "power", true },
+    { "raid", "healthText", "percent" },
+    { "raid", "hpAnchor", "CENTER" },
+    { "raid", "nameClassColor", false },
+    { "raid", "bgColor", { 0, 0, 0, 0.6 } },
+    { "raid", "borderColor", { 0, 0, 0, 0.9 } },
+    { "raid", "leaderIcon", false },
+}
+K.RAID_STOCK = RAID_STOCK
+
+-- RETIRED the same night (2026-11-10, Zac on the kit: "the raid frames are
+-- not the same as old style ... grey super wide and not tall enough" - a
+-- kit over ZacUI's raid keeps every raid setting made by hand). Under
+-- Classic WoW UI the raid is now the old raid frames themselves
+-- (OldRaid.lua); this kit is off under every look, and what is left of it
+-- only puts back the values a save took from RAID_STOCK while it ran
+-- (ns.FollowRaidKitDefaults, the _zRaidKit mark).
+function K.RaidKit()
+    return false
+end
+
+local function RaidSame(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then
+        if type(a) == "number" then return math.abs(a - b) < 0.0005 end
+        return a == b
+    end
+    for k, v in pairs(a) do if not RaidSame(v, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+end
+local function RaidCopy(v)
+    if type(v) ~= "table" then return v end
+    local o = {}
+    for k, x in pairs(v) do o[k] = RaidCopy(x) end
+    return o
+end
+
+-- piece 1 (see above). Waits for the settled look like Look.FollowDefaults.
+function ns.FollowRaidKitDefaults()
+    local Z = _G.ZacUI
+    local L = Z and Z.Look
+    if not (L and L.Settled and L.Settled() and ns.db and ns.defaults) then return false end
+    local save, defaults = ns.db, ns.defaults
+    if type(save.raid) ~= "table" or type(defaults.raid) ~= "table" then return false end
+    -- ZacUI's shipped values, read once before anything is changed
+    for _, e in ipairs(RAID_STOCK) do
+        if e.zacui == nil then e.zacui = { v = RaidCopy(defaults.raid[e[2]]) } end
+    end
+    if K.RaidKit() then
+        for _, e in ipairs(RAID_STOCK) do
+            local k, stock = e[2], e[3]
+            defaults.raid[k] = RaidCopy(stock)
+            if save.raid[k] ~= nil and RaidSame(save.raid[k], e.zacui.v) then save.raid[k] = RaidCopy(stock) end
+        end
+        save._zRaidKit = true
+        return true
+    end
+    if save._zRaidKit then
+        for _, e in ipairs(RAID_STOCK) do
+            local k, stock = e[2], e[3]
+            if save.raid[k] ~= nil and RaidSame(save.raid[k], stock) then save.raid[k] = RaidCopy(e.zacui.v) end
+        end
+        save._zRaidKit = nil
+    end
+    return false
+end
+
+-- a raid slot (not party, not a tank frame): its cfg is ns.db.raid, or a
+-- preview proxy over it
+local function IsRaid(frame)
+    local cfg, raid = frame.cfg, ns.db and ns.db.raid
+    if not (cfg and raid) then return false end
+    if cfg == raid then return true end
+    local mt = getmetatable(cfg)
+    return (mt and mt.__index == raid) and true or false
+end
+
+-- piece 2: the old raid frames' fills, after every restyle
+function K.ApplyRaid(frame)
+    if not (frame and frame.isGroupUnit and K.RaidKit() and IsRaid(frame)) then return false end
+    if frame.Health and frame.Health.SetStatusBarTexture then frame.Health:SetStatusBarTexture(RAID_HP_FILL) end
+    if frame.Power and frame.Power.SetStatusBarTexture then frame.Power:SetStatusBarTexture(RAID_RES_FILL) end
+    frame._zRaidKit = true
+    return true
+end
+
+-- piece 3: the room over each group's column for its title (0 when the
+-- raid wears no kit, is not kept in groups, or grows upward - the old
+-- frames' titles sit over a column that grows down)
+function K.RaidTitleH(cfg, grouped)
+    if not (grouped and cfg and cfg.growth ~= "UP" and K.RaidKit()) then return 0 end
+    return RAID_TITLE_H
+end
+
+local raidTitleHost, raidTitleWatch
+local function RaidGroupCounts()
+    local counts = { 0, 0, 0, 0, 0, 0, 0, 0 }
+    if IsInRaid and IsInRaid() then
+        for i = 1, (GetNumGroupMembers and GetNumGroupMembers() or 0) do
+            local _, _, sub = GetRaidRosterInfo(i)
+            if sub and counts[sub] then counts[sub] = counts[sub] + 1 end
+        end
+    end
+    return counts
+end
+-- like the old frames: a group's title is there once someone is in the
+-- group (and for every group while the frames are unlocked for moving)
+function K.RefreshRaidTitles()
+    local host = raidTitleHost
+    if not host then return end
+    local counts = RaidGroupCounts()
+    local unlocked = ns.db and ns.db.locked == false
+    for g = 1, 8 do
+        local t = host.titles[g]
+        if t then t:SetShown(host.on and t.placed and (counts[g] > 0 or unlocked) and true or false) end
+    end
+end
+-- container: the raid's own (Groups.lua); spots[g] = { x, y } of group g's
+-- title box from the container's TOPLEFT (nil = no title for that group)
+function K.RaidTitles(container, cfg, spots)
+    if not container then return end
+    local on = type(spots) == "table"
+    if not raidTitleHost then
+        if not on then return end
+        local host = CreateFrame("Frame", nil, container)
+        host:SetAllPoints(container)
+        if host.EnableMouse then host:EnableMouse(false) end
+        host.titles = {}
+        raidTitleHost = host
+    end
+    local host = raidTitleHost
+    host.on = on
+    for g = 1, 8 do
+        local spot = on and spots[g] or nil
+        local t = host.titles[g]
+        if spot and not t then
+            t = host:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            t:SetText((_G.GROUP or "Group") .. " " .. g)
+            t:SetTextColor(1, 0.82, 0)
+            t:SetJustifyH("CENTER")
+            if t.SetWordWrap then t:SetWordWrap(false) end
+            host.titles[g] = t
+        end
+        if t then
+            t.placed = spot and true or false
+            if spot then
+                t:ClearAllPoints()
+                t:SetPoint("TOPLEFT", container, "TOPLEFT", spot[1], spot[2])
+                t:SetSize(cfg.width, RAID_TITLE_H)
+            end
+        end
+    end
+    if on and not raidTitleWatch then
+        raidTitleWatch = CreateFrame("Frame")
+        raidTitleWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
+        raidTitleWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
+        raidTitleWatch:SetScript("OnEvent", K.RefreshRaidTitles)
+    end
+    K.RefreshRaidTitles()
 end
 
 -- the frames wearing a kit, for the colours (weak; filled by Apply)
@@ -898,6 +1089,8 @@ do
             frame._zKitKind = G and kind or nil
             style(frame, ...)
             K.Apply(frame)
+            -- (the raid under Classic WoW UI: the old raid frames' fills)
+            K.ApplyRaid(frame)
         end
     end
     -- the game's colours on a kitted frame: Blizzard's green health and

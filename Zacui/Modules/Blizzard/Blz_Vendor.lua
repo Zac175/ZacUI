@@ -45,6 +45,12 @@ Modules.mail = function()
     if OpenMailFrame then
         SkinPanel(OpenMailFrame)
     end
+    -- (2026-11-10, Zac's Send Mail screenshot) the letter's own scroll bars
+    -- kept the game's stone art
+    if ns.SkinScrollFrame then
+        if SendMailScrollFrame then ns.SkinScrollFrame("SendMailScrollFrame") end
+        if OpenMailScrollFrame then ns.SkinScrollFrame("OpenMailScrollFrame") end
+    end
     if SendMailSubjectEditBox then SkinEditBox(SendMailSubjectEditBox) end
     if SendMailNameEditBox then SkinEditBox(SendMailNameEditBox) end
 

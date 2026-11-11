@@ -57,6 +57,10 @@ Kit.lua
 Glows.lua
 Units.lua
 Groups.lua
+# Classic WoW UI: the raid is the old raid frames (built from the
+# OldRaidFrames addon's main file by tools/orf/embed.py; asleep under every
+# other look and while that addon itself is loaded)
+OldRaid.lua
 Mock.lua
 Blizzard.lua
 ShoutAlert.lua

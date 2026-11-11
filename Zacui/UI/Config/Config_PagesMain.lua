@@ -2548,7 +2548,7 @@ RegisterPage("Chat", function(L)
     local function Tab_look(L)
         L:Card("Panel")
         local op = UI.Slider(L.current, { width = 220, min = 0, max = 100, step = 5,
-            value = math.floor((d.opacity or 0.75) * 100 + 0.5), label = "Background opacity",
+            value = math.floor(((ns.Chat and ns.Chat.PanelOpacity and ns.Chat.PanelOpacity(d)) or d.opacity or 0.75) * 100 + 0.5), label = "Background opacity",
             format = function(v) return v .. "%" end,
             onChange = function(v)
                 d.opacity = v / 100

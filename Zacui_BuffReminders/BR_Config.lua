@@ -95,7 +95,7 @@ local function Colour(L, sec, key, label, default)
                 return
             end
             t.colors = t.colors or {}
-            t.colors[key] = { r = r, g = g, b = b, a = a or 1 }
+            t.colors[key] = { r = r, g = g, b = b, a = a or 1, pick = true }
         end,
         default = function()
             local d = default and default() or BR.DEFAULTS[sec].colors[key]

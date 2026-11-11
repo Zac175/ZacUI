@@ -84,9 +84,22 @@ B.BAR_COLOR_DEFAULTS = {
     frostOil = { r = 0.4, g = 0.8, b = 1, a = 1 },
     enchanted = { r = 0, g = 1, b = 0.5, a = 1 },
 }
+-- (2026-11-10) the bar backgrounds Readycheck shipped before both addons
+-- lightened, copied over by the import as saved colours: one still exactly
+-- that old value was never picked and is passed over (a colour picked on
+-- the bar's page carries pick = true and is kept)
+local OLD_BAR_BG = { { 0.08, 0.08, 0.08 }, { 0.08, 0.08, 0.10 }, { 0.08, 0.06, 0.08 } }
+local function OldBarBg(c)
+    if c.pick then return false end
+    for _, o in ipairs(OLD_BAR_BG) do
+        if math.abs((c.r or c[1] or 0) - o[1]) < 0.006 and math.abs((c.g or c[2] or 0) - o[2]) < 0.006
+            and math.abs((c.b or c[3] or 0) - o[3]) < 0.006 then return true end
+    end
+    return false
+end
 function B.BarColor(cfg, key)
     local c = CB.T(cfg, "colors") and cfg.colors[key]
-    if type(c) == "table" then return ns.ColorOf(c) end
+    if type(c) == "table" and not (key == "frameBackground" and OldBarBg(c)) then return ns.ColorOf(c) end
     if key == "frameBackground" then
         local t = ns.GetColor and ns.GetColor("ui", "windowBg") or { r = 0.08, g = 0.08, b = 0.08, a = 0.95 }
         return t.r, t.g, t.b, t.a or 0.95

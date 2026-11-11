@@ -37,6 +37,29 @@ local C = {
 }
 UI.C = C
 
+-- (2026-11-10, Zac: "audit the both addons ... random inconsistant things")
+-- THIS TOOLKIT'S WINDOW CHROME FOLLOWS ZACUI'S PALETTE. The table above was
+-- a copy of the old near-black one, so the one window built from it (the
+-- unit frame positions dialog) stayed dark after every other window
+-- lightened. The chrome keys are read from ZacUI's palette each time they
+-- are used; the copy above is what they fall back to without ZacUI. The
+-- frames on screen (panel, header, border, the text) keep their own.
+do
+    local LIVE = { window = { "ui", "windowBg" }, card = { "ui", "cardBg" }, btn = { "button", "bg" },
+        btnHover = { "button", "hover" }, btnPress = { "button", "pressed" }, active = { "button", "active" },
+        activeHover = { "button", "activeHover" }, checkBg = { "checkbox", "bg" } }
+    local static = {}
+    for k in pairs(LIVE) do static[k] = C[k] C[k] = nil end
+    setmetatable(C, { __index = function(_, k)
+        local pair = LIVE[k]
+        if not pair then return nil end
+        local Z = ns.ZUI or _G.ZacUI
+        local c = Z and Z.GetColor and Z.GetColor(pair[1], pair[2])
+        if type(c) == "table" and c.r then return { c.r, c.g, c.b, static[k][4] or c.a or 1 } end
+        return static[k]
+    end })
+end
+
 local function unpackc(t) return t[1], t[2], t[3], t[4] or 1 end
 
 -- Current UI font (respects config)
@@ -154,6 +177,21 @@ function UI:Button(parent, text, w, h, onClick)
     b:SetScript("OnMouseDown", function(s) s:SetBackdropColor(unpackc(C.btnPress)) end)
     b:SetScript("OnMouseUp", function(s) s:SetBackdropColor(unpackc(s._active and C.activeHover or C.btnHover)) end)
     if onClick then b:SetScript("OnClick", onClick) end
+    -- (2026-11-10) ZacUI's one button look, when its framework is up: the
+    -- raised plate, the accent edge and label while active
+    local Z = ns.ZUI or _G.ZacUI
+    if Z and Z.UI and Z.UI.PlateLook then
+        b:SetBackdropColor(0, 0, 0, 0)
+        b:SetBackdropBorderColor(0, 0, 0, 0)
+        hl:SetAlpha(0)
+        for _, ev in ipairs({ "OnEnter", "OnLeave", "OnMouseDown", "OnMouseUp" }) do b:SetScript(ev, nil) end
+        function b:SetActive(on)
+            self._active = on and true or false
+            self._zActive = self._active or nil
+            self:_zPaint()
+        end
+        Z.UI.PlateLook(b, b.text)
+    end
     return b
 end
 
@@ -864,6 +902,18 @@ function UI:Window(name, title, w, h)
 
     local titleFS = self:FS(header, 14)
     titleFS:SetPoint("LEFT", 10, art and 2 or 0)
+    -- (2026-11-10) ZacUI's mark at the left of the title, as on every
+    -- other ZacUI window
+    if flat and ZUI.TEX_ICON then
+        local mark = header:CreateTexture(nil, "ARTWORK")
+        mark:SetSize(16, 16)
+        mark:SetPoint("LEFT", 10, 0)
+        mark:SetTexture(ZUI.TEX_ICON)
+        if ZUI.SharpenIcon then ZUI.SharpenIcon(mark) end
+        titleFS:ClearAllPoints()
+        titleFS:SetPoint("LEFT", mark, "RIGHT", 7, 0)
+        f.titleMark = mark
+    end
     titleFS:SetText(title)
     if flat then titleFS:SetTextColor(1, 1, 1, 1) else titleFS:SetTextColor(unpackc(C.headerText)) end
 

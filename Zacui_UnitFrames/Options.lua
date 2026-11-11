@@ -434,6 +434,22 @@ local function FramePicker(L)
     end
     L:Desc("The settings marked \"this frame\" below are for the frame picked here, and the preview shows it.")
     L:EndCard()
+    -- (2026-11-11) Under Classic WoW UI the raid is the old raid frames
+    -- (OldRaid.lua), which have their own options: say so here, at the top
+    -- of every tab, instead of leaving a page of settings that do nothing.
+    if key == "raid" and ns.OldRaidActive and ns.OldRaidActive() then
+        L:Card("Classic raid frames")
+        local own = ns.OldRaid and ns.OldRaid.Started and ns.OldRaid.Started()
+        L:Desc("With the Classic WoW UI style your raid uses the old raid frames. The raid settings on this page "
+            .. "are for ZacUI's own raid frames and come back into use when you pick another style.")
+        if own and ns.OldRaid.Slash then
+            Button(L, "Old raid frame options", 180, function() ns.OldRaid.Slash("") end,
+                "Opens the old raid frames' own options (size, class colours, pets, tanks, buffs and debuffs). Same as /orf.")
+        else
+            L:Desc("The OldRaidFrames addon is loaded and is drawing them: its options are under /orf.")
+        end
+        L:EndCard()
+    end
     return key, CfgOf(key)
 end
 
@@ -1646,6 +1662,18 @@ do
             end
             return list
         end
+        -- one group's members and samples (not its drag handle)
+        local function GroupSample(kind)
+            local out = {}
+            local f = ns.frames and ns.frames[kind]
+            for _, h in ipairs(f and f.headers or {}) do
+                for _, child in ipairs({ h:GetChildren() }) do out[#out + 1] = child end
+            end
+            local mf, n = nil, 0
+            if ns.MockFrames then mf, n = ns.MockFrames(kind) end
+            for i = 1, n or 0 do out[#out + 1] = mf[i] end
+            return out
+        end
         ZUI.EditModeProviders[#ZUI.EditModeProviders + 1] = function()
             if not (ns.db and ns.frames and ns.ApplySettings) then return nil end
             return { {
@@ -1671,6 +1699,12 @@ do
                 end,
                 frames = EditFrames,
                 content = EditFrames,
+                -- (2026-11-11) the party's and the raid's samples can each
+                -- be switched off on their own (Edit Mode's previewParts)
+                previewParts = {
+                    { key = "party", label = "party preview", content = function() return GroupSample("party") end },
+                    { key = "raid", label = "raid preview", content = function() return GroupSample("raid") end },
+                },
                 -- every frame's spot, for Edit Mode's undo and Cancel
                 snapshot = function()
                     local out = {}

@@ -854,7 +854,7 @@ local function PaintRail(d)
     -- (2026-11-08, Zac: "add a background to these buttons") the column
     -- has the chat's own panel colour behind it - the panel's fill exactly
     -- as painted, so chat and rail read as one box
-    local a = tonumber(d.opacity) or 0.65
+    local a = (Chat.PanelOpacity and Chat.PanelOpacity(d)) or tonumber(d.opacity) or 0.65
     local cf = DEFAULT_CHAT_FRAME
     local pfill = cf and cf._zui_chatbg and cf._zui_chatbg._zui_cbg
     if pfill and pfill.GetVertexColor then
@@ -862,6 +862,10 @@ local function PaintRail(d)
         if Num(pr) and Num(pg) and Num(pb) then r, g, b = pr, pg, pb end
         if Num(pa) then a = pa end
     end
+    -- (2026-11-10, Zac: "the sidebar ... is not a more solid style") the
+    -- column is SOLID like the bar under the chat: the panel's colour at
+    -- the windows' own 97%, not the see-through panel's opacity
+    if Chat.SOLID_A and (Chat.Match == nil or Chat.Match()) then a = Chat.SOLID_A end
     rail.fill:SetVertexColor(r, g, b, a)
     local er, eg, eb, ea = 1, 1, 1, 0.06
     if Chat.EdgeRGBA then

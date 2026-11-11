@@ -475,10 +475,17 @@ local Tiles = {}
 Meter.Tiles = Tiles
 
 local TILE_H, TILE_GAP, COL_GAP, PAD_X, PAD_TOP = 26, 4, 4, 8, 6
-local TILE_BG = { 0.12, 0.12, 0.12, 0.8 }
+-- (2026-11-10, the one look: the page is the windows' colour and a tile the
+-- raised button grey on it; they were the reference's near-black 0.03 page
+-- with 0.12 tiles, which read as black beside every other ZacUI window)
+local TILE_BG = { 0.160, 0.160, 0.160, 0.8 }
 local TILE_HOVER_LIFT, TILE_HOVER_A = 0.06, 0.18     -- colour +0.06, alpha +0.18
 local FOOT_BG_A, FOOT_HOVER_LIFT, FOOT_HOVER_A = 0.5, 0.04, 0.7   -- x the tile alpha
-local PAGE_BG = { 0.03, 0.03, 0.03, 0.95 }
+local function PageBG()
+    local c = ns.GetColor and ns.GetColor("ui", "windowBg")
+    if c and c.r then return c.r, c.g, c.b, 0.97 end
+    return 0.110, 0.110, 0.110, 0.97
+end
 local BAR_W = 2                    -- the accent bar, in screen pixels
 local ICON_INSET, ICON_GAP_R = 6, 5
 -- the icon's box is the reference's (the tile less 2); ZacUI's glyphs fill
@@ -657,7 +664,7 @@ local function EnsurePage(win)
     page:EnableMouse(true)
     page.bg = page:CreateTexture(nil, "BACKGROUND")
     page.bg:SetAllPoints()
-    page.bg:SetColorTexture(PAGE_BG[1], PAGE_BG[2], PAGE_BG[3], PAGE_BG[4])
+    page.bg:SetColorTexture(PageBG())
     -- measures labels for the column choice (never shown)
     page.measure = page:CreateFontString(nil, "OVERLAY")
     Font(page.measure, LABEL_PT)
@@ -936,9 +943,9 @@ function Tiles.Show(win)
     page:SetPoint("BOTTOMRIGHT", win.rowframe, "BOTTOMRIGHT", 0, 0)
     page.view, page.scroll = nil, 0
     -- (Classic look) the window's own tile shows through; ZacUI's look: the
-    -- reference's near-black page
+    -- windows' colour
     if Meter.IsClassicLook and Meter.IsClassicLook() then page.bg:SetColorTexture(0, 0, 0, 0)
-    else page.bg:SetColorTexture(PAGE_BG[1], PAGE_BG[2], PAGE_BG[3], PAGE_BG[4]) end
+    else page.bg:SetColorTexture(PageBG()) end
     win.rowframe:Hide()
     page:Show()
     Tiles.Layout(win)

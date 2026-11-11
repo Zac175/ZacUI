@@ -269,6 +269,7 @@ local function CursorUI()
     return (x or 0) / s, (y or 0) / s
 end
 
+local WOBBLE = 6        -- UI units a drag must travel before the box moves (Edit Mode)
 local function ManualStart(h)
     local l, b, w, ht = h:GetRect()
     if not (l and b and w and ht) then return end
@@ -286,7 +287,12 @@ local function ManualStep(h)
     local cx, cy = CursorUI()
     local dx, dy = cx - st.cx, cy - st.cy
     if not st.moved then
-        if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return end
+        -- (2026-11-10, Zac: "my target frame moved and is in the wrong spot")
+        -- A press that wobbles a few pixels is a click, not a move: until
+        -- the cursor has gone WOBBLE from where the drag began the box
+        -- stays put - before, half a pixel was enough, and snapping then
+        -- pulled the box up to 8 onto the nearest edge.
+        if math.abs(dx) < WOBBLE and math.abs(dy) < WOBBLE then return end
         st.moved = true
     end
     if IsShiftKeyDown() then
@@ -512,7 +518,23 @@ function Kit.Dress(h, spec)
         self:StopMovingOrSizing()
         if rawget(self, "_zManual") then
             ManualStep(self)
+            local st = rawget(self, "_zManual")
+            local went = st.moved
+            if not went then
+                -- (moved by its owner rather than by the cursor: it did go)
+                local l, b = self:GetRect()
+                went = l and b and (math.abs(l * st.k - st.l) > 0.5 or math.abs(b * st.k - st.b) > 0.5) or false
+            end
             rawset(self, "_zManual", nil)
+            if not went then
+                -- it never left its spot: nothing to save, nothing changed -
+                -- the box goes back onto its frame and the press was a click
+                Kit.Refresh(self)
+                Watch(self)
+                local edit = Kit.edit
+                if edit and edit.select then edit.select(self) end
+                return
+            end
             local edit = Kit.edit
             if edit and edit.dropped then edit.dropped(self) end
         end

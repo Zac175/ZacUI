@@ -1856,6 +1856,9 @@ function PD.LayoutButton(L)
         b:SetShown(L:IsShown())
         L:HookScript("OnShow", function() b:Show() Fill() end)
         L:HookScript("OnHide", function() b:Hide() Fill() end)
+        -- (and when the button gets its real width - its label is fitted
+        -- after it is made - so the slot never stays narrower than it)
+        b:HookScript("OnSizeChanged", Fill)
         Fill()
     else
         b:SetPoint("TOPRIGHT", L, "TOPRIGHT", -2, -2)

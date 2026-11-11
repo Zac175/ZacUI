@@ -99,6 +99,8 @@ local function DB()
     if d.grid == nil then d.grid = true end
     if d.snap == nil then d.snap = true end
     d.parked = d.parked or {}                 -- [key] = true: hidden in edit mode
+    if d.previews == nil then d.previews = true end   -- what is under the boxes is drawn
+    d.noPreview = d.noPreview or {}           -- [key] = true: this one's is not
     return d
 end
 
@@ -455,6 +457,9 @@ local function KeepFaded()
     end
 end
 
+local PreviewHidden   -- forward: this frame's preview is switched off (PREVIEWS below)
+local FadeHiddenParts -- forward: fades the parts of a box switched off one by one (PARTS below)
+
 -- One element out of the way, or back. Remembered for the next pass.
 local function SetParked(m, park)
     local d = DB()
@@ -466,8 +471,89 @@ local function SetParked(m, park)
         d.parked[m.key] = nil
         UnfadeContent(m)
         ShowMovable(m)
+        if PreviewHidden(m) then FadeContent(m) else FadeHiddenParts(m) end
     end
 end
+
+-- PREVIEWS (2026-11-10, Zac: "with the edit mode can we have the ability
+-- to show previews or hide them and for each individual thing"). What is
+-- drawn under a box - the real frame, or the sample a part shows while
+-- Edit Mode is open (a HUD with every icon on) - is its preview. The top
+-- bar's "Previews" button switches all of them (off: just the boxes), a
+-- picked box's "Hide preview" / "Show preview" switches that one; both
+-- are remembered. A hidden preview is the same fade a hidden frame gets,
+-- with its box left up, so it can still be dragged. Parts that only show
+-- a sample for the pass (ns.WatchEditPreviews) are told when the switch
+-- for all changes.
+local previewWatchers = {}
+function ns.WatchEditPreviews(fn) previewWatchers[#previewWatchers + 1] = fn end
+local function NotifyPreviews(on)
+    for _, fn in ipairs(previewWatchers) do pcall(fn, on and true or false) end
+end
+local function HasPreview(m) return #ContentOf(m) > 0 end
+PreviewHidden = function(m)
+    local d = DB()
+    return d.previews == false or d.noPreview[m.key] == true
+end
+-- PARTS (2026-11-11). One box can stand for several things with a sample
+-- each - the unit frames' box holds the party's and the raid's samples -
+-- and "for each individual thing" means each of those. A movable may list
+-- them: previewParts = { { key = , label = , content = function } }. Each
+-- gets its own "Hide ... / Show ..." on the picked box, remembered under
+-- "<movable>:<part>"; the box's own Hide preview still hides all of it.
+local function PartsOf(m)
+    return type(m.previewParts) == "table" and m.previewParts or {}
+end
+local function PartKey(m, part) return m.key .. ":" .. tostring(part.key) end
+local function PartFrames(part)
+    local ok, list = pcall(part.content)
+    if not (ok and type(list) == "table") then return {} end
+    local out = {}
+    for _, item in ipairs(list) do
+        if type(item) == "table" and rawget(item, "union") then
+            for _, f in ipairs(item.union) do out[#out + 1] = f end
+        elseif item then
+            out[#out + 1] = item
+        end
+    end
+    return out
+end
+local function PartHidden(m, part)
+    return DB().noPreview[PartKey(m, part)] == true
+end
+FadeHiddenParts = function(m)
+    for _, part in ipairs(PartsOf(m)) do
+        if PartHidden(m, part) then
+            for _, f in ipairs(PartFrames(part)) do
+                if f.SetAlpha and f.GetAlpha then
+                    if faded[f] == nil then faded[f] = f:GetAlpha() or 1 end
+                    f:SetAlpha(0)
+                end
+            end
+        end
+    end
+end
+local function ApplyPreview(m)
+    if IsParked(m.key) then return end      -- (hidden altogether: already faded)
+    if PreviewHidden(m) then FadeContent(m) else UnfadeContent(m) FadeHiddenParts(m) end
+end
+local function SetPartPreview(m, part, on)
+    DB().noPreview[PartKey(m, part)] = (not on) and true or nil
+    ApplyPreview(m)
+end
+local function ApplyPreviews()
+    for _, m in ipairs(current) do ApplyPreview(m) end
+end
+local function SetPreviews(on)
+    DB().previews = on and true or false
+    NotifyPreviews(on)
+    ApplyPreviews()
+end
+local function SetPreview(m, on)
+    DB().noPreview[m.key] = (not on) and true or nil
+    ApplyPreview(m)
+end
+ns.EditPreviewsOn = function() return active and DB().previews ~= false end
 
 local BuildTop   -- forward: the bar across the top (built on first entry)
 local LayoutTop  -- forward: what fits on it, measured (status, search box)
@@ -974,6 +1060,28 @@ local function Menu(m, anchor)
         func = function() if m.reset then m.reset(true) ES.Check() end end }
     items[#items + 1] = { text = "Hide while editing",
         func = function() SetParked(m, true) FillBar() end }
+    -- (2026-11-11) its preview, and each thing in it with a sample of its
+    -- own: here as well as on a picked box, because some frames (the unit
+    -- frames) are picked through their own handles and never get that bar
+    if HasPreview(m) and DB().previews ~= false and not IsParked(m.key) then
+        if DB().noPreview[m.key] then
+            items[#items + 1] = { text = "Show preview", func = function() SetPreview(m, true) end }
+        else
+            items[#items + 1] = { text = "Hide preview",
+                tooltip = "What is under its box is not drawn while Edit Mode is open; the box stays. Remembered.",
+                func = function() SetPreview(m, false) end }
+            for _, part in ipairs(PartsOf(m)) do
+                local label = tostring(part.label or part.key)
+                if PartHidden(m, part) then
+                    items[#items + 1] = { text = "Show " .. label, func = function() SetPartPreview(m, part, true) end }
+                else
+                    items[#items + 1] = { text = "Hide " .. label,
+                        tooltip = "The " .. label .. " is not drawn while Edit Mode is open; the rest is. Remembered.",
+                        func = function() SetPartPreview(m, part, false) end }
+                end
+            end
+        end
+    end
     UI.ContextMenu(items, anchor and { anchor = anchor } or nil)
     return true
 end
@@ -1387,6 +1495,7 @@ RefreshBar = function()
         top.undo:SetDisabled(not ES.CanUndo())
         top.grid:SetActive(DB().grid and true or false)
         top.snap:SetActive(DB().snap and true or false)
+        if top.prev then top.prev:SetActive(DB().previews ~= false) end
         top.list:SetActive(bar:IsShown() and true or false)
         local anyRM = false
         for _, m in ipairs(current) do if IsRaidMod(m) then anyRM = true break end end
@@ -1445,7 +1554,7 @@ LayoutTop = function()
     Put(top.save, 6) Put(top.cancel, 6) Put(top.undo, 16)
     Put(top.list, 6)
     if top.rm:IsShown() then Put(top.rm, 6) end
-    Put(top.snap, 6) Put(top.grid, 16)
+    Put(top.snap, 6) Put(top.grid, 6) Put(top.prev, 16)
     local left = 14 + 3 + 9 + math.ceil(top.title:GetStringWidth() or 80)
     local st = top._status or { "", "" }
     local tries = { { st[1], true }, { st[2], true }, { "", true }, { st[2], false }, { "", false } }
@@ -1540,6 +1649,13 @@ BuildTop = function()
             ApplyFilter()
             FillBar()
         end)
+    top.prev = Btn("Previews", 72, "Previews",
+        "What is under the boxes: the real frames, and the samples drawn while Edit Mode is open (a HUD with "
+            .. "every icon on). Off leaves just the boxes. One frame's own can be switched from its actions.", function()
+            SetPreviews(DB().previews == false)
+            if Kit.selected then Select(Kit.selected) end
+            RefreshBar()
+        end)
     top.grid = Btn("Grid", 52, "Grid", "The grid under everything, one pixel wide.", function()
         local d = DB()
         d.grid = not d.grid
@@ -1607,6 +1723,26 @@ local function ActsFor(m)
     end
     out[#out + 1] = { "Hide", true, function() SetParked(m, true) FillBar() end,
         "Out of the way while you place the rest. The Frames button on the top bar brings it back." }
+    if HasPreview(m) and DB().previews ~= false then
+        if DB().noPreview[m.key] then
+            out[#out + 1] = { "Show preview", true, function() SetPreview(m, true) Select(Kit.selected) end,
+                "Draw what is under this box again." }
+        else
+            out[#out + 1] = { "Hide preview", true, function() SetPreview(m, false) Select(Kit.selected) end,
+                "Just this frame's box: what is under it is not drawn while Edit Mode is open. Remembered." }
+            -- each thing in the box that has a sample of its own
+            for _, part in ipairs(PartsOf(m)) do
+                local label = tostring(part.label or part.key)
+                if PartHidden(m, part) then
+                    out[#out + 1] = { "Show " .. label, true, function() SetPartPreview(m, part, true) Select(Kit.selected) end,
+                        "Draw the " .. label .. " again." }
+                else
+                    out[#out + 1] = { "Hide " .. label, true, function() SetPartPreview(m, part, false) Select(Kit.selected) end,
+                        "The " .. label .. " is not drawn while Edit Mode is open; the rest of the box is. Remembered." }
+                end
+            end
+        end
+    end
     if link then
         out[#out + 1] = { "Detach", true, function() ES.Detach(m.key) ES.Check() RefreshBar() end,
             "It stops following the frame it is attached to." }
@@ -1835,6 +1971,8 @@ local function Enter(opts)
     if top.hint then top.hint:Show() end
     RefreshBar()
     NotifyWatchers(true)
+    NotifyPreviews(DB().previews ~= false)
+    ApplyPreviews()
     if focus then ns.EditModeFocus(focus) end
 end
 
@@ -1925,6 +2063,7 @@ Exit = function(mode)
         ns.OpenConfig()
     end
     NotifyWatchers(false)
+    NotifyPreviews(false)
 end
 
 local function Toggle()

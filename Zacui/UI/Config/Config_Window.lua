@@ -1280,12 +1280,14 @@ local function Build()
             if not (H and H.Callout and window:IsShown()) then return end
             if ns.Tutorial and ns.Tutorial.TourActive and ns.Tutorial.TourActive() then return end
             if InCombatLockdown and InCombatLockdown() then return end
+            -- (left of the window, outside it - 2026-11-10: on the right
+            -- the bubble sat over the page's tab row)
             H.Callout("cfg_editmode", window.editButton,
-                "Edit Mode shows every ZacUI frame at once over a grid. Drag them where you want them.", "RIGHT")
+                "Edit Mode shows every ZacUI frame at once over a grid. Drag them where you want them.", "LEFT")
             for _, row in ipairs(rowPool) do
                 if row:IsShown() and row._zPower and row._zPower:IsShown() then
                     H.Callout("cfg_power", row._zPower, "Each part has its own switch. Off means not loaded at all, "
-                        .. "and it asks before the reload.", "RIGHT")
+                        .. "and it asks before the reload.", "LEFT")
                     break
                 end
             end

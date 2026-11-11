@@ -189,7 +189,7 @@ local SET_TEXT = {
 -- palette's shipped value.
 function UI.SCol(cat, key)
     local p = ZacUIDB and ZacUIDB.palette and ZacUIDB.palette[cat]
-    if p and p[key] then return p[key] end
+    if p and p[key] and not (ns.StaleColor and ns.StaleColor(cat, key, p[key])) then return p[key] end
     local a = SET_TEXT[cat] and SET_TEXT[cat][key]
     if a then return { r = 1, g = 1, b = 1, a = a } end
     return GetColor(cat, key)
@@ -517,7 +517,7 @@ function UI.Hover(frame, normalKey, hoverKey, cat)
     frame._zNormalKey, frame._zHoverKey, frame._zHoverCat = normalKey, hoverKey, cat
     frame:HookScript("OnEnter", function(self)
         -- the settings window's widgets paint their own hover (_zSet)
-        if rawget(self, "_zSet") then return end
+        if rawget(self, "_zSet") or rawget(self, "_zPlateLook") or rawget(self, "_zOneLook") then return end
         if self._zDisabled or self._zActive then return end
         local c = GetColor(self._zHoverCat, self._zHoverKey)
         if self._zFill then self._zFill:SetVertexColor(c.r, c.g, c.b, c.a or 1) end
@@ -527,7 +527,7 @@ function UI.Hover(frame, normalKey, hoverKey, cat)
         end
     end)
     frame:HookScript("OnLeave", function(self)
-        if rawget(self, "_zSet") then return end
+        if rawget(self, "_zSet") or rawget(self, "_zPlateLook") or rawget(self, "_zOneLook") then return end
         if self._zDisabled or self._zActive then return end
         -- a tab's resting label is grey, not the text default
         if self._zTab then return self:_zPaint() end
@@ -658,7 +658,9 @@ end
 local function PaintSetButton(self)
     local t = self._zDisabled and 0 or (self._zP or 0)
     local fs = self._zText
-    if self._zTab then
+    -- (a tab outside the settings window is a plain plate at its own
+    -- height: the settings tab's inset plate is cut for a 40 px strip)
+    if self._zTab and rawget(self, "_zSet") then
         if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
         Strips(self, 0, 0, 0, 0)
         -- (2026-11-09) the open tab is a raised plate with the accent line
@@ -734,6 +736,19 @@ local function PaintSetButton(self)
     end
 end
 UI.PaintSetButton = PaintSetButton
+-- The same look on a button this file did not make (a module's own, or
+-- another toolkit's): the plate, its hover fade, the accent edge and label
+-- while b._zActive, half strength while b._zDisabled. fs: its label.
+-- The button keeps its own size, font and scripts; :_zPaint() repaints it.
+function UI.PlateLook(b, fs)
+    if not b or rawget(b, "_zPlateLook") or rawget(b, "_zSet") then return b end
+    b._zText = b._zText or fs
+    b._zPlateLook = true
+    b._zPaint = PaintSetButton
+    UI.FadeHover(b)
+    b:_zPaint()
+    return b
+end
 
 -- The 0.1 s hover fade: an OnUpdate only while it moves.
 local function FadeStep(self, dt)
@@ -762,7 +777,17 @@ end
 
 local function PaintButton(self)
     if rawget(self, "_zSet") then return PaintSetButton(self) end
-    if self._zTab then return PaintTab(self) end
+    if self._zTab and not rawget(self, "_zPlateLook") then return PaintTab(self) end
+    -- (2026-11-10, Zac: "so many buttons ... not updated to match the new
+    -- buttons") ONE BUTTON LOOK: a button anywhere - a bag, the auction
+    -- house, a popup, a HUD's panel - is the settings window's raised plate
+    -- at its own size. The flat fill below stays only for a caller that
+    -- asks for it (opts.flat).
+    if rawget(self, "_zPlateLook") then
+        -- (a tab: the open one wears the accent edge and label, no line under it)
+        if self._zUnderline then self._zUnderline:Hide() end
+        return PaintSetButton(self)
+    end
     local key = self._zNormalKey
     if self._zDisabled then
         key = "disabled"
@@ -845,7 +870,11 @@ function UI.Button(parent, text, opts)
     -- click on a dark button reads as a missed click. (The settings
     -- window's buttons fade between two looks instead, as EllesmereUI's
     -- do, and have no pushed state.)
-    if set then
+    -- (tabs too since 2026-11-10 22:40: every tab strip - the auction
+    -- house's, a bag's - is the same plate, the open one in the accent)
+    local plate = (not set) and (not opts.flat)
+    if plate then b._zPlateLook = true end
+    if set or plate then
         UI.FadeHover(b)
     else
         local hover = b:CreateTexture(nil, "HIGHLIGHT")
@@ -929,8 +958,12 @@ function UI.CloseX(parent, size, onClick)
     b._zB = b._zA
     b._zSet = UI._zSettings or nil
     b._zPaint = function(self)
-        if rawget(self, "_zSet") then
-            -- the settings window: white, 0.53 at rest, full under the mouse
+        -- (2026-11-10) ONE CLOSE BOX: white, 0.53 at rest, full under the
+        -- mouse - the settings window's, on every window and row. A close
+        -- colour picked on the Colours page keeps that colour.
+        local pk = ZacUIDB and ZacUIDB.palette and ZacUIDB.palette.button
+        local picked = pk and (pk.xNormal or (pk.xHover and not (ns.StaleColor and ns.StaleColor("button", "xHover", pk.xHover))))
+        if rawget(self, "_zSet") or not picked then
             local a = self._zHot and 1 or S.DIM_A
             self._zA:SetVertexColor(1, 1, 1, a)
             return
@@ -1009,7 +1042,10 @@ local function PaintSetCheck(self)
 end
 
 local function PaintCheck(self)
-    if rawget(self, "_zSet") then return PaintSetCheck(self) end
+    -- (2026-11-10, Zac: "literally every menu popup etc needs to match")
+    -- ONE CHECKBOX: the settings window's box and accent square on a
+    -- checkbox anywhere (_zOneLook), at its own size
+    if rawget(self, "_zSet") or rawget(self, "_zOneLook") then return PaintSetCheck(self) end
     local bg, bk
     if self._zHot and not self._zOff then
         bg, bk = GetColor("button", "hover"), GetColor("checkbox", "hoverBorder")
@@ -1039,8 +1075,9 @@ function UI.Checkbox(parent, label, checked, onToggle, opts)
 
     local check = box:CreateTexture(nil, "ARTWORK")
     check._zui_own = true
-    if set then
-        -- EllesmereUI's tick: a solid square, CHECK_PAD in from the edge
+    -- the tick: a solid square, CHECK_PAD in from the edge (the settings
+    -- window's; everywhere since 2026-11-10 - opts.art keeps the drawn tick)
+    if set or not opts.art then
         check:SetTexture(FLAT)
         check:SetPoint("TOPLEFT", box, "TOPLEFT", S.CHECK_PAD, -S.CHECK_PAD)
         check:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -S.CHECK_PAD, S.CHECK_PAD)
@@ -1054,6 +1091,7 @@ function UI.Checkbox(parent, label, checked, onToggle, opts)
     host._zFill, host._zBorder = box._zFill, box._zBorder
     host._zCheck = check
     host._zSet = set or nil
+    host._zOneLook = (not set and not opts.art) or nil
     -- (a whole box-and-label: two of them can share a settings row)
     host._zHalf = set or nil
     host._zText = UI.Font(host, opts.size or F.LABEL, { text = label })
@@ -1474,17 +1512,24 @@ function UI.Slider(parent, opts)
 
     -- Label and value ride ABOVE the track (bottom-anchored), so the
     -- thumb never slides through a line of text.
+    -- (2026-11-10, Zac: "literally every menu popup etc needs to match")
+    -- ONE SLIDER LOOK: the settings window's track and grip - a 4 px pill,
+    -- the part up to the grip a pill in the accent, a round accent grip
+    -- with a black edge - under this slider's own layout (name and value
+    -- above the track). The old box-and-block parts stay for the code that
+    -- reads them and are not drawn.
     local track = CreateFrame("Frame", nil, host)
-    track:SetHeight(M.TRACK_H)
-    track:SetPoint("BOTTOMLEFT", 0, 5)
-    track:SetPoint("BOTTOMRIGHT", 0, 5)
+    track:SetHeight(S.TRACK_H)
+    track:SetPoint("BOTTOMLEFT", 0, 6)
+    track:SetPoint("BOTTOMRIGHT", 0, 6)
     UI.Fill(track, "ui", "elementBg")
     UI.Border(track, "ui", "border")
+    local trackPill = UI.Pill(track, "BACKGROUND", 1, S.TRACK_H)
 
     local slider = CreateFrame("Slider", nil, host)
     slider:SetOrientation("HORIZONTAL")
-    slider:SetPoint("TOPLEFT", track, "TOPLEFT", 0, 2)
-    slider:SetPoint("BOTTOMRIGHT", track, "BOTTOMRIGHT", 0, -2)
+    slider:SetPoint("TOPLEFT", track, "TOPLEFT", 0, 6)
+    slider:SetPoint("BOTTOMRIGHT", track, "BOTTOMRIGHT", 0, -6)
     -- ABOVE THE TRACK, and this is not a nicety.
     -- The track's border is four strips at OVERLAY sublevel 7; the thumb
     -- is a texture at OVERLAY sublevel 0. Both frames sat at the same
@@ -1500,26 +1545,35 @@ function UI.Slider(parent, opts)
 
     -- A narrow flat grab riding ON the track - 2px proud of it, not the
     -- old square hanging 4px into whatever text sat underneath.
-    local thumb = slider:CreateTexture(nil, "OVERLAY")
+    local thumb = slider:CreateTexture(nil, "OVERLAY", nil, 2)
     thumb._zui_own = true
-    thumb:SetTexture(FLAT)
-    thumb:SetSize(10, M.TRACK_H + 6)
+    thumb:SetSize(S.THUMB - 2, S.THUMB - 2)
     slider:SetThumbTexture(thumb)
+    UI.DiscArt(thumb, S.THUMB - 2)
+    -- the black disc a pixel wider under the grip (the client puts a
+    -- slider's thumb on ARTWORK when it takes it: the grip goes back on top)
+    local block = slider:CreateTexture(nil, "ARTWORK", nil, 6)
+    block._zui_own = true
+    UI.DiscArt(block, S.THUMB)
+    block:SetSize(S.THUMB, S.THUMB)
+    block:SetPoint("CENTER", thumb, "CENTER", 0, 0)
+    if thumb.SetDrawLayer then thumb:SetDrawLayer("OVERLAY", 2) end
 
     -- THE FILLED PART: the track in the accent colour from its left end up
     -- to the thumb, so where the value sits reads at a glance.
-    local fill = track:CreateTexture(nil, "ARTWORK")
-    fill._zui_own = true
-    fill:SetTexture(FLAT)
-    fill:SetPoint("TOPLEFT", track, "TOPLEFT", 1, -1)
-    fill:SetPoint("BOTTOMLEFT", track, "BOTTOMLEFT", 1, 1)
-    fill:SetWidth(1)
+    local fill = CreateFrame("Frame", nil, track)
+    fill:SetPoint("TOPLEFT", track, "TOPLEFT", 0, 0)
+    fill:SetPoint("BOTTOMLEFT", track, "BOTTOMLEFT", 0, 0)
+    fill:SetWidth(S.TRACK_H)
+    local fillPill = UI.Pill(fill, "ARTWORK", 0, S.TRACK_H)
     host._zFillBar = fill
     local function PlaceFill(v)
         local lo, hi = slider:GetMinMaxValues()
-        local w = (track:GetWidth() or 0) - 2
+        local w = track:GetWidth() or 0
         local k = (hi and lo and hi > lo) and math.max(0, math.min(1, ((v or lo) - lo) / (hi - lo))) or 0
-        fill:SetWidth(math.max(1, w * k))
+        -- to the grip's middle
+        local fw = (S.THUMB - 2) / 2 + k * math.max(0, w - (S.THUMB - 2))
+        fill:SetWidth(math.max(S.TRACK_H, math.floor(fw + 0.5)))
         fill:SetShown(k > 0)
     end
     track:SetScript("OnSizeChanged", function() PlaceFill(slider:GetValue()) end)
@@ -1616,15 +1670,15 @@ function UI.Slider(parent, opts)
     -- the thumb: the scroll thumb's colour, the accent under the mouse,
     -- the hover border's colour while it is dragged
     host._zPaint = function(self)
-        PaintBox(self)
-        -- (2026-11-09: the accent at rest too, as Readycheck's grips)
-        local t = GetColor("ui", "accent")
-        if self._zDrag then t = GetColor("ui", "borderHover") end
-        thumb:SetVertexColor(t.r, t.g, t.b, 1)
-        local a = GetColor("ui", "accent")
-        fill:SetVertexColor(a.r, a.g, a.b, 0.55)
-        local b = GetColor("ui", "border")
-        for _, s in ipairs(ring._zBorder) do s:SetVertexColor(b.r, b.g, b.b, 1) end
+        -- the settings window's colours (SetSlider's paint)
+        local a = Accent()
+        trackPill:Color(1, 1, 1, S.SL_TRACK_A)
+        fillPill:Color(a.r, a.g, a.b, S.SL_FILL_A)
+        thumb:SetVertexColor(a.r, a.g, a.b, 1)
+        block:SetVertexColor(0, 0, 0, 1)
+        if track._zFill then track._zFill:SetVertexColor(0, 0, 0, 0) end
+        for _, s in ipairs(track._zBorder or {}) do s:SetVertexColor(0, 0, 0, 0) end
+        for _, s in ipairs(ring._zBorder or {}) do s:SetVertexColor(0, 0, 0, 0) end
         value:_zPaint()
         if label then label:_zPaint() end
     end
@@ -1684,6 +1738,10 @@ function UI.Dropdown(parent, opts)
     local room = UI.Room(parent)
     if room and width > room then width = math.max(60, room) end
     local set = UI._zSettings
+    -- (2026-11-10) ONE DROPDOWN: the settings window's paint (its fill,
+    -- the white edges, the white 8% row under the mouse, no tick) on a
+    -- dropdown anywhere; `set` is only its size and font now
+    local look = true
     local dd = CreateFrame("Button", nil, parent)
     dd:SetSize(width, set and S.DD_H or M.DROPDOWN_H)
     function dd:_zFit(w) self:SetWidth(math.max(60, w)) end
@@ -1691,6 +1749,7 @@ function UI.Dropdown(parent, opts)
     UI.Border(dd, "ui", "border")
     dd._zNormalKey = "bg"
     dd._zSet = set or nil
+    dd._zOneLook = (not set) or nil
 
     -- (settings window: the value at 13 px, 12 in; the arrow 17 from the right)
     dd._zText = set and UI.SFont(dd, S.F_VALUE, { justify = "LEFT" }) or UI.Font(dd, F.LABEL, { justify = "LEFT" })
@@ -1782,7 +1841,7 @@ function UI.Dropdown(parent, opts)
                 row.tick = UI.Font(row, F.SMALL, { text = "*", cat = "dropdown", key = "selected" })
                 row.tick:SetPoint("RIGHT", -5, 0)
                 row:SetScript("OnEnter", function(self)
-                    if set then
+                    if look then
                         -- white 0.08 under the mouse, the label full white
                         self.hl:SetVertexColor(1, 1, 1, S.DD_HL_A)
                         self.hl:Show()
@@ -1794,7 +1853,7 @@ function UI.Dropdown(parent, opts)
                     self.hl:Show()
                 end)
                 row:SetScript("OnLeave", function(self)
-                    if set then
+                    if look then
                         self.hl:SetVertexColor(1, 1, 1, S.DD_SEL_A)
                         self.hl:SetShown(self._zSel and true or false)
                         self.label:SetTextColor(1, 1, 1, S.DIM_A)
@@ -1809,7 +1868,7 @@ function UI.Dropdown(parent, opts)
             row.label._zPaintCat, row.label._zPaintKey = "dropdown", "itemText"
             row.label:_zPaint()
             row.tick:SetShown(selected ~= nil and val == selected)
-            if set then
+            if look then
                 -- the chosen one: white 0.04 behind it, no tick
                 row._zSel = (selected ~= nil and val == selected) or nil
                 row.tick:Hide()
@@ -1892,7 +1951,7 @@ function UI.Dropdown(parent, opts)
     menu:SetScript("OnHide", function() open = false end)
 
     UI.Hover(dd, "bg", "hover")
-    if set then
+    if look then
         -- the menu: the dropdown's fill at 0.98, a white 0.20 edge
         menu._zPaint = function(self)
             local c = S.DD_BG
@@ -1904,7 +1963,7 @@ function UI.Dropdown(parent, opts)
         dd:HookScript("OnLeave", function(self) self._zHot = nil self:_zPaint() end)
     end
     dd._zPaint = function(self)
-        if set then
+        if look then
             local hot = (self._zHot or open) and not self._zOff
             local c = S.DD_BG
             self._zFill:SetVertexColor(c.r, c.g, c.b, hot and S.DD_BG_HA or S.DD_BG_A)
@@ -2210,18 +2269,21 @@ function UI.EditBox(parent, opts)
     if set then
         host._zSet, eb._zSet = true, true
         FontDress(eb, S.F_VALUE, "")
-        host._zPaint = function(self)
-            local c = S.INPUT
-            self._zFill:SetVertexColor(c.r, c.g, c.b, S.INPUT_A)
-            local focus = self._zBorderKey == "accent"
-            local a = focus and Accent() or WHITE
-            for _, t in ipairs(self._zBorder) do t:SetVertexColor(a.r, a.g, a.b, focus and 0.8 or S.INPUT_BRD_A) end
-            eb:SetTextColor(1, 1, 1, 0.9)
-        end
-        host:_zPaint()
     else
         FontDress(eb, F.LABEL, "")
     end
+    -- (2026-11-10) ONE FIELD LOOK: the settings window's field - the input
+    -- colour at 0.35, a white 0.10 edge, the accent while typing - on a
+    -- field anywhere (the auction house's search, a bag's), at its own size
+    host._zPaint = function(self)
+        local c = S.INPUT
+        self._zFill:SetVertexColor(c.r, c.g, c.b, S.INPUT_A)
+        local focus = self._zBorderKey == "accent"
+        local a = focus and Accent() or WHITE
+        for _, t in ipairs(self._zBorder) do t:SetVertexColor(a.r, a.g, a.b, focus and 0.8 or S.INPUT_BRD_A) end
+        eb:SetTextColor(1, 1, 1, 0.9)
+    end
+    host:_zPaint()
     eb:SetText(opts.text or "")
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     eb:SetScript("OnEnterPressed", function(self)
@@ -2346,6 +2408,16 @@ function UI.TextBox(parent, opts)
     eb:SetFontObject("GameFontHighlightSmall")
     -- (no size adjustment here, as before: the box is a fixed size)
     FontDress(eb, F.SMALL, "", true)
+    -- (2026-11-10) the one field look, as UI.EditBox
+    host._zPaint = function(self)
+        local c = S.INPUT
+        if self._zFill then self._zFill:SetVertexColor(c.r, c.g, c.b, S.INPUT_A) end
+        if self._zBorder then
+            for _, t in ipairs(self._zBorder) do t:SetVertexColor(1, 1, 1, S.INPUT_BRD_A) end
+        end
+        eb:SetTextColor(1, 1, 1, 0.9)
+    end
+    host:_zPaint()
     eb:SetText(opts.text or "")
     eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     -- Selecting everything on focus is the whole interaction for an
@@ -4050,7 +4122,12 @@ function UI.Window(name, width, height, title, opts)
     icon._zui_own = true
     icon:SetSize(18, 18)
     icon:SetPoint("LEFT", 9, 2)
-    icon:SetTexture(ns.TEX_ICON)
+    -- (2026-11-10) every title bar carries an icon at its left: ZacUI's
+    -- mark on ZacUI's own windows, the subject's icon on a game window
+    -- (opts.icon: the bags, the auction house - as the mail and vendor
+    -- windows have theirs)
+    icon:SetTexture(opts.icon or ns.TEX_ICON)
+    if opts.icon and ns.Look and ns.Look.CropIcon then ns.Look.CropIcon(icon) end
     SharpenIcon(icon)
     -- pop-ups get the opening (drop, turn, ring, flare, sheen) and the
     -- hover; the idle sparkle and returning sheen stay on the main window
@@ -4078,15 +4155,19 @@ function UI.Window(name, width, height, title, opts)
                 if t and t.Hide then t:Hide() t:SetAlpha(0) end
             end
         end
-        icon:Hide()
-        icon:SetAlpha(0)
+        -- (2026-11-10, Zac: "why does the changelog [in Readycheck show]
+        -- the addon icon but not zui") the icon stays, still: 16 px, the
+        -- title beside it
+        icon:SetSize(16, 16)
+        icon:ClearAllPoints()
+        icon:SetPoint("LEFT", bar, "LEFT", 10, 0)
         label:ClearAllPoints()
-        label:SetPoint("LEFT", bar, "LEFT", 12, 1)
+        label:SetPoint("LEFT", icon, "RIGHT", 7, 1)
         label._zPaint = function(self) self:SetTextColor(1, 1, 1, 1) end
         UI.FlatBar(bar, { title = label, close = close })
     end
 
-    f.titleBar, f.titleText, f.closeButton = bar, label, close
+    f.titleBar, f.titleText, f.closeButton, f.titleIcon = bar, label, close, icon
     return f
 end
 

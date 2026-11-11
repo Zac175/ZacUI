@@ -32,7 +32,8 @@
 -- Bloodthirst buff gets a button to itself, so it goes on every press.
 -- Salvation that is only dropped while tanking rides along marked
 -- tank-only: the button skips it unless you are in Defensive Stance or
--- bear form at that press. The names and the macro lines are set before
+-- bear form at that press and at the two before it (passing through the
+-- form is not tanking). The names and the macro lines are set before
 -- each fight (they cannot change in one), and unlinking a macro, or
 -- switching the remover off, takes the lines back out.
 --
@@ -106,11 +107,26 @@ local LINE_LEN = #("/click " .. ButtonName(1)) + 1
 -- marked tank-only (Salvation not ticked, but dropped while tanking) is
 -- skipped unless you are in your tanking form right now, so switching
 -- to Defensive Stance or bear form mid-fight takes Salvation off too.
+-- (2026-11-10, Zac: "when i go defensive stance and press nothing then
+-- back to like zerker stance it will still cancel my salvation") PASSING
+-- THROUGH the tanking form is not tanking: the press that takes you back
+-- out of Defensive Stance is still made in it, and that one press used to
+-- drop Salvation. A tank-only name now goes only on the third press in a
+-- row made in the tanking form ("tankseen"; any press out of it starts
+-- the count again), so a tank loses Salvation within his first few
+-- presses and a stance dance never does. When nothing on the button may
+-- go, the name it last held is cleared as well as the click refused.
 local NEXT_NAME = [[
     local n = self:GetAttribute("count") or 0
     if n == 0 then return false end
     local tf = self:GetAttribute("tankform")
-    local tank = tf ~= nil and GetShapeshiftForm() == tf
+    local seen = 0
+    if tf ~= nil and GetShapeshiftForm() == tf then
+        seen = (self:GetAttribute("tankseen") or 0) + 1
+        if seen > 3 then seen = 3 end
+    end
+    self:SetAttribute("tankseen", seen)
+    local tank = seen >= 3
     local i = self:GetAttribute("at") or 0
     for _ = 1, n do
         i = i % n + 1
@@ -120,6 +136,7 @@ local NEXT_NAME = [[
             return
         end
     end
+    self:SetAttribute("spell", nil)
     return false
 ]]
 
@@ -333,15 +350,31 @@ BR.Visible = Visible
 local function Fixed(e) return (e.provided or e.locked) and true or false end
 BR.Fixed = Fixed
 
+-- (2026-11-10) A warrior or druid counts as tanking once the tanking form
+-- has been held for TANK_SETTLE seconds: stepping into Defensive Stance
+-- and straight back out (a stance dance, a mis-press) drops nothing, out
+-- of combat as in it. The form's own event keeps the clock (FormChanged).
+local TANK_SETTLE = 6
+local tankSince              -- GetTime() when the tanking form was entered
+local function InTankForm()
+    local D = DATA()
+    return D and GetShapeshiftFormID and D.TANK_FORMS[GetShapeshiftFormID() or 0] == true or false
+end
 local function Tanking()
     if not TANK_CLASSES[cls] then return false end
     if cls == "PALADIN" then
         local BC, D = RCB(), DATA()
         return BC and D and BC:Has(D.RIGHTEOUS_FURY) or false
     end
-    local D = DATA()
-    return D and GetShapeshiftFormID and D.TANK_FORMS[GetShapeshiftFormID() or 0] == true or false
+    if not InTankForm() then
+        tankSince = nil
+        return false
+    end
+    local now = GetTime()
+    tankSince = tankSince or now
+    return now - tankSince >= TANK_SETTLE
 end
+BR.TANK_SETTLE = TANK_SETTLE
 
 local function SalvOff(e)
     return e.family ~= nil and e.family.salv == true and ClassCfg().salv == true and Tanking()
@@ -570,7 +603,13 @@ local function CombatNames(ignorePause)
     for n in pairs(c.keep) do keep[n] = true end
     for _, e in ipairs(D.ALL) do
         if Visible(e) then
-            local off = not Fixed(e) and (SalvOff(e) or (not paused and remove[e.key] == true))
+            -- (2026-11-10) where the button can read the form itself (a
+            -- warrior's stance, a druid's bear form) Salvation-while-
+            -- tanking is ALWAYS loaded tank-only: loaded as a plain name
+            -- while you happened to stand in Defensive Stance, it stayed
+            -- one for the whole fight and went in Berserker Stance too
+            local salvNow = SalvOff(e) and TANK_INDEX[cls] == nil
+            local off = not Fixed(e) and (salvNow or (not paused and remove[e.key] == true))
             local standby = not off and not Fixed(e) and SalvStandby(e)
             for _, n in ipairs(NamesOf(e)) do
                 -- a name ticked by name is not held back by an unticked entry
@@ -667,6 +706,7 @@ local function Load(lists, only, tankForm)
             end
             b:SetAttribute("count", #names)
             b:SetAttribute("at", 0)
+            b:SetAttribute("spell", nil)    -- (never a name left from the last load)
             b:SetAttribute("tankform", tankForm)
             loaded[k] = sig
         end
@@ -1508,6 +1548,17 @@ events:SetScript("OnEvent", function(_, event)
         -- Sync reads every macro slot per linked macro, so it waits half
         -- a second and runs only when the tanking state is not the one
         -- the last Sync saw.
+        -- (2026-11-10) the tanking clock is kept here (Tanking()), and a
+        -- look is taken once the form has been held long enough to count
+        local wasIn = tankSince ~= nil
+        Tanking()
+        if tankSince ~= nil and not wasIn then
+            C_Timer.After(TANK_SETTLE + 0.2, function()
+                if not running or InCombatLockdown() then return end
+                if Tanking() ~= syncedTanking then Sync() end
+                Plan()
+            end)
+        end
         if formSyncPending or InCombatLockdown() then return end
         formSyncPending = true
         C_Timer.After(0.5, function()

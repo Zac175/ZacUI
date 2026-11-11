@@ -208,18 +208,99 @@ local function Default(cat, key)
     return c and c[key]
 end
 
+-- ============================================================
+-- OLD SHIPPED COLOURS A DB STILL CARRIES
+-- ============================================================
+-- (2026-11-10, Zac: "the ah in zacui ... still just pitch black") The
+-- lighter windows changed PALETTE, and a stored colour wins over PALETTE -
+-- so a DB that carries an old shipped value for a surface (older versions
+-- wrote the whole palette into the DB) stayed near-black for ever. Each
+-- surface below lists the values ZacUI itself shipped before; a stored
+-- colour that is still exactly one of them was never picked by anyone and
+-- goes, so today's shade shows. A colour that is anything else is the
+-- player's own and is left alone. Greys are one number; a tint is r, g, b.
+-- (These are window furniture, so a plain grey darker than today's goes as
+-- well - the same old look, whichever version wrote it. A tint, or a grey
+-- lighter than today's, is a pick.)
+local LEGACY = {
+    ui = { windowBg = { 0.08, 0.06 }, elementBg = { 0.12 }, cardBg = { 0.10, 0.08 }, headerBg = { 0.12 } },
+    button = { bg = { 0.12, 0.15 }, hover = { 0.18, 0.22 }, pressed = { 0.06, 0.10 }, disabled = { 0.08, 0.10 },
+        active = { { 0.12, 0.16, 0.12 } }, activeHover = { { 0.15, 0.20, 0.15 } },
+        -- (the red an older version wrote for the close box under the
+        -- mouse; without a stored one the close box is the white one)
+        xHover = { { 1.00, 0.30, 0.30 } } },
+    sidebar = { bg = { 0.07, 0.08 }, rowNormal = { 0.12, 0.15 }, rowHover = { 0.18, 0.22 },
+        rowSelected = { { 0.12, 0.16, 0.12 } } },
+    checkbox = { bg = { 0.10 } },
+    dropdown = { bg = { 0.12 }, itemHover = { { 0.20, 0.18, 0.12 } } },
+    tooltip = { bg = { 0.08, 0.10 } },
+}
+local function IsLegacy(c, list)
+    if type(c) ~= "table" or type(c.r) ~= "number" then return false end
+    for _, v in ipairs(list) do
+        local r, g, b = v, v, v
+        if type(v) == "table" then r, g, b = v[1], v[2], v[3] end
+        if math.abs(c.r - r) < 0.006 and math.abs((c.g or 0) - g) < 0.006 and math.abs((c.b or 0) - b) < 0.006 then
+            return true
+        end
+    end
+    return false
+end
+-- Is this stored colour the old look rather than a pick? A colour set with
+-- SetColor from here on carries pick = true and is never stale. (ZacLayout
+-- and profile copies can put an old palette back after any one-off clean,
+-- so GetColor asks this at every read as well - 2026-11-10 21:33, Zac:
+-- "still tons of things with the pure black bags character pane".)
+local function Stale(cat, key, c)
+    local list = LEGACY[cat] and LEGACY[cat][key]
+    if not list or type(c) ~= "table" or c.pick or type(c.r) ~= "number" then return false end
+    if IsLegacy(c, list) then return true end
+    local now = Default(cat, key)
+    return (now and type(list[1]) == "number"
+        and math.max(c.r, c.g or 0, c.b or 0) - math.min(c.r, c.g or 0, c.b or 0) <= 0.02
+        and c.r < now.r - 0.005) and true or false
+end
+ns.StaleColor = Stale
+
+-- pal: a palette table ({ cat = { key = colour } }); flat: the 1.x flat
+-- table ({ windowBg = colour }), either may be nil. Returns how many went.
+local function DropLegacyColors(pal, flat)
+    local n = 0
+    if type(pal) == "table" then
+        for cat, keys in pairs(LEGACY) do
+            local t = type(pal[cat]) == "table" and pal[cat]
+            if t then
+                for key in pairs(keys) do
+                    if Stale(cat, key, t[key]) then t[key] = nil n = n + 1 end
+                end
+                if next(t) == nil then pal[cat] = nil end
+            end
+        end
+    end
+    if type(flat) == "table" then
+        for name, pair in pairs(ALIAS) do
+            if Stale(pair[1], pair[2], flat[name]) then flat[name] = nil n = n + 1 end
+        end
+    end
+    return n
+end
+ns.DropLegacyColors = DropLegacyColors
+ns.LEGACY_COLORS = LEGACY
+
 -- The structured read. Falls back through the legacy flat override so a
 -- 1.x DB keeps its saved colours without a migration step.
 local function GetColor(cat, key)
     local db = ZacUIDB
     if db then
         local p = db.palette and db.palette[cat]
-        if p and p[key] then return p[key] end
+        -- (a stored colour that is only an old shipped shade is passed over)
+        if p and p[key] and not Stale(cat, key, p[key]) then return p[key] end
         -- the legacy flat table is {} on every current DB; only walk the
         -- alias list when it actually holds something
         if db.colors and next(db.colors) ~= nil then
             for flat, pair in pairs(ALIAS) do
-                if pair[1] == cat and pair[2] == key and db.colors[flat] then
+                if pair[1] == cat and pair[2] == key and db.colors[flat]
+                    and not Stale(cat, key, db.colors[flat]) then
                     return db.colors[flat]
                 end
             end
@@ -257,8 +338,10 @@ local function SetColor(cat, key, r, g, b, a)
     if not Default(cat, key) then return end
     ZacUIDB.palette = ZacUIDB.palette or {}
     ZacUIDB.palette[cat] = ZacUIDB.palette[cat] or {}
+    -- pick = true: chosen by the player, so never mistaken for an old
+    -- shipped shade (Stale above)
     ZacUIDB.palette[cat][key] = { r = r, g = g, b = b,
-                                  a = a or Default(cat, key).a or 1 }
+                                  a = a or Default(cat, key).a or 1, pick = true }
     -- The legacy flat override would otherwise win the precedence race
     -- and silently swallow the new value.
     if ZacUIDB.colors then

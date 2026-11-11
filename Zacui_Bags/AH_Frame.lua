@@ -384,6 +384,7 @@ local function BuildBuyWindow()
     -- Closing the window IS ending the run - by X, by Escape, or by Done.
     win:HookScript("OnHide", function()
         win._zErr = nil
+        win._zRunH = nil
         if AH.PurchaseInProgress and AH.PurchaseInProgress() then
             AH.CancelPurchase()
         end
@@ -491,6 +492,12 @@ local function BuildBuyWindow()
         else
             y = y - GAP
         end
+        -- (2026-11-10) ONE SIZE PER RUN: the window is as tall as the
+        -- tallest it has had to be since it opened and never shrinks or
+        -- jumps while you click through a purchase (a note that comes and
+        -- goes, the button leaving at the end); the next run starts again
+        if (self._zRunH or 0) > y then y = self._zRunH end
+        self._zRunH = y
         local top, left = self:GetTop(), self:GetLeft()
         self:FitHeight(y)
         if self:IsShown() and type(top) == "number" and type(left) == "number" then
@@ -527,9 +534,14 @@ local function BuildBuyWindow()
         self.icon:SetTexture(IconOf(name) or self._zLastIcon or fallbackIcon)
         self._zLastIcon = IconOf(name) or self._zLastIcon
         local n = st.nextCount or 1
+        -- (2026-11-10, Zac: "clicking buy ... resizes the window for some
+        -- reason that shouldnt happen at all") while the auction house
+        -- answers a click there is no next price for a moment: the line
+        -- under the name stays as it was (it went, and the window with it
+        -- shrank a line and grew back on every click)
         if st.nextPrice then
             self.sub:SetText(n > 1 and ("Stack of " .. n .. " per auction") or "1 item per auction")
-        else
+        elseif not st.waiting then
             self.sub:SetText("")
         end
         -- Items as well as auctions: one auction of a 20-stack is 20 of
@@ -626,11 +638,13 @@ local function BuildBuyWindow()
         if b._zWrapped and b._zUnfit then
             b:_zUnfit()
             b._zWrapped = nil
-            b:SetHeight(POP.BTN_H)
+            b:SetHeight(BUY_H)
         end
         b:SetWidth(IW)
         local ok, sw = pcall(b._zText.GetStringWidth, b._zText)
-        if ok and type(sw) == "number" and sw + 24 > IW and b._zFit then b:_zFit(IW) end
+        -- (not while it waits: that label is the same every click, and a
+        -- button two lines tall for a moment is the window jumping)
+        if ok and type(sw) == "number" and sw + 24 > IW and b._zFit and not st.waiting then b:_zFit(IW) end
         self:Layout()
     end
 
@@ -1721,7 +1735,7 @@ end
 
 local function Build()
     if window then return window end
-    window = UI.Window("ZacUIAuctionFrame", WIDTH, HEIGHT, "Auction house")
+    window = UI.Window("ZacUIAuctionFrame", WIDTH, HEIGHT, "Auction house", { icon = "Interface\\Icons\\INV_Misc_Coin_02" })
 
     for i, spec in ipairs(TAB_SPECS) do
         local tab = UI.Button(window, spec.label, { width = 84, height = 22 })
@@ -2018,7 +2032,7 @@ local SAMPLE_ROWS = {
       buyout = 0, owner = "Ghaldor" },
 }
 local function NewSample(parent)
-    local f = UI.Window(nil, WIDTH, HEIGHT, "Auction house")
+    local f = UI.Window(nil, WIDTH, HEIGHT, "Auction house", { icon = "Interface\\Icons\\INV_Misc_Coin_02" })
     f:SetParent(parent)
     f:SetFrameStrata(parent:GetFrameStrata())
     f:EnableMouse(false)

@@ -326,7 +326,13 @@ function ns.SpawnHeader(kind)
             -- Block-row height = one full 5-man column (5 units, 4 gaps) plus a
             -- columnSpacing gap, so the vertical gap between wrapped rows matches
             -- the horizontal gap between group columns.
-            local blockH = 5 * cfg.height + 4 * (cfg.spacing or 0) + colSpacing
+            -- (Classic WoW UI, Kit.lua's raid kit: each group's column
+            -- starts under its gold "Group N" title - titleH of room, 0
+            -- under every other look, so nothing else moves a pixel)
+            local Kit = ns.Kit
+            local titleH = (kind == "raid" and Kit and Kit.RaidTitleH and Kit.RaidTitleH(cfg, grouped)) or 0
+            local blockH = 5 * cfg.height + 4 * (cfg.spacing or 0) + colSpacing + titleH
+            local spots = titleH > 0 and {} or nil
             for gi = 0, 7 do
                 local h = container.headers[gi + 1]
                 if h then
@@ -335,9 +341,11 @@ function ns.SpawnHeader(kind)
                     local x = dir * col * (cfg.width + colSpacing)
                     local y = growUp and (row * blockH) or -(row * blockH)
                     h:ClearAllPoints()
-                    h:SetPoint(anchor, container, anchor, x, y)
+                    h:SetPoint(anchor, container, anchor, x, y - titleH)
+                    if spots then spots[gi + 1] = { x, y } end
                 end
             end
+            if kind == "raid" and Kit and Kit.RaidTitles then Kit.RaidTitles(container, cfg, spots) end
         else
             local h = container.headers[1]
             if h then

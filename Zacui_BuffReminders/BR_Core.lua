@@ -153,11 +153,26 @@ function BR.SetOpt(key, field, v)
     c.buffs[key][field] = v
 end
 
+-- (2026-11-10, Zac: "still tons of things with the pure black") The
+-- backgrounds Readycheck shipped before both addons lightened, which the
+-- import copied over as saved colours: one that is still exactly that old
+-- value was never picked and is passed over, so today's default shows. A
+-- colour picked on the Colours tab (BR_Config stamps pick = true) is kept.
+BR.OLD_COLORS = {
+    icon = { background = { 0.08, 0.08, 0.08 } },
+    tracker = { background = { 0.06, 0.06, 0.06 }, headerBackground = { 0.10, 0.10, 0.10 } },
+}
+local function OldColor(sec, key, c)
+    local o = BR.OLD_COLORS[sec] and BR.OLD_COLORS[sec][key]
+    return o and not c.pick and math.abs((c.r or 0) - o[1]) < 0.006 and math.abs((c.g or 0) - o[2]) < 0.006
+        and math.abs((c.b or 0) - o[3]) < 0.006
+end
+
 -- the colour a key stands for (saved, else Readycheck's default)
 function BR.Color(sec, key)
     local t = (sec == "icon") and BR.Icon() or BR.Tracker()
     local c = type(t.colors) == "table" and t.colors[key]
-    if type(c) == "table" then return c end
+    if type(c) == "table" and not OldColor(sec, key, c) then return c end
     local d = BR.DEFAULTS[sec].colors[key]
     return d or C(1, 1, 1, 1)
 end

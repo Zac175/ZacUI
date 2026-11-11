@@ -92,7 +92,12 @@ function ns.GroupLayout(kind, cfg, chatRow, honourPlayer)
     local count, place
     if grouped then
         local cols   = math.max(1, math.min(8, cfg.maxColumns or 8))
-        local blockH = 5 * cfg.height + 4 * spacing + colSpacing
+        -- (the room over each column for its gold title, Kit.lua's raid
+        -- kit under Classic WoW UI; 0 otherwise - the same number the real
+        -- grid uses)
+        local Kit = ns.Kit
+        local titleH = (Kit and Kit.RaidTitleH and Kit.RaidTitleH(cfg, grouped)) or 0
+        local blockH = 5 * cfg.height + 4 * spacing + colSpacing + titleH
         count = 40
         place = function(idx)
             local gi  = math.floor((idx - 1) / 5)   -- group 0..7
@@ -100,7 +105,7 @@ function ns.GroupLayout(kind, cfg, chatRow, honourPlayer)
             local col = gi % cols
             local row = math.floor(gi / cols)
             local x   = dir * col * (cfg.width + colSpacing)
-            local y   = row * blockH + r * (cfg.height + spacing)
+            local y   = row * blockH + r * (cfg.height + spacing) + titleH
             return x, growUp and y or -y, ("G%d"):format(gi + 1)
         end
     elseif kind == "party" and chatRow then

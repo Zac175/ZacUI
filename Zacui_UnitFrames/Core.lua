@@ -425,7 +425,17 @@ local function Init()
     -- Group headers
     if ns.SpawnHeader then
         if ns.db.party.enabled then ns.SpawnHeader("party") end
-        if ns.db.raid.enabled  then ns.SpawnHeader("raid")  end
+        if ns.db.raid.enabled then
+            -- (2026-11-10, Zac: "if users pick that style it uses those
+            -- frames") under Classic WoW UI the raid is the old raid frames
+            -- themselves (OldRaid.lua) and ZacUI's raid header is not made;
+            -- when the OldRaidFrames addon is loaded it draws them instead
+            if ns.OldRaidActive and ns.OldRaidActive() then
+                if ns.OldRaidStart then ns.OldRaidStart() end
+            else
+                ns.SpawnHeader("raid")
+            end
+        end
     end
 
     -- the frames only some games have (focus, boss...: Extras.lua and

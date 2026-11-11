@@ -289,6 +289,26 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
                 end
                 ZacUIDB.paletteRev = 2
             end
+            -- (2026-11-10) rev 3: the old shipped surface shades a DB still
+            -- carries go (Core_Colors: DropLegacyColors), in what is worn
+            -- now and in every saved profile, so the lighter windows reach
+            -- a character that predates them. Picked colours are kept.
+            if ZacUIDB.paletteRev < 3 then
+                if ns.DropLegacyColors then
+                    ns.DropLegacyColors(ZacUIDB.palette, ZacUIDB.colors)
+                    for _, prof in pairs(ZacUIDB.profiles or {}) do
+                        if type(prof) == "table" then ns.DropLegacyColors(prof.palette, prof.colors) end
+                    end
+                end
+                ZacUIDB.paletteRev = 3
+            end
+
+            -- (2026-11-11) a one-morning diagnostic wrote ZacUIDB.dev.paintProbe
+            -- on Zac's own machine; the diagnostic is gone, so is its record
+            if type(ZacUIDB.dev) == "table" and ZacUIDB.dev.paintProbe ~= nil then
+                ZacUIDB.dev.paintProbe = nil
+                if next(ZacUIDB.dev) == nil then ZacUIDB.dev = nil end
+            end
 
             -- NOTE for whoever adds the next module: you do not need a
             -- migration for it. The nil-fill above covers any key no DB

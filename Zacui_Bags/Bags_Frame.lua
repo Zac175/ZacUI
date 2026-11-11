@@ -2010,7 +2010,10 @@ local function CreateView(key, globalName, title, bagList)
     local view = { key = key, title = title, bagList = bagList,
                    buttons = {}, holders = {} }
 
-    local frame = UI.Window(globalName, 400, 400, title)
+    -- (2026-11-10) a bag on the title bar, as the mail and vendor windows
+    -- carry their own icon
+    local frame = UI.Window(globalName, 400, 400, title,
+        { icon = "Interface\\Icons\\" .. (key == "bank" and "INV_Misc_Bag_10" or "INV_Misc_Bag_08") })
     view.frame = frame
     -- a modern look on a client with the combined bag's template: that
     -- template's chrome under the window (THE GAME LOOKS' KIT)
@@ -2097,7 +2100,7 @@ local function CreateView(key, globalName, title, bagList)
         search:SetPoint("RIGHT", groupsBtn, "LEFT", -6, 0)
         -- as wide as the bar leaves it (a narrow bag: shorter, then gone)
         local function FitSearch()
-            local room = (frame:GetWidth() or 0) - 250
+            local room = (frame:GetWidth() or 0) - 272   -- (the title bar's icon: 22 more)
             search:SetShown(room >= 50)
             search:SetWidth(math.max(50, math.min(140, room)))
         end

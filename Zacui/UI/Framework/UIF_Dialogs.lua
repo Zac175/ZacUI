@@ -239,7 +239,23 @@ function UI.Popup(name, width, height, title, opts)
         icon._zPaint = function(self) local a = GetColor("ui", "accent") self:SetVertexColor(a.r, a.g, a.b, 1) end
         icon:_zPaint()
     end
-    local x = P.PAD + (icon and 44 or 0)
+    -- (2026-11-10, Zac: "why does the changelog [in Readycheck show] the
+    -- addon icon but not zui") ZacUI's mark at the left of every popup's
+    -- title, sized to the title and centred on its line; a popup with a
+    -- picture of its own (opts.icon) or that asks for none (opts.mark =
+    -- false) has none.
+    local mark, markW = nil, 0
+    if not icon and opts.mark ~= false and ns.TEX_ICON then
+        local ms = math.max(13, math.min(26, P.T + 2))
+        mark = bar:CreateTexture(nil, "ARTWORK")
+        mark._zui_own = true
+        mark:SetSize(ms, ms)
+        mark:SetPoint("TOPLEFT", f, "TOPLEFT", P.PAD, -(P.TOP + math.floor((P.T - ms) / 2 + 0.5)))
+        mark:SetTexture(ns.TEX_ICON)
+        if ns.SharpenIcon then ns.SharpenIcon(mark) end
+        markW = ms + math.max(5, math.floor(P.T / 3 + 0.5))
+    end
+    local x = P.PAD + (icon and 44 or 0) + markW
     local right = POP.CLOSE_X + POP.CLOSE + 6
     local tt = UI.SFont(bar, P.T, { text = title or "" })
     tt:SetPoint("TOPLEFT", f, "TOPLEFT", x, -P.TOP)
@@ -345,7 +361,7 @@ function UI.Popup(name, width, height, title, opts)
         return self.buttons
     end
 
-    f.titleText, f.descText, f.titleIcon, f.headerRule = tt, dt, icon, rule
+    f.titleText, f.descText, f.titleIcon, f.headerRule, f.titleMark = tt, dt, icon, rule, mark
     f:SetTitle(title, opts.desc or "")
     -- a game window of ZacUI's (opts.part: the look part it follows) wears
     -- the look's dialog under a game look (Core_LookPanels' one helper);
@@ -690,6 +706,15 @@ function UI.Callout(target, opts)
     f:SetSize(w, CO_PAD + math.ceil(f.text:GetStringHeight() or POP.BODY) + 12 + CO_BTN_H + CO_BOT)
     f._key, f._target, f._onOkay, f._zAnswered = opts.key, target, opts.onOkay, nil
     local side, arrow = opts.side or "BELOW", f.arrow
+    -- (2026-11-10) "LEFT" with no room left of the thing on this screen
+    -- goes to its right: the bubble is clamped to the screen and would
+    -- otherwise be pushed back over what it points at
+    if side == "LEFT" and target.GetLeft then
+        local l = target:GetLeft()
+        local ts = target.GetEffectiveScale and target:GetEffectiveScale() or 1
+        local fs = f.GetEffectiveScale and f:GetEffectiveScale() or 1
+        if l and fs and fs > 0 and (l * ts / fs) < (w + ARROW + 4) then side = "RIGHT" end
+    end
     f:ClearAllPoints()
     arrow:ClearAllPoints()
     if side == "ABOVE" then

@@ -110,6 +110,7 @@ local function EdgeAround(frame, region, layer, sub)
     return strips
 end
 
+local WHITE = { r = 1, g = 1, b = 1, a = 1 }
 local function TintAll(strips, c, a)
     for _, t in ipairs(strips) do t:SetVertexColor(c.r, c.g, c.b, a or c.a or 1) end
 end
@@ -122,15 +123,11 @@ local function CardStrip(frame, left, top, right, bottom)
     local fill = Tex(frame, "BACKGROUND", -7)
     fill:SetPoint("TOPLEFT", left, top)
     fill:SetPoint("BOTTOMRIGHT", right or 0, bottom)
-    local c = GetColor("ui", "cardBg")
-    fill:SetVertexColor(c.r, c.g, c.b, c.a or 1)
-    TintAll(EdgeAround(frame, fill, "BORDER", 1), GetColor("ui", "border"), 0.55)
-    local bar = Tex(frame, "BORDER", 2)
-    bar:SetWidth(3)
-    bar:SetPoint("TOPLEFT", fill, "TOPLEFT")
-    bar:SetPoint("BOTTOMLEFT", fill, "BOTTOMLEFT")
-    local a = GetColor("ui", "accent")
-    bar:SetVertexColor(a.r, a.g, a.b, 0.8)
+    -- (2026-11-10, Zac: "options still on the really old styling") the
+    -- settings window's card: a faint dark wash, a white 5% edge, no gold
+    -- bar down the left
+    fill:SetVertexColor(0, 0, 0, UI.S.ROW_ODD)
+    TintAll(EdgeAround(frame, fill, "BORDER", 1), WHITE, UI.S.BORDER_A)
     return fill
 end
 
@@ -191,7 +188,7 @@ local function SkinTab(tab)
             t:ClearAllPoints()
             t:SetPoint("CENTER", 0, 0)
             ZFont(t, F.CARD)
-            PaintText(t, "text", sel and "green" or "normal")
+            PaintText(t, sel and "ui" or "text", sel and "accent" or "normal")
         end
     end
     PinText(tab.Text)
@@ -238,28 +235,36 @@ local function SkinCheck(cb)
     fill:SetAllPoints()
     fill:SetTexture(FLAT)
     AddPixelBorder(box)
+    -- (2026-11-10) the settings window's checkbox: its box colour, a
+    -- white 5% edge (the accent at 15% while ticked), the tick an accent
+    -- square
+    local S = UI.S
     local function Paint(hot)
-        local bg = hot and GetColor("button", "hover") or GetColor("checkbox", "bg")
-        fill:SetVertexColor(bg.r, bg.g, bg.b, 1)
-        local bk = GetColor("checkbox", hot and "hoverBorder" or "border")
-        ns.TintBorder(box, bk.r, bk.g, bk.b, 1)
+        local on = cb.GetChecked and cb:GetChecked() and true or false
+        local k = (on or hot) and 1 or S.CB_REST
+        local c = S.CB_BOX
+        fill:SetVertexColor(c.r, c.g, c.b, k)
+        if on then
+            local a = GetColor("ui", "accent")
+            ns.TintBorder(box, a.r, a.g, a.b, S.CB_ACT_BRD_A)
+        else
+            ns.TintBorder(box, 1, 1, 1, S.CB_BRD_A * k)
+        end
     end
     Paint(false)
     cb:HookScript("OnEnter", function() Paint(true) end)
     cb:HookScript("OnLeave", function() Paint(false) end)
+    cb:HookScript("OnClick", function(self) Paint(self.IsMouseOver and self:IsMouseOver()) end)
+    if type(cb.SetChecked) == "function" then hooksecurefunc(cb, "SetChecked", function() Paint(false) end) end
     for _, get in ipairs({ "GetCheckedTexture", "GetDisabledCheckedTexture" }) do
         local t = cb[get] and cb[get](cb)
         if t then
-            t:SetTexture(ns.TEX_CHECK)
+            t:SetTexture(FLAT)
             t:ClearAllPoints()
             t:SetSize(10, 10)
             t:SetPoint("CENTER")
-            if get == "GetCheckedTexture" and UI.PaintTick then
-                UI.PaintTick(t)
-            else
-                local c = (get == "GetCheckedTexture") and GetColor("checkbox", "check") or GetColor("text", "disabled")
-                t:SetVertexColor(c.r, c.g, c.b, 1)
-            end
+            local c = (get == "GetCheckedTexture") and GetColor("ui", "accent") or GetColor("text", "disabled")
+            t:SetVertexColor(c.r, c.g, c.b, 1)
         end
     end
 end
@@ -270,28 +275,38 @@ local function SkinSlider(sl)
     if not sl or ZUI.skinned[sl] then return end
     ZUI.skinned[sl] = true
     for _, k in ipairs({ "Left", "Middle", "Right" }) do Fade(sl[k]) end
+    -- (2026-11-10) the settings window's slider: a 4 px pill, a round
+    -- accent grip with a black edge
+    local S = UI.S
     local track = CreateFrame("Frame", nil, sl)
-    track:SetHeight(6)
+    track:SetHeight(S.TRACK_H)
     track:SetPoint("LEFT", 0, 0)
     track:SetPoint("RIGHT", 0, 0)
     track:SetFrameLevel(math.max(0, sl:GetFrameLevel() - 1))
-    local tf = track:CreateTexture(nil, "BACKGROUND")
-    tf._zui_own = true
-    tf:SetAllPoints()
-    tf:SetTexture(FLAT)
-    local e = Col("elementBg")
-    tf:SetVertexColor(e.r, e.g, e.b, 1)
-    AddPixelBorder(track)
+    if UI.Pill then
+        UI.Pill(track, "BACKGROUND", 1, S.TRACK_H):Color(1, 1, 1, S.SL_TRACK_A)
+    else
+        local tf = track:CreateTexture(nil, "BACKGROUND")
+        tf._zui_own = true
+        tf:SetAllPoints()
+        tf:SetTexture(FLAT)
+        tf:SetVertexColor(1, 1, 1, S.SL_TRACK_A)
+    end
     local thumb = sl.GetThumbTexture and sl:GetThumbTexture()
     if thumb then
-        thumb:SetTexture(FLAT)
-        thumb:SetSize(8, 12)
-        local c = GetColor("text", "normal")
-        thumb:SetVertexColor(c.r, c.g, c.b, 1)
-        local ring = CreateFrame("Frame", nil, sl)
-        ring:SetAllPoints(thumb)
-        ring:SetFrameLevel(sl:GetFrameLevel() + 2)
-        AddPixelBorder(ring)
+        local a = GetColor("ui", "accent")
+        thumb:SetSize(12, 12)
+        if UI.DiscArt then UI.DiscArt(thumb, 12) else thumb:SetTexture(FLAT) end
+        thumb:SetVertexColor(a.r, a.g, a.b, 1)
+        if UI.DiscArt and sl.CreateTexture then
+            local block = sl:CreateTexture(nil, "ARTWORK", nil, 6)
+            block._zui_own = true
+            UI.DiscArt(block, 14)
+            block:SetSize(14, 14)
+            block:SetPoint("CENTER", thumb, "CENTER", 0, 0)
+            block:SetVertexColor(0, 0, 0, 1)
+            if thumb.SetDrawLayer then thumb:SetDrawLayer("OVERLAY", 2) end
+        end
     end
     local holder = sl:GetParent()
     if holder then
@@ -311,12 +326,15 @@ local function SkinMenuButton(dd)
     bg._zui_own = true
     bg:SetAllPoints()
     bg:SetTexture(FLAT)
+    -- (2026-11-10) the settings window's dropdown: its fill, a white edge
+    local S = UI.S
+    AddPixelBorder(dd)
     local function Paint(hot)
-        local c = hot and GetColor("button", "hover") or GetColor("dropdown", "bg")
-        bg:SetVertexColor(c.r, c.g, c.b, 1)
+        local c = S.DD_BG
+        bg:SetVertexColor(c.r, c.g, c.b, hot and S.DD_BG_HA or S.DD_BG_A)
+        ns.TintBorder(dd, 1, 1, 1, hot and S.DD_BRD_HA or S.DD_BRD_A)
     end
     Paint(false)
-    AddPixelBorder(dd)
     PinText(dd.Text)
     if dd.Arrow then
         local c = GetColor("dropdown", "arrow")
@@ -346,6 +364,13 @@ local function SkinKeyButton(b)
     local n = Col("buttonBg")
     bg:SetVertexColor(n.r, n.g, n.b, 1)
     AddPixelBorder(b)
+    -- (2026-11-10) the one button look: the raised plate
+    local plated = UI.PlateLook and true or false
+    if plated then
+        bg:SetVertexColor(0, 0, 0, 0)
+        ns.TintBorder(b, 0, 0, 0, 0)
+        UI.PlateLook(b, b.Text or (b.GetFontString and b:GetFontString()))
+    end
     if b.SelectedHighlight then
         local a = Col("accent")
         b.SelectedHighlight:SetTexture(FLAT)
@@ -354,10 +379,12 @@ local function SkinKeyButton(b)
         b.SelectedHighlight:SetVertexColor(a.r, a.g, a.b, 0.35)
     end
     b:HookScript("OnEnter", function()
+        if plated then return end
         local h = Col("hoverBg")
         bg:SetVertexColor(h.r, h.g, h.b, 1)
     end)
     b:HookScript("OnLeave", function()
+        if plated then return end
         local c = Col("buttonBg")
         bg:SetVertexColor(c.r, c.g, c.b, 1)
     end)
@@ -512,15 +539,29 @@ local function PaintNav(self, selected)
     if not nav then return end
     if selected == nil then selected = nav.sel else nav.sel = selected end
     if self.Texture then self.Texture:SetAlpha(0) end
-    local c = GetColor("sidebar", selected and "rowSelected" or (self.over and "rowHover") or "rowNormal")
-    nav.fill:SetVertexColor(c.r, c.g, c.b, c.a or 1)
-    TintAll(nav.edge, GetColor("ui", "border"), 1)
-    local ind = GetColor("sidebar", "indicator")
-    nav.ind:SetVertexColor(ind.r, ind.g, ind.b, selected and 1 or 0)
+    -- (2026-11-10, Zac: "options still on the really old styling") the
+    -- settings window's page rows: a faint plate with a soft edge; the
+    -- edge goes to the accent under the mouse and on the open page, which
+    -- also carries the accent bar; the name white at 0.60 / 0.86 / 1.0
+    local S, a = UI.S, GetColor("ui", "accent")
+    if selected then
+        nav.fill:SetVertexColor(a.r, a.g, a.b, 0.08)
+        TintAll(nav.edge, a, 0.70)
+    elseif self.over then
+        nav.fill:SetVertexColor(1, 1, 1, 0.07)
+        TintAll(nav.edge, a, 0.50)
+    else
+        nav.fill:SetVertexColor(1, 1, 1, 0.035)
+        TintAll(nav.edge, WHITE, 0.085)
+    end
+    nav.ind:SetVertexColor(a.r, a.g, a.b, selected and 1 or 0)
     -- Blizzard swaps the label's font object on every state change, so
     -- the font and colour go back on after each one.
     ZFont(self.Label, F.NAV)
-    PaintText(self.Label, "text", selected and "green" or "normal")
+    if self.Label and self.Label.SetTextColor then
+        self.Label._zPinned = true
+        self.Label:SetTextColor(1, 1, 1, selected and 1 or (self.over and S.NAV_HOVER or S.NAV_EN))
+    end
 
     local tg, chev = self.Toggle, nav.chev
     if tg and chev then
@@ -654,8 +695,7 @@ local function Segment(f)
     if s then return s end
     s = {}
     s.fill = Tex(f, "BACKGROUND", -7)
-    local c = GetColor("ui", "cardBg")
-    s.fill:SetVertexColor(c.r, c.g, c.b, c.a or 1)
+    s.fill:SetVertexColor(0, 0, 0, UI.S.ROW_ODD)
     s.l, s.r, s.t, s.b = Tex(f, "BORDER", 1), Tex(f, "BORDER", 1), Tex(f, "BORDER", 1), Tex(f, "BORDER", 1)
     s.l:SetWidth(1)
     s.l:SetPoint("TOPLEFT", s.fill, "TOPLEFT")
@@ -669,14 +709,8 @@ local function Segment(f)
     s.b:SetHeight(1)
     s.b:SetPoint("BOTTOMLEFT", s.fill, "BOTTOMLEFT")
     s.b:SetPoint("BOTTOMRIGHT", s.fill, "BOTTOMRIGHT")
-    TintAll({ s.l, s.r, s.t, s.b }, GetColor("ui", "border"), 0.55)
-    s.bar = Tex(f, "BORDER", 2)
-    s.bar:SetWidth(3)
-    s.bar:SetPoint("TOPLEFT", s.fill, "TOPLEFT")
-    s.bar:SetPoint("BOTTOMLEFT", s.fill, "BOTTOMLEFT")
-    local a = GetColor("ui", "accent")
-    s.bar:SetVertexColor(a.r, a.g, a.b, 0.8)
-    s.all = { s.fill, s.l, s.r, s.t, s.b, s.bar }
+    TintAll({ s.l, s.r, s.t, s.b }, WHITE, UI.S.BORDER_A)
+    s.all = { s.fill, s.l, s.r, s.t, s.b }
     f._zSeg = s
     return s
 end
@@ -756,15 +790,18 @@ local function BuildChrome(sp)
     bar:SetPoint("TOPLEFT", 1, -1)
     bar:SetPoint("TOPRIGHT", -1, -1)
     UI.Fill(bar, "ui", "headerBg")
-    -- the same header art as every ZacUI window (UIF_Controls); the step
-    -- sits at the category column's edge
-    if UI.HeaderArt then
-        local cat = sp.CategoryList
-        local colW = cat and cat.GetWidth and cat:GetWidth() or 0
-        UI.HeaderArt(bar, { stepX = (colW > 0 and (colW + 4) or 180), left = { "sidebar", "bg" } })
-    else
-        local h = GetColor("ui", "headerBg")
-        bar._zFill:SetVertexColor(h.r, h.g, h.b, h.a or 1)
+    -- (2026-11-10, Zac: "options still on the really old styling") the
+    -- flat header every ZacUI window wears now: the window itself, the
+    -- title in the light text, a white 6% rule under it (it was the gold
+    -- header art)
+    bar._zFill:SetVertexColor(0, 0, 0, 0)
+    bar._zPaint = function(self) self._zFill:SetVertexColor(0, 0, 0, 0) end
+    do
+        local rule = Tex(bar, "ARTWORK", 1)
+        rule:SetHeight(1)
+        rule:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+        rule:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+        rule:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
     end
 
     local icon = bar:CreateTexture(nil, "ARTWORK", nil, 3)
@@ -778,7 +815,7 @@ local function BuildChrome(sp)
     local src = sp.NineSlice and sp.NineSlice.Text
     local title = UI.Font(bar, F.TITLE, {
         text = (src and src:GetText()) or _G.SETTINGS_TITLE or "Options",
-        cat = "text", key = "gold" })
+        cat = "text", key = "normal" })
     title:SetPoint("LEFT", icon, "RIGHT", 8, 2)
     if src then
         hooksecurefunc(src, "SetText", function(_, t) title:SetText(t or "") end)
@@ -810,14 +847,13 @@ local function BuildChrome(sp)
         side:SetPoint("TOPLEFT", sp, "TOPLEFT", 1, -(M.TITLEBAR + 1))
         side:SetPoint("BOTTOMLEFT", sp, "BOTTOMLEFT", 1, FOOT_H + 1)
         side:SetPoint("RIGHT", cat, "RIGHT", 4, 0)
-        local c = GetColor("sidebar", "bg")
-        side:SetVertexColor(c.r, c.g, c.b, c.a or 1)
+        -- (the settings window's sidebar: the window, a fifth darker)
+        side:SetVertexColor(0, 0, 0, UI.S.SIDEBAR_A)
         local edge = Tex(sp, "BACKGROUND", -5)
         edge:SetWidth(1)
         edge:SetPoint("TOPLEFT", side, "TOPRIGHT")
         edge:SetPoint("BOTTOMLEFT", side, "BOTTOMRIGHT")
-        local b = GetColor("ui", "border")
-        edge:SetVertexColor(b.r, b.g, b.b, 1)
+        edge:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
     end
 
     -- Footer strip (Kit.Footer's colours) for Close / Apply and the
@@ -826,14 +862,12 @@ local function BuildChrome(sp)
     foot:SetPoint("BOTTOMLEFT", 1, 1)
     foot:SetPoint("BOTTOMRIGHT", -1, 1)
     foot:SetHeight(FOOT_H)
-    local h = GetColor("ui", "headerBg")
-    foot:SetVertexColor(h.r, h.g, h.b, h.a or 1)
+    foot:SetVertexColor(0, 0, 0, UI.S.HEAD_BAND_A)
     local frule = Tex(sp, "BACKGROUND", -5)
     frule:SetHeight(1)
     frule:SetPoint("BOTTOMLEFT", foot, "TOPLEFT")
     frule:SetPoint("BOTTOMRIGHT", foot, "TOPRIGHT")
-    local b = GetColor("ui", "border")
-    frule:SetVertexColor(b.r, b.g, b.b, 1)
+    frule:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
     Place(sp.CloseButton, "BOTTOMRIGHT", sp, "BOTTOMRIGHT", -8, 8)
     Place(sp.OutputText, "LEFT", sp, "BOTTOMLEFT", 12, 19)
     PinText(sp.OutputText)
@@ -884,14 +918,13 @@ local function SkinPageHeader(hd)
             r:SetHeight(1)
             r:SetPoint("BOTTOMLEFT", hd, "BOTTOMLEFT", 7, 6)
             r:SetPoint("BOTTOMRIGHT", hd, "BOTTOMRIGHT", -8, 6)
-            local a = GetColor("ui", "accent")
-            r:SetVertexColor(a.r, a.g, a.b, 0.6)
+            r:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
         end
     end
     FadeOptionsArt(hd)
     if hd.Title then
         ZFont(hd.Title, F.HEADER)
-        PaintText(hd.Title, "text", "gold")
+        PaintText(hd.Title, "text", "normal")
         Place(hd.Title, "TOPLEFT", hd, "TOPLEFT", 7, -20)
     end
     if hd.DefaultsButton then SkinButton(hd.DefaultsButton) end

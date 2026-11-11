@@ -802,8 +802,11 @@ local function LayoutInside(e, w, h)
         slot:SetWidth(sw)
     end
     local slotW = (slot and (slot:GetWidth() or 0) > 1) and (slot:GetWidth() + 6) or 0
+    -- (hung on the slot's left edge whatever is in it - 2026-11-10: a
+    -- button that reached the slot, or got its width, after this ran sat
+    -- on top of the note; anchored here the note moves with the slot)
     sizeNote:ClearAllPoints()
-    if slotW > 0 then sizeNote:SetPoint("RIGHT", slot, "LEFT", -6, 0)
+    if slot then sizeNote:SetPoint("RIGHT", slot, "LEFT", slotW > 0 and -6 or 0, 0)
     elseif clusterLeft then sizeNote:SetPoint("RIGHT", clusterLeft, "LEFT", -8, 0)
     else sizeNote:SetPoint("RIGHT", bar, "RIGHT", -(RIGHT_W + 6), 0) end
     if e.row then

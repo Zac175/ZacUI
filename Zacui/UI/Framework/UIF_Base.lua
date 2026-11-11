@@ -122,6 +122,10 @@ end
 local function TintBorder(frame, r, g, b, a)
     local strips = frame and frame._zui_borderTex
     if not strips then return end
+    if not r and frame._zui_rest then
+        -- (a field's own resting edge: the white 10% one, not the palette's)
+        r, g, b, a = frame._zui_rest[1], frame._zui_rest[2], frame._zui_rest[3], frame._zui_rest[4]
+    end
     if not r then
         -- a Classic edge's "palette" is the art's own colour
         if strips._zEdge then
@@ -246,13 +250,18 @@ local function AccentTitle(frame, lineY, rightInset, titleFrame)
     local title = tf.TitleText
         or (tf.TitleContainer and tf.TitleContainer.TitleText)
         or (name and _G[name .. "TitleText"])
-    local a = Col("accent")
+    -- (2026-11-10, Zac: "same thing with the mail window. like literally
+    -- every menu popup etc needs to match") ONE HEADER: a game window
+    -- ZacUI has skinned wears the header ZacUI's own windows wear - the
+    -- title in the light text, the rule under it white at 8% - where it
+    -- was the gold title over a gold rule.
+    local tc = Col("text")
     if title and title.SetTextColor then
-        title:SetTextColor(a.r, a.g, a.b, 1)
+        title:SetTextColor(tc.r, tc.g, tc.b, 1)
     end
     local line = frame:CreateTexture(nil, "OVERLAY", nil, 6)
     line._zui_own = true
-    line:SetColorTexture(a.r, a.g, a.b, 0.6)
+    line:SetColorTexture(1, 1, 1, 0.08)
     line:SetPoint("TOPLEFT",  frame, "TOPLEFT",  1, lineY or -24)
     line:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(rightInset or 1), lineY or -24)
     if ns.Pixel then ns.Pixel.Edge(line, "TOP", frame) else line:SetHeight(1) end
@@ -293,6 +302,7 @@ local function SkinButton(btn, bgKey, hoverKey, borderKey, borderAlpha, look)
     end
 
     btn:HookScript("OnEnter", function(self)
+        if self._zui_plate then return end
         local h = Col(self._zui_hoverKey or "hoverBg")
         if self._zui_bg then self._zui_bg:SetVertexColor(h.r, h.g, h.b, 1) end
         if self._zui_fs then
@@ -301,6 +311,7 @@ local function SkinButton(btn, bgKey, hoverKey, borderKey, borderAlpha, look)
         end
     end)
     btn:HookScript("OnLeave", function(self)
+        if self._zui_plate then return end
         local nn = Col(self._zui_selected and "activeBg" or self._zui_bgKey or "buttonBg")
         if self._zui_bg then self._zui_bg:SetVertexColor(nn.r, nn.g, nn.b, 1) end
         if self._zui_fs then
@@ -308,6 +319,22 @@ local function SkinButton(btn, bgKey, hoverKey, borderKey, borderAlpha, look)
             self._zui_fs:SetTextColor(tc.r, tc.g, tc.b, 1)
         end
     end)
+
+    -- (2026-11-10, Zac: "so many buttons ... not updated to match the new
+    -- buttons") ONE BUTTON LOOK: a game button ZacUI has skinned wears the
+    -- same raised plate as ZacUI's own (UIF_Controls: UI.PlateLook) - the
+    -- flat fill and the strips step back under it. The framework is up by
+    -- the time anything is skinned; without it the flat look above stays.
+    local UI = ns.UI
+    if UI and UI.PlateLook and btn.HookScript and not btn._zui_borderTex._zEdge then
+        btn._zui_plate = true
+        btn._zui_bg:SetVertexColor(0, 0, 0, 0)
+        TintBorder(btn, 0, 0, 0, 0)
+        btn._zDisabled = (btn.IsEnabled and not btn:IsEnabled()) or nil
+        UI.PlateLook(btn, fs)
+        btn:HookScript("OnDisable", function(self) self._zDisabled = true self:_zPaint() end)
+        btn:HookScript("OnEnable", function(self) self._zDisabled = nil self:_zPaint() end)
+    end
 end
 
 -- SELECTED STATE for a skinned Blizzard tab: the same green fill + green
@@ -316,6 +343,12 @@ end
 local function PaintSelected(btn, on)
     if not btn or not btn._zui_bg then return end
     btn._zui_selected = on and true or nil
+    if btn._zui_plate then
+        -- the plate's picked look: the accent on its edge and label
+        btn._zActive = on and true or nil
+        if btn._zPaint then btn:_zPaint() end
+        return
+    end
     local c = Col(on and "activeBg" or btn._zui_bgKey or "buttonBg")
     btn._zui_bg:SetVertexColor(c.r, c.g, c.b, 1)
     if btn._zui_fs then
@@ -564,6 +597,18 @@ local function SkinEditBox(eb, height, look)
     -- every other NineSlice.
     if eb.NineSlice then eb.NineSlice:SetAlpha(0) end
     SkinBackdrop(eb, "elementBg", 0.9)
+    -- (2026-11-10, Zac: "literally every menu popup etc needs to match")
+    -- ONE FIELD LOOK on a game edit box ZacUI has skinned (mail's To and
+    -- Subject, every search box): the settings window's field - the input
+    -- colour at 0.35 with a white 10% edge. _zui_rest is what TintBorder
+    -- goes back to when a caller clears its own tint (focus lost).
+    if eb._zui_cbg and eb._zui_borderTex and not eb._zui_borderTex._zEdge then
+        local S = ns.UI and ns.UI.S
+        local c = S and S.INPUT or { r = 0.024, g = 0.024, b = 0.024 }
+        eb._zui_cbg:SetVertexColor(c.r, c.g, c.b, S and S.INPUT_A or 0.35)
+        eb._zui_rest = { 1, 1, 1, S and S.INPUT_BRD_A or 0.10 }
+        for _, t in ipairs(eb._zui_borderTex) do t:SetColorTexture(1, 1, 1, eb._zui_rest[4]) end
+    end
     if height then eb:SetHeight(height) end
 end
 
