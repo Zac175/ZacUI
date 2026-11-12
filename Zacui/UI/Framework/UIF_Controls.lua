@@ -3084,14 +3084,137 @@ end
 -- ============================================================
 -- RESIZE GRIP
 -- ============================================================
--- Six dots in the bottom-right corner, the same handle Readycheck uses -
--- deliberately, so the two addons resize the same way and the gesture
--- transfers. It is drawn rather than textured because six 2px squares
--- scale honestly at any UI scale and a corner .tga does not.
+-- (2026-11-11, Zac: "update the resize handler and make something for it
+-- so its not just some dots"; of five drawn for him he picked "B", the
+-- solid corner.) The grip was six 2px dots in a triangle. It is a solid
+-- corner now: a filled right triangle sitting in the window's corner,
+-- its two short sides along the window's edges - the corner of the
+-- window itself, folded over to be taken hold of. Muted at rest; under
+-- the mouse, and for as long as it is being pulled, it turns the accent
+-- and grows by two, over a tenth of a second.
 --
--- The dots light up on hover. Without that they read as decoration:
--- a resize corner nobody discovers is a window nobody resizes.
-local RESIZE_DOTS = { {2,2}, {6,2}, {10,2}, {6,6}, {10,6}, {10,10} }
+-- One file (Media\Icons\grip: the triangle fills the lower-right half
+-- of a 32px canvas, so its legs are the canvas's own edges and stay
+-- sharp at any scale), one place that draws it:
+--   UI.GripArt(grip, opts)   puts it on a grip button; returns the texture
+--       opts.corner  the corner it sits in ("BOTTOMRIGHT")
+--       opts.size    its legs at rest (10)      opts.grow  ...more when lit (2)
+--       opts.inset   in from the button's corner (3: clear of a 1px border)
+--       opts.layer   draw layer ("ARTWORK")
+--       opts.rest / opts.hot   functions returning r, g, b, a (the muted
+--                    text gray / the accent unless given)
+--   UI.GripLit(grip, on)     the mouse is on it or not (eased)
+--   UI.GripHold(grip)        it has just been pressed: it stays lit until
+--                            the left button comes up, wherever the mouse
+--                            goes meanwhile and whatever the owner does
+--                            with its own mouse-up script
+--   UI.GripPaint(grip)       redraw as it stands (a theme change)
+-- Every resize corner ZacUI draws goes through it: the windows below,
+-- the HUD handle, the map, the battlefield map, the meter, the world
+-- map, the unit frames' dialogs.
+local GRIP_ART = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\grip"
+local GRIP_TIME = 0.1
+UI.GRIP_ART = GRIP_ART
+local function GripRest()
+    local c = GetColor("text", "gray")
+    return c.r * 0.7, c.g * 0.7, c.b * 0.7, 0.85
+end
+local function GripHot()
+    local c = GetColor("ui", "accent")
+    return c.r, c.g, c.b, 1
+end
+local function GripDraw(art)
+    local p = art._p or 0
+    local r, g, b, a = art._rest()
+    if p > 0 then
+        local r2, g2, b2, a2 = art._hot()
+        r, g, b, a = r + (r2 - r) * p, g + (g2 - g) * p, b + (b2 - b) * p, a + (a2 - a) * p
+    end
+    art:SetVertexColor(r, g, b, a)
+    local side = art._side + art._grow * p
+    art:SetSize(side, side)
+end
+-- One driver for every grip, and only while one of them is changing.
+local gripMoving, gripDriver = {}, nil
+local function GripStep(self, dt)
+    local step = (dt or 0.016) / GRIP_TIME
+    local busy
+    for art in pairs(gripMoving) do
+        -- (held: watched until the button comes up - a corner is left
+        -- behind on the first frame of a pull, and the mouse-up is the
+        -- owner's to script)
+        if art._held and not (IsMouseButtonDown and IsMouseButtonDown("LeftButton")) then
+            art._held = nil
+            art._want = art._over and 1 or 0
+        end
+        local want, p = art._want or 0, art._p or 0
+        if p ~= want then
+            if p < want then p = math.min(want, p + step) else p = math.max(want, p - step) end
+            art._p = p
+            GripDraw(art)
+        end
+        if p == want and not art._held then gripMoving[art] = nil else busy = true end
+    end
+    if not busy then self:SetScript("OnUpdate", nil) end
+end
+local function GripRun(art)
+    gripMoving[art] = true
+    gripDriver = gripDriver or CreateFrame("Frame")
+    gripDriver:SetScript("OnUpdate", GripStep)
+end
+function UI.GripArt(grip, opts)
+    opts = opts or {}
+    local corner = opts.corner or "BOTTOMRIGHT"
+    local inset = opts.inset or 3
+    local art = grip.art or grip:CreateTexture(nil, opts.layer or "ARTWORK")
+    art._zui_own = true
+    art:SetTexture(GRIP_ART)
+    local left = corner == "BOTTOMLEFT" or corner == "TOPLEFT"
+    local top = corner == "TOPLEFT" or corner == "TOPRIGHT"
+    art:SetTexCoord(left and 1 or 0, left and 0 or 1, top and 1 or 0, top and 0 or 1)
+    art:ClearAllPoints()
+    art:SetPoint(corner, grip, corner, left and inset or -inset, top and -inset or inset)
+    art._side, art._grow = opts.size or 10, opts.grow or 2
+    art._rest, art._hot = opts.rest or GripRest, opts.hot or GripHot
+    art._p, art._want, art._over, art._held = 0, 0, nil, nil
+    grip.art = art
+    GripDraw(art)
+    return art
+end
+function UI.GripLit(grip, on)
+    local art = grip and grip.art
+    if not art then return end
+    local down = IsMouseButtonDown and IsMouseButtonDown("LeftButton") and true or false
+    if on then
+        art._cameDown = down or nil       -- (something else being dragged across it)
+    elseif down and art._over and not art._cameDown then
+        -- left with the button down, having arrived with it up: it is
+        -- being pulled, whoever scripted the press
+        art._held = true
+    end
+    art._over = on and true or nil
+    art._want = (on or art._held) and 1 or 0
+    if art._held then GripRun(art) return end      -- (watched until the button comes up)
+    if (art._p or 0) == art._want then return end
+    -- (unseen: nothing to ease)
+    if grip.IsVisible and not grip:IsVisible() then
+        art._p = art._want
+        gripMoving[art] = nil
+        GripDraw(art)
+        return
+    end
+    GripRun(art)
+end
+function UI.GripHold(grip)
+    local art = grip and grip.art
+    if not art then return end
+    art._held = true
+    art._want = 1
+    GripRun(art)
+end
+function UI.GripPaint(grip)
+    if grip and grip.art then GripDraw(grip.art) end
+end
 
 -- ============================================================
 -- HUD HANDLE
@@ -3145,14 +3268,13 @@ function UI.HudHandle(frame, opts)
 
     local grip = CreateFrame("Button", nil, strip)
     grip:SetSize(12, 12)
-    grip.dots = {}
-    for i, pos in ipairs({ { 1, 1 }, { 5, 1 }, { 9, 1 }, { 5, 5 }, { 9, 5 }, { 9, 9 } }) do
-        local dot = grip:CreateTexture(nil, "ARTWORK")
-        dot._zui_own = true
-        dot:SetSize(2, 2)
-        dot:SetPoint("BOTTOMLEFT", grip, "BOTTOMLEFT", pos[1], pos[2])
-        grip.dots[i] = dot
-    end
+    -- (the corner points the way the frame grows: right from a right
+    -- corner, left from a left one)
+    UI.GripArt(grip, { corner = corner == "TOPLEFT" and "BOTTOMLEFT" or "BOTTOMRIGHT", size = 8, grow = 2, inset = 1,
+        rest = function()
+            local g = GetColor("text", "gray")
+            return g.r * 0.8, g.g * 0.8, g.b * 0.8, 0.9
+        end })
 
     local function Place()
         strip:ClearAllPoints()
@@ -3175,8 +3297,7 @@ function UI.HudHandle(frame, opts)
         local c = locked and GetColor("text", "gray") or GetColor("ui", "accent")
         for _, t in ipairs(lock.parts) do t:SetVertexColor(c.r, c.g, c.b, 1) end
         grip:SetShown(not locked and opts.setScale ~= nil)
-        local g = GetColor("text", "gray")
-        for _, d in ipairs(grip.dots) do d:SetColorTexture(g.r * 0.8, g.g * 0.8, g.b * 0.8, 0.9) end
+        UI.GripPaint(grip)
         if not strip.hot then strip:SetAlpha(strip.idleAlpha) end
     end
     -- The handle shows while the mouse is over the frame or the strip and
@@ -3231,8 +3352,8 @@ function UI.HudHandle(frame, opts)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         local locked = opts.getLocked and opts.getLocked() or false
         GameTooltip:SetText(locked and "Locked" or "Unlocked", 1, 1, 1)
-        GameTooltip:AddLine(locked and "Click to unlock: then drag the frame to move it, the dots to resize it."
-            or "Drag the frame to move it, the dots to resize it. Click to lock.", 0.8, 0.8, 0.8, true)
+        GameTooltip:AddLine(locked and "Click to unlock: then drag the frame to move it, the grip to resize it."
+            or "Drag the frame to move it, the grip to resize it. Click to lock.", 0.8, 0.8, 0.8, true)
         GameTooltip:Show()
     end)
     lock:HookScript("OnLeave", function() GameTooltip:Hide() end)
@@ -3242,8 +3363,7 @@ function UI.HudHandle(frame, opts)
         if btn ~= "LeftButton" then return end
         local x = GetCursorPosition()
         self.dragX, self.dragScale = x, (opts.getScale and opts.getScale()) or frame:GetScale() or 1
-        local a = GetColor("ui", "accent")
-        for _, d in ipairs(self.dots) do d:SetColorTexture(a.r, a.g, a.b, 1) end
+        UI.GripHold(self)
         self:SetScript("OnUpdate", function(g)
             local cx = GetCursorPosition()
             local dx = (cx - g.dragX) / (UIParent:GetEffectiveScale() or 1)
@@ -3266,12 +3386,16 @@ function UI.HudHandle(frame, opts)
         Paint()
     end)
     grip:HookScript("OnEnter", function(self)
+        UI.GripLit(self, true)
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
         GameTooltip:SetText("Resize", 1, 1, 1)
         GameTooltip:AddLine("Drag sideways.", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
-    grip:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    grip:HookScript("OnLeave", function(self)
+        GameTooltip:Hide()
+        UI.GripLit(self, false)
+    end)
 
     strip.lock, strip.grip = lock, grip
     strip.Refresh = function() Place() Paint() end
@@ -3297,31 +3421,15 @@ function UI.AttachResizeGrip(frame, opts)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", 0, 0)
     grip:SetFrameLevel(frame:GetFrameLevel() + 10)
-    grip.dots = {}
+    UI.GripArt(grip)
 
-    local function Rest()
-        local c = GetColor("text", "gray")
-        for _, d in ipairs(grip.dots) do
-            d:SetColorTexture(c.r * 0.7, c.g * 0.7, c.b * 0.7, 0.85)
+    grip:SetScript("OnEnter", function(self) UI.GripLit(self, true) end)
+    grip:SetScript("OnLeave", function(self) UI.GripLit(self, false) end)
+    grip:SetScript("OnMouseDown", function(self, btn)
+        if btn == "LeftButton" then
+            UI.GripHold(self)
+            frame:StartSizing("BOTTOMRIGHT")
         end
-    end
-
-    for i, pos in ipairs(RESIZE_DOTS) do
-        local dot = grip:CreateTexture(nil, "ARTWORK")
-        dot._zui_own = true
-        dot:SetSize(2, 2)
-        dot:SetPoint("BOTTOMLEFT", grip, "BOTTOMLEFT", pos[1], pos[2])
-        grip.dots[i] = dot
-    end
-    Rest()
-
-    grip:SetScript("OnEnter", function()
-        local a = GetColor("ui", "accent")
-        for _, d in ipairs(grip.dots) do d:SetColorTexture(a.r, a.g, a.b, 1) end
-    end)
-    grip:SetScript("OnLeave", Rest)
-    grip:SetScript("OnMouseDown", function(_, btn)
-        if btn == "LeftButton" then frame:StartSizing("BOTTOMRIGHT") end
     end)
     grip:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()
@@ -3329,8 +3437,9 @@ function UI.AttachResizeGrip(frame, opts)
         -- frame of a resize, and rebuilding a page that often is a freeze.
         if opts.onResizeStopped then opts.onResizeStopped(frame) end
     end)
+    grip:HookScript("OnHide", function(self) UI.GripLit(self, false) end)
 
-    grip._zPaint = Rest
+    grip._zPaint = UI.GripPaint
     frame._zGrip = grip
     return grip
 end

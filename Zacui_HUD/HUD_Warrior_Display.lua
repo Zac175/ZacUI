@@ -456,7 +456,15 @@ local function UpdateSpellIcon(icon, def)
         -- paler one (the WA's: about a third of the way to white)
         local c = WCol().oor
         if def.softRed then
-            tint = { c[1] + (1 - c[1]) * 0.36, c[2] + (1 - c[2]) * 0.36, c[3] + (1 - c[3]) * 0.36 }
+            -- (one table, refilled only when the colour changes: this
+            -- runs every pass for every Bloodthirst / Whirlwind out of reach)
+            local st = D._softOor
+            if not st then st = { 0, 0, 0 } D._softOor = st end
+            if st.r ~= c[1] or st.g ~= c[2] or st.b ~= c[3] then
+                st.r, st.g, st.b = c[1], c[2], c[3]
+                st[1], st[2], st[3] = c[1] + (1 - c[1]) * 0.36, c[2] + (1 - c[2]) * 0.36, c[3] + (1 - c[3]) * 0.36
+            end
+            tint = st
         else
             tint = c
         end
@@ -558,7 +566,9 @@ local function UpdateItemIcon(icon, def)
     elseif def.kind == "itemPotion" then
         item, count = ResolvePotion()
     elseif def.kind == "itemSapper" then
-        item = { id = WH.SAPPER_ID, icon = 135826 }
+        -- (one table for good, not one a pass: it is only read)
+        item = D._sapperItem
+        if not item then item = { id = WH.SAPPER_ID, icon = 135826 } D._sapperItem = item end
         local e = S.items[WH.SAPPER_ID]
         count = e and e.count or 0
     elseif def.kind == "itemDense" then
@@ -710,6 +720,21 @@ end
 -- Main grid refresh
 local mainActive = {}
 local mainLast = {}
+local mainHold = W.NewHold()      -- (W.HeldList: a leaving icon's place kept a moment)
+
+-- A held place closes on the first pass after its time is up. In a fight
+-- that pass is a fifth of a second away anyway; out of one the HUD only
+-- looks once a second, so one wake is booked for when the hold ends (one
+-- timer however many places are held, and none while one is booked).
+local holdWakeBooked = false
+local function WakeWhenHoldEnds()
+    if holdWakeBooked or S.inCombat then return end
+    holdWakeBooked = true
+    C_Timer.After((W.HOLD or 0.4) + 0.02, function()
+        holdWakeBooked = false
+        if WH.Wake then WH.Wake() end
+    end)
+end
 
 -- one grid icon per call (a file-level function: the 0.2s refresh used to
 -- build this closure on every tick)
@@ -790,9 +815,12 @@ local function RefreshMainRow(cfg)
     else
         for _, icon in pairs(mainIcons) do icon:Hide() end
     end
-    if ListMoved(mainActive, mainLast) then
-        RememberList(mainActive, mainLast)
-        W.LayoutMainRow(mainAnchor, mainActive, cfg.mainRow.rows, cfg.mainRow.spacing)
+    local list, held = mainActive, false
+    if not D.preview then list, held = W.HeldList(mainActive, mainLast, mainHold, GetTime()) end
+    if held then WakeWhenHoldEnds() end
+    if ListMoved(list, mainLast) then
+        RememberList(list, mainLast)
+        W.LayoutMainRow(mainAnchor, list, cfg.mainRow.rows, cfg.mainRow.spacing)
     end
 end
 
@@ -1838,6 +1866,7 @@ end
 
 local auraActive = {}
 local auraLast = {}
+local auraHold = W.NewHold()
 
 -- one buff-row icon (and its clones) per call; file-level, built once
 local function placeIcon(icon, key)
@@ -1951,9 +1980,12 @@ local function RefreshAuraRow(cfg)
     else
         for _, icon in pairs(auraIcons) do icon:Hide() end
     end
-    if ListMoved(auraActive, auraLast) then
-        RememberList(auraActive, auraLast)
-        W.LayoutHRow(auraAnchor, auraActive,
+    local list, held = auraActive, false
+    if not D.preview then list, held = W.HeldList(auraActive, auraLast, auraHold, GetTime()) end
+    if held then WakeWhenHoldEnds() end
+    if ListMoved(list, auraLast) then
+        RememberList(list, auraLast)
+        W.LayoutHRow(auraAnchor, list,
             cfg.auraRow.iconW, cfg.auraRow.iconH, cfg.auraRow.spacing)
     end
 end
@@ -2051,6 +2083,7 @@ end
 
 local debuffActive = {}
 local debuffLast = {}
+local debuffHold = W.NewHold()
 
 -- one debuff icon per call; answers whether the entry is on (so the core
 -- knows to read the target)
@@ -2103,9 +2136,12 @@ local function RefreshDebuffRow(cfg)
         for _, icon in pairs(debuffIcons) do icon:Hide() end
     end
     WH.WantDebuffs(want and not D.preview)
-    if ListMoved(debuffActive, debuffLast) then
-        RememberList(debuffActive, debuffLast)
-        if row then W.LayoutHRow(debuffAnchor, debuffActive, row.iconW or 26, row.iconH or 26, row.spacing) end
+    local list, held = debuffActive, false
+    if not D.preview then list, held = W.HeldList(debuffActive, debuffLast, debuffHold, GetTime()) end
+    if held then WakeWhenHoldEnds() end
+    if ListMoved(list, debuffLast) then
+        RememberList(list, debuffLast)
+        if row then W.LayoutHRow(debuffAnchor, list, row.iconW or 26, row.iconH or 26, row.spacing) end
     end
 end
 

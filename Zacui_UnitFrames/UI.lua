@@ -673,15 +673,14 @@ function UI:TabBar(parent, tabs, onSelect, fill)
 end
 
 -- ----------------------------------------------------------------------------
--- Resize grip: six dots in the bottom-right corner - the same handle ZacUI and
--- Readycheck use, deliberately, so the gesture transfers between the three.
--- Drawn (2px squares) rather than textured so it scales honestly at any UI
--- scale. Dots light gold on hover; a corner nobody discovers is a window
--- nobody resizes. opts: minW/minH/maxW/maxH, onResizeStopped(frame) - fired
--- AFTER the drag, never per-frame (relaying out a page that often is a freeze).
+-- Resize grip: ZacUI's solid corner in the bottom-right corner - the same
+-- handle every ZacUI window has, drawn, coloured and eased by ZacUI's own
+-- UI.GripArt (the triangle turns the accent and grows under the mouse and
+-- while it is pulled; a corner nobody discovers is a window nobody
+-- resizes). It was six dots until 2026-11-11. opts: minW/minH/maxW/maxH,
+-- onResizeStopped(frame) - fired AFTER the drag, never per-frame (relaying
+-- out a page that often is a freeze).
 -- ----------------------------------------------------------------------------
-local RESIZE_DOTS = { {2,2}, {6,2}, {10,2}, {6,6}, {10,6}, {10,10} }
-
 function UI:AttachResizeGrip(frame, opts)
     opts = opts or {}
     frame:SetResizable(true)
@@ -696,27 +695,23 @@ function UI:AttachResizeGrip(frame, opts)
     grip:SetSize(16, 16)
     grip:SetPoint("BOTTOMRIGHT", 0, 0)
     grip:SetFrameLevel(frame:GetFrameLevel() + 10)
-    grip.dots = {}
 
-    local function rest()
-        for _, d in ipairs(grip.dots) do
-            d:SetColorTexture(C.txtDim[1] * 0.7, C.txtDim[2] * 0.7, C.txtDim[3] * 0.7, 0.85)
+    local Z = ns.ZUI or _G.ZacUI
+    local ZUI_UI = Z and Z.UI
+    if ZUI_UI and ZUI_UI.GripArt then
+        ZUI_UI.GripArt(grip, {
+            rest = function() return C.txtDim[1] * 0.7, C.txtDim[2] * 0.7, C.txtDim[3] * 0.7, 0.85 end,
+            hot = function() return C.accent[1], C.accent[2], C.accent[3], 1 end,
+        })
+    end
+    local function Lit(self, on) if ZUI_UI and ZUI_UI.GripLit then ZUI_UI.GripLit(self, on) end end
+    grip:SetScript("OnEnter", function(self) Lit(self, true) end)
+    grip:SetScript("OnLeave", function(self) Lit(self, false) end)
+    grip:SetScript("OnMouseDown", function(self, btn)
+        if btn == "LeftButton" then
+            if ZUI_UI and ZUI_UI.GripHold then ZUI_UI.GripHold(self) end
+            frame:StartSizing("BOTTOMRIGHT")
         end
-    end
-    for i, pos in ipairs(RESIZE_DOTS) do
-        local dot = grip:CreateTexture(nil, "ARTWORK")
-        dot:SetSize(2, 2)
-        dot:SetPoint("BOTTOMLEFT", grip, "BOTTOMLEFT", pos[1], pos[2])
-        grip.dots[i] = dot
-    end
-    rest()
-
-    grip:SetScript("OnEnter", function()
-        for _, d in ipairs(grip.dots) do d:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1) end
-    end)
-    grip:SetScript("OnLeave", rest)
-    grip:SetScript("OnMouseDown", function(_, btn)
-        if btn == "LeftButton" then frame:StartSizing("BOTTOMRIGHT") end
     end)
     grip:SetScript("OnMouseUp", function()
         frame:StopMovingOrSizing()

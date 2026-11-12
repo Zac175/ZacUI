@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Unit frames|r
 ## Notes: ZacUI's unit frames: player, target, pet, party and raid frames with incoming heals. The addon that used to be ZacUF.
 ## Author: Zac
-## Version: 3.0.9
+## Version: 3.0.10
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Unit Frames
 ## Dependencies: Zacui

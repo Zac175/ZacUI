@@ -152,11 +152,9 @@ end
 -- The corner grip. A slider in the options is fine for a one-off, but
 -- sizing a window is something you want to do by looking at it.
 --
--- SIX DOTS IN A TRIANGLE, muted at rest and accent gold on hover - the
--- same grip Readycheck puts on its resizable dialogs, so the gesture is
--- the one already learned rather than a second thing to discover.
-local GRIP_DOTS = { { 2, 2 }, { 6, 2 }, { 10, 2 }, { 6, 6 }, { 10, 6 }, { 10, 10 } }
-
+-- THE GRIP: ZacUI's solid corner (UI.GripArt), muted at rest and the
+-- accent, a little larger, under the mouse or while it is being pulled.
+-- (It was six dots in a triangle until 2026-11-11.)
 local function BuildGrip(map)
     local grip = CreateFrame("Button", "ZacUIMapGrip", map)
     -- Marked as ours BEFORE anything else touches it: the skin pass
@@ -167,25 +165,19 @@ local function BuildGrip(map)
     grip:SetSize(16, 16)
     grip:EnableMouse(true)
 
-    grip.dots = {}
-    for i, pos in ipairs(GRIP_DOTS) do
-        local dot = grip:CreateTexture(nil, "OVERLAY")
-        dot._zui_own = true
-        dot:SetTexture(FLAT)
-        dot:SetSize(2, 2)
-        dot:SetPoint("BOTTOMLEFT", grip, "BOTTOMLEFT", pos[1], pos[2])
-        grip.dots[i] = dot
-    end
-    grip._zPaint = function(self)
-        local c = self._hot and Col("accent") or GetColor("text", "disabled")
-        local a = self._hot and 1 or 0.8
-        for _, dot in ipairs(self.dots) do
-            dot:SetVertexColor(c.r, c.g, c.b, a)
-        end
-    end
+    UI.GripArt(grip, { layer = "OVERLAY", inset = 1,
+        rest = function()
+            local c = GetColor("text", "disabled")
+            return c.r, c.g, c.b, 0.8
+        end,
+        hot = function()
+            local c = Col("accent")
+            return c.r, c.g, c.b, 1
+        end })
+    grip._zPaint = UI.GripPaint
     grip:_zPaint()
-    grip:SetScript("OnEnter", function(self) self._hot = true self:_zPaint() end)
-    grip:SetScript("OnLeave", function(self) self._hot = nil self:_zPaint() end)
+    grip:SetScript("OnEnter", function(self) UI.GripLit(self, true) end)
+    grip:SetScript("OnLeave", function(self) UI.GripLit(self, false) end)
 
     -- Sizing by hand rather than through StartSizing. StartSizing needs
     -- SetResizable plus resize bounds whose API has moved twice, and it
@@ -254,6 +246,7 @@ local function BuildGrip(map)
         local startScale = map:GetScale() or 1
         map:SetClampedToScreen(false)
         F.resizing = true
+        UI.GripHold(self)
 
         local wait = 0
         self:SetScript("OnUpdate", function(_, dt)

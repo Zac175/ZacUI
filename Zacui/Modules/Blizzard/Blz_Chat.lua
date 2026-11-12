@@ -73,7 +73,7 @@ local COPY_LINES = 500
 -- name at 11 in white (65% unselected), the selected one underlined one
 -- pixel in the accent, a 6% hairline between tabs; the bar under the
 -- text the panel itself with the 6% divider over it; the edit box 23
--- high; wrapped lines indented; the resize grip ZacUI's own glyph at 40%.
+-- high; wrapped lines indented; the resize grip ZacUI's solid corner.
 -- A colour or font picked on the Chat page still wins over every one.
 -- Sizes and spots of the chat itself are never moved.
 local REF = {
@@ -678,31 +678,37 @@ function Chat.ApplyIndent(cf, d)
 end
 
 -- THE RESIZE GRIP: the window's own resize button (the game's, so sizing
--- and its saving stay the game's) wearing ZacUI's corner glyph, white at
--- 40%, 90% under the mouse, 18 across (the reference's). Only its art and
--- size change; where the game puts it and when it shows stay the game's.
--- Lock size (Chat_Panel) hides the button itself, so the two never meet.
-local GRIP_ART = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\resize"
+-- and its saving stay the game's) wearing ZacUI's solid corner - the same
+-- triangle every other ZacUI window has (UI.GripArt: muted at rest, the
+-- accent and a little larger under the mouse and while it is pulled).
+-- (2026-11-12, Zac: the chat was the one corner left on the older glyph,
+-- two diagonal strokes.) The button's own three textures are emptied, not
+-- removed: the game still owns the button, where it sits and when it
+-- shows; on the clients that leave its size to the addon side it is 18
+-- across (the reference's). Lock size (Chat_Panel) hides the button
+-- itself, so the two never meet.
 function Chat.StyleGrip(cf)
     if not cf or not Match() then return end
     local name = cf.GetName and cf:GetName()
     local grip = cf.resizeButton or (name and _G[name .. "ResizeButton"])
     if not grip or grip._zGrip or not grip.SetNormalTexture then return end
     grip._zGrip = true
-    local function Art(setter, getter, a)
-        if not grip[setter] then return end
-        pcall(grip[setter], grip, GRIP_ART)
+    for _, getter in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture" }) do
         local t = grip[getter] and grip[getter](grip)
         if t then
             t._zui_own = true
-            if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
-            if t.SetVertexColor then t:SetVertexColor(1, 1, 1, a) end
-            if t.SetBlendMode then t:SetBlendMode("BLEND") end
+            if t.SetAlpha then t:SetAlpha(0) end
         end
     end
-    Art("SetNormalTexture", "GetNormalTexture", REF.gripA)
-    Art("SetPushedTexture", "GetPushedTexture", REF.gripHoverA)
-    Art("SetHighlightTexture", "GetHighlightTexture", REF.gripHoverA - REF.gripA)
+    local UI = ns.UI
+    if UI and UI.GripArt then
+        -- (3 in: where the old glyph's strokes ended)
+        UI.GripArt(grip, { inset = 3 })
+        grip:HookScript("OnEnter", function(self) UI.GripLit(self, true) end)
+        grip:HookScript("OnLeave", function(self) UI.GripLit(self, false) end)
+        grip:HookScript("OnMouseDown", function(self) UI.GripHold(self) end)
+        grip:HookScript("OnHide", function(self) UI.GripLit(self, false) end)
+    end
     -- the size on the clients where the game leaves the button to the
     -- addon side (Era / TBC); the modern clients keep their own
     local modern = ns.ModernClient and ns.ModernClient()

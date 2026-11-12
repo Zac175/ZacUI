@@ -385,6 +385,7 @@ local function BuildBuyWindow()
     win:HookScript("OnHide", function()
         win._zErr = nil
         win._zRunH = nil
+        win._zRunNote, win._zRunStacks = nil, nil
         if AH.PurchaseInProgress and AH.PurchaseInProgress() then
             AH.CancelPurchase()
         end
@@ -553,7 +554,11 @@ local function BuildBuyWindow()
         self.spent:SetText(Money(st.spent, true)
             .. (st.missed > 0 and ("  |cff888888(" .. st.missed .. " gone)|r") or ""))
         self.left:SetText(st.remaining .. (st.remaining == 1 and " auction" or " auctions"))
-        self._zStacks = units ~= st.bought
+        -- (2026-11-11) a run that buys stacks keeps its Bought row from
+        -- the first click to the last (it used to arrive with the first
+        -- stack bought, pushing everything under it down a row)
+        if units ~= st.bought or (st.nextPrice and n > 1) then self._zRunStacks = true end
+        self._zStacks = self._zRunStacks == true
         -- the progress bar: auctions bought of the run's auctions
         local total = tonumber(st.total) or ((st.bought or 0) + (st.remaining or 0) + (st.missed or 0))
         local settled = (st.bought or 0) + (st.missed or 0)
@@ -608,6 +613,12 @@ local function BuildBuyWindow()
             self.buy:Show()
             self.buy:SetLabel("waiting for the auction house...")
             self.buy:SetDisabled(true)
+            -- (2026-11-11, Zac: buying stacks, "the text ... flashes
+            -- instead of being smooth") the stack callout stays while the
+            -- auction house answers the click, like the line under the
+            -- name: it went and came back on every click, and the Buy
+            -- button rode up and down a line with it
+            note = self._zRunNote or ""
         elseif st.nextPrice then
             self.buy:Show()
             if n > 1 then
@@ -616,6 +627,7 @@ local function BuildBuyWindow()
             else
                 self.buy:SetLabel("Buy 1 item for " .. Money(st.nextPrice, true))
             end
+            self._zRunNote = note
             self.buy:SetDisabled(false)
         else
             -- Nothing left at a price you can afford: the window stays and
@@ -635,7 +647,11 @@ local function BuildBuyWindow()
         -- a label longer than the button wraps onto two lines (the button
         -- grows) instead of running past the window's edge
         local b = self.buy
-        if b._zWrapped and b._zUnfit then
+        -- (2026-11-11: and a label that had wrapped keeps its two-line
+        -- button while the auction house answers, so a long "Buy STACK"
+        -- label does not make the button a line shorter and taller again
+        -- on every click)
+        if b._zWrapped and b._zUnfit and not st.waiting then
             b:_zUnfit()
             b._zWrapped = nil
             b:SetHeight(BUY_H)

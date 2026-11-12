@@ -14,6 +14,41 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.10",
+        date = "2026-11-12",
+        title = "A world-buff switch for the buff remover, and a smoother warrior HUD",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "Buff remover: an \"Only while world buffs are out\" switch. With no world buff on you nothing ticked is cancelled; once you have one, everything ticked goes as usual.",
+                    "Buff remover: while that switch is on, a buff can be marked \"even with no WBs\" so it always goes. Salvation while tanking always goes too.",
+                    "Hesitation prompts: in execute range, Whirlwind is marked ahead of Execute when there are enough mobs for it. It has its own switch.",
+                    "Hesitation prompts: a Glide option. The icons over your target fade, slide and grow instead of jumping.",
+                    "With Readycheck installed, its route tracker can sit along the top of the chat box in a raid, above the raid frames. The switch is on the Chat page under \"In a raid\", with two more for how gear swaps show on it.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "Warrior HUD: icons grow smoothly, and an icon that leaves keeps its place for a moment so the row does not jump twice.",
+                    "Every window's resize corner is one solid corner that lights up under the mouse and while you drag it.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "A first login no longer ticks buffs for removal on a warrior, changes attack macros or makes a macro called \"dummy\".",
+                    "Hesitation prompts: an ability that comes off cooldown during the global cooldown counts as ready.",
+                    "Hesitation prompts: Arms warriors get Mortal Strike where Bloodthirst would be.",
+                    "Hesitation prompts: Whirlwind was rated too high with a fast main-hand weapon.",
+                    "The map window's title bar no longer shows a lighter slab behind it.",
+                    "Auction house: the line saying what you bought no longer flickers while buying stacks.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.9",
         date = "2026-11-11",
         title = "The old raid frames, and one look everywhere",

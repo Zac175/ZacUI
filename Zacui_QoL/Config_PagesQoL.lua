@@ -256,10 +256,24 @@ local function BuffsTab(L, QoL)
         .. "room for one you never wanted. Readycheck's stats bar shows Keep or "
         .. "Remove beside every buff (click its Buffs cell); a click there "
         .. "switches it too.")
+    -- the master switch (off until ticked); the card's status line under
+    -- it follows, so the page is redrawn with it
+    local wbBox = UI.Checkbox(L.current, "Only while world buffs are out", b.wbOnly == true,
+        function(v)
+            b.wbOnly = v and true or false
+            Refresh()
+            RefreshPage()
+        end)
+    L:Row(wbBox, 17)
+    L:Desc("With no world buff on you (Ony, Rend, Zandalar, Songflower, Dire Maul, Darkmoon) "
+        .. "nothing ticked below is removed, in or out of combat - except the buffs you mark "
+        .. "\"even with no WBs\" beside their tick, and Salvation while tanking. Once a world "
+        .. "buff is on you, everything ticked goes as usual.")
     BindCheck(L, b, "auto", "Out of combat, take them off as soon as they land", nil)
     if cls == "WARRIOR" or cls == "DRUID" or cls == "PALADIN" then
         BindCheck(L, c, "salv", "Drop Blessing of Salvation while tanking",
-            "Defensive Stance, bear form or Righteous Fury. Pausing does not stop this.")
+            "Defensive Stance, bear form or Righteous Fury. Neither pausing nor "
+            .. "\"Only while world buffs are out\" stops this.")
     end
     local paused = BR.Paused()
     local pb = UI.Button(L.current, paused and "Resume removal" or "Pause removal", { width = 140,
@@ -276,6 +290,11 @@ local function BuffsTab(L, QoL)
     elseif paused then
         L:Desc("Paused on this character: nothing is removed except Salvation while tanking. "
             .. "Shift-clicking Readycheck's Buffs cell pauses and resumes as well.")
+    elseif BR.Held and BR.Held() then
+        L:Desc("Standing by: no world buff on you, so of the " .. n .. " buff(s) ticked for your class "
+            .. "only the ones marked \"even with no WBs\" go"
+            .. ((cls == "WARRIOR" or cls == "DRUID" or cls == "PALADIN") and c.salv
+                and " (and Salvation while tanking)." or "."))
     else
         L:Desc(n .. " buff(s) ticked for your class. Ticks are per class, so each class keeps its own list.")
     end
@@ -484,10 +503,21 @@ local function BuffsTab(L, QoL)
         dd:SetShown(ticked)
         return dd
     end
-    local function WbTick(dd, get, set, ticked)
-        local wb = UI.Checkbox(L.current, "while WBs out", get(), function(v) set(v) end,
-            { tooltip = "Only while a world buff is on you (Ony, Rend, Zandalar, Songflower, DMF, Darkmoon Faire...). "
-                .. "Untick it and the buff goes whether or not you have world buffs." })
+    -- With the master switch on ("Only while world buffs are out") every
+    -- tick is held to world buffs already, so the tick beside it is the
+    -- other way round: "even with no WBs", the switch's exceptions.
+    local master = b.wbOnly == true
+    local function WbTick(dd, get, set, ticked, getAlways, setAlways)
+        local wb
+        if master then
+            wb = UI.Checkbox(L.current, "even with no WBs", getAlways(), function(v) setAlways(v) end,
+                { tooltip = "Goes even while \"Only while world buffs are out\" is holding the rest back: "
+                    .. "for the few you never want on you, world buffs or not." })
+        else
+            wb = UI.Checkbox(L.current, "while WBs out", get(), function(v) set(v) end,
+                { tooltip = "Only while a world buff is on you (Ony, Rend, Zandalar, Songflower, DMF, Darkmoon Faire...). "
+                    .. "Untick it and the buff goes whether or not you have world buffs." })
+        end
         wb:SetPoint("LEFT", dd, "RIGHT", 8, 0)
         wb:SetShown(ticked)
         return wb
@@ -504,7 +534,8 @@ local function BuffsTab(L, QoL)
         dd = WhenPicker(cb, function() return BR.Phase(key) end,
             function(v) BR.SetPhase(key, v) end, c.remove[key] == true)
         wb = WbTick(dd, function() return BR.Wb(key) end,
-            function(v) BR.SetWb(key, v) end, c.remove[key] == true)
+            function(v) BR.SetWb(key, v) end, c.remove[key] == true,
+            function() return BR.Always(key) end, function(v) BR.SetAlways(key, v) end)
     end
     local function NameTick(name, label)
         local dd, wb
@@ -518,7 +549,8 @@ local function BuffsTab(L, QoL)
         dd = WhenPicker(cb, function() return BR.PhaseName(name) end,
             function(v) BR.SetPhaseName(name, v) end, c.names[name] == true)
         wb = WbTick(dd, function() return BR.WbName(name) end,
-            function(v) BR.SetWbName(name, v) end, c.names[name] == true)
+            function(v) BR.SetWbName(name, v) end, c.names[name] == true,
+            function() return BR.AlwaysName(name) end, function(v) BR.SetAlwaysName(name, v) end)
     end
     local function EntryLabel(e)
         local label = e.name

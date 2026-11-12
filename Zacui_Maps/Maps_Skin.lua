@@ -641,16 +641,60 @@ function S.Apply()
     -- silently resolves to nil after the next one. Anything inside the
     -- canvas is off limits - those are pins, and SkinButton on a pin
     -- deletes the pin's artwork.
+    -- A BAR IS NOT A BUTTON (2026-11-11, Zac: "the map looks weird the
+    -- background/border looks like its built out of multiple different
+    -- windows and stitched together"). Blizzard's windowed map has an
+    -- invisible Button across its title bar - the handle the stock map
+    -- is dragged by. It is a Button, so it was skinned as one, and since
+    -- every skinned button wears the raised plate (2026-11-10) it became
+    -- a lighter slab with its own edge and top highlight, most of the
+    -- window wide, sitting behind ZacUI's header: a second, shorter
+    -- header inside the first. Anything that wide and that flat is a
+    -- handle, not a control, and gets no skin; one skinned before its
+    -- size was known (the first pass can come before the layout) has
+    -- what was drawn on it taken off again.
+    local function IsBarNotButton(child)
+        local name = child.GetName and child:GetName()
+        if type(name) == "string" and name:find("TitleButton", 1, true) then return true end
+        local l = child.GetLeft and child:GetLeft()
+        local r = child.GetRight and child:GetRight()
+        local w = (l and r) and (r - l) or (child.GetWidth and child:GetWidth()) or 0
+        local h = child.GetHeight and child:GetHeight() or 0
+        return w >= 240 and w > h * 4
+    end
+    local function Unskin(child)
+        if child._zMapBar then return end
+        child._zMapBar = true
+        child._zPaint = function() end            -- (the plate repaints itself on hover)
+        if child.GetRegions then
+            for _, region in ipairs({ child:GetRegions() }) do
+                if region.IsObjectType and region:IsObjectType("Texture") and region.SetAlpha then
+                    region:SetAlpha(0)
+                end
+            end
+        end
+    end
     local function SkinControls(root, depth)
         if not root or depth > 2 or root == canvas or IsOurs(root) then return end
         if not root.GetChildren then return end
         for _, child in ipairs({ root:GetChildren() }) do
             if child ~= canvas and not IsOurs(child) and IsBlizzards(child) and not overlaySet[child] then
                 local otype = child.GetObjectType and child:GetObjectType()
-                if (otype == "Button" or otype == "CheckButton")
-                    and not child._zMapCtl and ns.SkinButton then
-                    child._zMapCtl = true
-                    pcall(ns.SkinButton, child)
+                if otype == "Button" or otype == "CheckButton" then
+                    if IsBarNotButton(child) then
+                        -- (whoever skinned it: this pass earlier, or the
+                        -- general skinner at login)
+                        local Z = ns.ZUI
+                        if child._zMapCtl or rawget(child, "_zPlateLook") or rawget(child, "_zui_bg")
+                            or (Z and Z.skinned and Z.skinned[child]) then
+                            Unskin(child)
+                        end
+                        child._zMapCtl = true
+                        if Z and Z.skinned then Z.skinned[child] = true end   -- and nobody skins it later
+                    elseif not child._zMapCtl and ns.SkinButton then
+                        child._zMapCtl = true
+                        pcall(ns.SkinButton, child)
+                    end
                 end
                 SkinControls(child, depth + 1)
             end

@@ -138,18 +138,17 @@ local function Grip(corner)
 	g:SetFrameLevel(math.min(map.ScrollContainer:GetFrameLevel() + 9500, 9990))
 	if left then g:SetHitRectInsets(-GRIP_OUT, -GRIP_IN, -GRIP_IN, -GRIP_OUT)
 	else g:SetHitRectInsets(-GRIP_IN, -GRIP_OUT, -GRIP_IN, -GRIP_OUT) end
-	-- ZacUI's grip, exactly as ZacUI and Readycheck draw theirs (UI.AttachResizeGrip): a 16 px
-	-- square in the window's bottom-right corner, six 2 px dots in a triangle pointing into the
-	-- corner, text-gray at 70% and 85% alpha at rest, the accent under the cursor. One grip, bottom
-	-- right, as theirs: the left corner's is kept (the code sizes from either) but unseen and
-	-- untouchable. The button stays bigger than the dots so the corner is easy to catch.
-	local DOTS = { {2,2}, {6,2}, {10,2}, {6,6}, {10,6}, {10,10} }
-	g.dots = {}
+	-- ZacUI's grip, as ZacUI draws it everywhere (UI.GripArt, which also colours and eases it): the
+	-- solid corner in the window's bottom-right corner, muted text-gray at rest, the accent and a
+	-- little larger under the cursor. One grip, bottom right: the left corner's is kept (the code
+	-- sizes from either) but unseen and untouchable. The button stays bigger than the corner drawn
+	-- so it is easy to catch. (Six dots in a triangle until 2026-11-11.)
+	local face
 	if left then
 		g:SetAlpha(0)
 		g:EnableMouse(false)
 	else
-		local face = CreateFrame("Frame", nil, g)
+		face = CreateFrame("Frame", nil, g)
 		face:SetSize(16, 16)
 		face:SetPoint("BOTTOMRIGHT", map, "BOTTOMRIGHT", 0, 0)
 		-- (over ZacUI's coordinate strip, which sits a strata above the map along its bottom)
@@ -157,26 +156,14 @@ local function Grip(corner)
 		local up = Z and Z.Maps and Z.Maps.STRATA_UP and Z.Maps.STRATA_UP[map:GetFrameStrata()]
 		if up then face:SetFrameStrata(up) end
 		face:SetFrameLevel(120)
-		for i, pos in ipairs(DOTS) do
-			local dot = face:CreateTexture(nil, "ARTWORK")
-			dot:SetSize(2, 2)
-			dot:SetPoint("BOTTOMLEFT", face, "BOTTOMLEFT", pos[1], pos[2])
-			g.dots[i] = dot
-		end
+		if Z and Z.UI and Z.UI.GripArt then Z.UI.GripArt(face) end
+		g.face = face
 	end
 	local function Paint(hot)
 		local z = _G.ZacUI
-		local r, gg, b, a
-		if hot then
-			local c = z and z.Col and z.Col("accent")
-			r, gg, b, a = c and c.r or 0.85, c and c.g or 0.65, c and c.b or 0.25, 1
-		else
-			local c = z and z.GetColor and z.GetColor("text", "gray")
-			r, gg, b, a = (c and c.r or 0.6) * 0.7, (c and c.g or 0.6) * 0.7, (c and c.b or 0.6) * 0.7, 0.85
-		end
-		for _, d in ipairs(g.dots) do d:SetColorTexture(r, gg, b, a) end
+		if face and z and z.UI and z.UI.GripLit then z.UI.GripLit(face, hot and true or false) end
 	end
-	g.PaintDots = Paint
+	g.PaintDots = Paint          -- (the name is older than the corner)
 	Paint(false)
 	local start
 	g:SetScript("OnMouseDown", function()
@@ -184,6 +171,9 @@ local function Grip(corner)
 		local x, y = GetCursorPosition()
 		start = { x = x, y = y, w = map:GetWidth(), h = map:GetHeight(), left = map:GetLeft(), right = map:GetRight(), top = map:GetTop() }
 		sizing = true
+		-- (lit until the button comes up, wherever the mouse goes)
+		local z = _G.ZacUI
+		if face and z and z.UI and z.UI.GripHold then z.UI.GripHold(face) end
 		if mod.BeginResize then mod.BeginResize() end
 	end)
 	local function Finish()

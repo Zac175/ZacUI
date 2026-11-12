@@ -57,6 +57,7 @@ local EXECUTE = "Execute"
 local MELEE_PROXY = { "Hamstring", "Sunder Armor", "Rend", "Heroic Strike", "Bloodthirst",
     "Mortal Strike", "Overpower", "Revenge", "Sinister Strike", "Claw", "Maul" }
 local TICK = 0.1
+local SOON_SLACK = 0.1      -- a cooldown ending this long after the global cooldown still counts as "with it"
 local SOUND_GAP = 2.0       -- never two alert sounds closer than this
 
 -- The abilities a class starts with. Everything is matched by spell
@@ -100,6 +101,7 @@ local DEFAULTS = {
     plateCDs = true,             -- BT/WW cooldowns over the target's nameplate
     plateSoon = 1.5,             -- ...an icon appears this many seconds before it is ready
     plateSize = 30,              -- (24 until 2026-10-20: Zac "bigger by default")
+    plateGlide = true,           -- the row's icons fade, slide and grow instead of jumping (2026-11-11)
     plateGrow = true,            -- a NOOB icon keeps growing while it is ignored...
     plateGrowMax = 2.0,          -- ...up to this many times its size
     plateRowX = 0, plateRowY = 2, -- the row's fixed spot over a ZacUI plate: its bottom this far above the target box
@@ -120,6 +122,7 @@ local DEFAULTS = {
     scorecard = false,           -- the summary as a popup after each pull (off: kept quietly, /zui noob shows it)
     ttkQuiet = 1.5,              -- no call-out on a mob about to die in under this many seconds (0 = off; never bosses)
     execBTap = 2000,             -- in execute range, Bloodthirst still beats Execute from this much attack power (0 = off)
+    execWW = true,               -- in execute range, Whirlwind still goes first with the mobs for it (2026-11-12)
     wwFirstAt = 3,               -- from this many mobs in reach Whirlwind goes before Bloodthirst (0 = always BT first)
     wwAuto = true,               -- ...worked out from attack power and the main hand instead (2026-10-28)
     shortfall = true,            -- "-6" on BT / WW when they are (nearly) back and the rage is short
@@ -428,9 +431,12 @@ function H.MainHandSpeeds()
     local WR = ns.WeaponRoles
     local f = WR and WR.Facts and WR.Facts(id)
     local speed = f and f.speed
+    -- (third answer: the speed is the weapon's own, from its tooltip - not
+    -- the swing timer's, which every haste effect shortens)
+    local own = speed ~= nil
     if not speed and UnitAttackSpeed then speed = UnitAttackSpeed("player") end
-    if ns.IsSecret(speed) then speed = nil end
-    return norm, speed
+    if ns.IsSecret(speed) then speed = nil own = false end
+    return norm, speed, own
 end
 
 local WW_MAX_TARGETS = 4
@@ -451,8 +457,16 @@ local function AutoWWFirstAt(now, force)
     -- (2026-10-30) Whirlwind hits with the NORMALISED speed (dagger 1.7,
     -- one-hander 2.4, two-hander 3.3), the sheet with the weapon's own:
     -- a 2.7 sword's sheet hit is AP/14 x 0.3 bigger than its Whirlwind
-    local norm, speed = H.MainHandSpeeds()
-    if norm and speed and speed > norm then ww = ww - ap / 14 * (speed - norm) * (pct or 1) end
+    -- (2026-11-11 audit) ...and a main hand FASTER than the normalised
+    -- speed (a 1.8 sword against 2.4, a 3.0 two-hander against 3.3) hits
+    -- HARDER with Whirlwind than its sheet says: that was left out, which
+    -- made Whirlwind look weaker and pushed its first-at count up. It is
+    -- put in only when the speed is the weapon's own - the swing timer's
+    -- is shortened by haste and would read a slow weapon as a fast one.
+    local norm, speed, own = H.MainHandSpeeds()
+    if norm and speed and (speed > norm or own) then
+        ww = ww - ap / 14 * (speed - norm) * (pct or 1)
+    end
     if ww <= 0 then return nil end
     local bt = 0.45 * ap * (pct or 1)             -- the same damage multipliers
     -- every hit that crits leaves Deep Wounds (60% of the weapon's average
@@ -1266,31 +1280,159 @@ local function NoobScale(e, db, now)
     return math.floor(s * 100 + 0.5) / 100
 end
 
+-- THE ROW GLIDES (2026-11-11, Zac: "can you smooth out the hesitation
+-- stuff"). Everything the row does used to happen in one frame, ten times
+-- a second at most: an icon was there or not, a NOOB icon was a size
+-- bigger or not, a dimmed one at 40% or 100%, and every icon beside one
+-- that came, went or grew jumped sideways to stay centred. Now each of
+-- those is a target the icon eases to, frame by frame:
+--   an icon arriving fades in and comes up to its size
+--   one leaving fades out where it stands while the rest close up
+--   a size change (NEXT, the NOOB growing) and a dim are eased
+--   the others slide to their new places
+-- The tick only writes targets (ic._ta alpha, ic._tw size, ic._tx place,
+-- ic._out leaving); the row's own OnUpdate eases to them and takes
+-- itself off the moment everything has arrived, so nothing runs per
+-- frame while the row sits still. plateGlide = false is the old jump.
+local GLIDE_TAU = 0.05      -- the ease's time constant: nine tenths of the way in ~0.12 s
+local POP_FROM = 0.6        -- an arriving icon starts at this much of its size
+local function GlideOn() return DB().plateGlide ~= false end
+
+local function PlaceIcon(f, ic, cx)
+    ic._cx = cx
+    ic:ClearAllPoints()
+    ic:SetPoint("BOTTOM", f, "BOTTOM", cx, 0)
+end
+
+-- a leaving icon is gone: hidden, and as it was before it ever showed
+local function EndLeave(ic, sz)
+    ic._out, ic._fresh = nil, nil
+    ic._ta, ic._tw, ic._tx, ic._cx = nil, nil, nil, nil
+    ic:Hide()
+    ic:SetAlpha(1)
+    ic:SetSize(sz, sz)
+end
+
+local function Glide(f, elapsed)
+    local k = 1 - math.exp(-(elapsed or 0) / GLIDE_TAU)
+    local sz = DB().plateSize or 30
+    local abs = math.abs
+    local busy = false
+    for i = 1, #f.icons do
+        local ic = f.icons[i]
+        if ic._out then
+            local ca = ic:GetAlpha() or 0
+            ca = ca - ca * k
+            if ca < 0.03 then EndLeave(ic, sz) else ic:SetAlpha(ca) busy = true end
+        elseif ic._on then
+            local ta, ca = ic._ta or 1, ic:GetAlpha() or 1
+            if abs(ta - ca) > 0.005 then
+                ca = ca + (ta - ca) * k
+                if abs(ta - ca) < 0.02 then ca = ta else busy = true end
+                ic:SetAlpha(ca)
+            end
+            local tw, cw = ic._tw or sz, ic:GetWidth() or sz
+            if abs(tw - cw) > 0.05 then
+                cw = cw + (tw - cw) * k
+                if abs(tw - cw) < 0.4 then cw = tw else busy = true end
+                ic:SetSize(cw, cw)
+            end
+            local tx, cx = ic._tx, ic._cx
+            if tx and cx ~= tx then
+                if cx == nil then
+                    cx = tx
+                else
+                    cx = cx + (tx - cx) * k
+                    if abs(tx - cx) < 0.4 then cx = tx else busy = true end
+                end
+                PlaceIcon(f, ic, cx)
+            end
+        end
+    end
+    if not busy then
+        f._gliding = nil
+        f:SetScript("OnUpdate", nil)
+    end
+end
+
+local function StartGlide(f)
+    if f._gliding then return end
+    f._gliding = true
+    f:SetScript("OnUpdate", Glide)
+end
+
+-- everything where it is going, now (the previews, the old jump, a hide)
+local function StopGlide(f)
+    if f._gliding then
+        f._gliding = nil
+        f:SetScript("OnUpdate", nil)
+    end
+    local sz = DB().plateSize or 30
+    for i = 1, #f.icons do
+        local ic = f.icons[i]
+        if ic._out then
+            EndLeave(ic, sz)
+        elseif ic._on then
+            ic._fresh = nil
+            ic:SetAlpha(ic._ta or 1)
+            local tw = ic._tw or sz
+            ic:SetSize(tw, tw)
+            if ic._tx then PlaceIcon(f, ic, ic._tx) end
+        end
+    end
+end
+H._StopGlide = StopGlide
+
 -- lays the shown icons out left to right, centred over the plate; only
 -- when the set of shown icons (or a NOOB icon's size) changed - `changed`
--- - or a layout was asked for (f._sig cleared)
-local function LayoutPlateRow(f, changed)
-    if f._sig and not changed then return end
+-- - or a layout was asked for (f._sig cleared). It writes each icon's
+-- place (ic._tx, its centre from the row's centre); `glide` (the live
+-- row with plateGlide on) leaves the moving to the ease, otherwise the
+-- icons are put there at once.
+local function LayoutPlateRow(f, changed, glide)
+    if f._sig and not changed then
+        if not glide and f._gliding then StopGlide(f) end
+        return
+    end
     f._sig = true
     local size = DB().plateSize or 30
     local gap = 3
-    local n, x, h = 0, 0, size
+    local total, h = 0, size
     for i = 1, #f.icons do
         local ic = f.icons[i]
         if ic._on then
             -- each icon its own width: a NOOB one is bigger (see BIG;
             -- _big is its scale while it grows, true in the preview)
             local w = ic._big and math.floor(size * (tonumber(ic._big) or BIG) + 0.5) or size
-            ic:ClearAllPoints()
-            ic:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", x, 0)
-            x = x + w + gap
+            ic._lw = w
+            total = total + w + gap
             if w > h then h = w end
             if ic._nx and w + NEXT_LABEL_H > h then h = w + NEXT_LABEL_H end
-            n = n + 1
         end
     end
-    f:SetSize(math.max(1, x - gap), h)
+    total = total - gap
+    local x = 0
+    for i = 1, #f.icons do
+        local ic = f.icons[i]
+        if ic._on then
+            local w = ic._lw
+            ic._tx = x + w / 2 - total / 2
+            x = x + w + gap
+            if glide and (ic._fresh or ic._cx == nil) then
+                -- just arrived: in its place already, small and clear,
+                -- and the ease brings it up
+                PlaceIcon(f, ic, ic._tx)
+                if ic._fresh then
+                    ic._fresh = nil
+                    local from = (ic._tw or size) * POP_FROM
+                    ic:SetSize(from, from)
+                end
+            end
+        end
+    end
+    f:SetSize(math.max(1, total), h)
     f._rowH = h
+    if glide then StartGlide(f) else StopGlide(f) end
 end
 
 HidePlateRow = function()
@@ -1298,11 +1440,18 @@ HidePlateRow = function()
         prow:Hide()
         prow._plate, prow._to, prow._pt, prow._zf = nil, nil, nil, nil
         prow._sig = nil
+        if prow._gliding then
+            prow._gliding = nil
+            prow:SetScript("OnUpdate", nil)
+        end
         local sz = DB().plateSize or 30
         for _, ic in ipairs(prow.icons) do
             ic._on = nil ic._tenth = nil ic:Hide()
-            if ic._big then ic._big = nil ic:SetSize(sz, sz) end
-            if ic._dim then ic._dim = nil ic:SetAlpha(1) end
+            -- (whatever it was on its way to: plain again)
+            ic:SetSize(sz, sz)
+            ic:SetAlpha(1)
+            ic._big, ic._dim = nil, nil
+            ic._out, ic._fresh, ic._ta, ic._tw, ic._tx, ic._cx = nil, nil, nil, nil, nil, nil
             if ic._nx then ic._nx = nil ic:SetText("nx", "") end
         end
         prow._rowH = nil
@@ -1331,6 +1480,9 @@ local function FillSampleRow(f)
         ic:SetIconTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
         ic._tex = nil            -- the live row sets its own again
         ic._on = true
+        -- (a sample is drawn where it stands: nothing eased, nothing dimmed)
+        ic._out, ic._fresh, ic._ta, ic._dim = nil, nil, nil, nil
+        ic:SetAlpha(1)
         ic:Show()
         ic:SetText("n", names[i] == "Whirlwind" and "3" or "")
         -- every state once: BT ready (gold), WW 1.3s out, then ready but
@@ -1346,6 +1498,7 @@ local function FillSampleRow(f)
             local w = big and math.floor(sz * big + 0.5) or sz
             ic:SetSize(w, w)
         end
+        ic._tw = big and math.floor((db.plateSize or 30) * big + 0.5) or nil
         ic._nx = lab or nil
         ic:SetText("nx", lab and "NEXT" or "")
         ic._txt = nil
@@ -1363,7 +1516,14 @@ local function FillSampleRow(f)
             ic:SetGlow("alert", false)
         end
     end
-    for i = #names + 1, #f.icons do if f.icons[i]._on then f.icons[i]._on = nil f.icons[i]:Hide() end end
+    for i = #names + 1, #f.icons do
+        local ic = f.icons[i]
+        if ic._on or ic._out then
+            ic._on, ic._out = nil, nil
+            ic:Hide()
+            ic:SetAlpha(1)
+        end
+    end
     f._sig = nil
     LayoutPlateRow(f, true)
 end
@@ -1483,6 +1643,9 @@ function H.HudState(name)
         if usable and Secondary(e) then return "ready2", usable, sb end
         return usable and "ready" or "norage", usable, sb
     end
+    -- still counting down, but it is the button the next press should be
+    -- (back as the global cooldown ends): it comes up a size already
+    if H.nextE == e and DB().nextMark ~= false then return nil, nil, sb, true end
     return nil, nil, sb
 end
 
@@ -1537,6 +1700,10 @@ function H:UpdatePlateRow(hasTarget)
     local markOn = db.nextMark ~= false
     local labelOn = markOn and db.nextLabel == true
     local changed, any = false, false
+    -- eased (see THE ROW GLIDES): the pass writes targets, `moved` says
+    -- one of them changed without the layout having to be redone
+    local glide = GlideOn()
+    local moved = false
     -- the watched abilities in list order, then Execute (its slot is
     -- always the last one, so the others never shuffle when it comes)
     local n = #self.watch
@@ -1555,6 +1722,14 @@ function H:UpdatePlateRow(hasTarget)
             if not ic._on then
                 ic._on = true
                 changed = true
+                if ic._out then
+                    -- back before it had faded out: carries on from there
+                    ic._out = nil
+                elseif glide then
+                    ic._fresh = true
+                    ic._cx = nil
+                    ic:SetAlpha(0)
+                end
                 ic:Show()
                 if e.name ~= "Whirlwind" then ic:SetText("n", "") end
             end
@@ -1582,6 +1757,10 @@ function H:UpdatePlateRow(hasTarget)
                 ic:SetDesat(false)
                 ic:SetGlow("ready", false)
                 dim = false
+                -- back as the global cooldown ends and the one to press
+                -- then: it carries the mark (its size, the word) while
+                -- it counts down; the gold waits until it is up
+                nx = markOn and (not e.isCd) and self.nextE == e
                 ic:SetGlow("alert", false)
                 ic:SetGlow("norage", false)
             else
@@ -1623,7 +1802,8 @@ function H:UpdatePlateRow(hasTarget)
             end
             if ic._dim ~= dim then
                 ic._dim = dim
-                ic:SetAlpha(dim and DIM_ALPHA or 1)
+                ic._ta = dim and DIM_ALPHA or nil
+                if glide then moved = true else ic:SetAlpha(dim and DIM_ALPHA or 1) end
             end
             local lab = nx and labelOn
             if (ic._nx or false) ~= lab then
@@ -1642,7 +1822,8 @@ function H:UpdatePlateRow(hasTarget)
                 ic._big = scale
                 local sz = db.plateSize or 30
                 local w = scale and math.floor(sz * scale + 0.5) or sz
-                ic:SetSize(w, w)
+                ic._tw = scale and w or nil
+                if not glide then ic:SetSize(w, w) end
                 changed = true
             end
 
@@ -1650,19 +1831,20 @@ function H:UpdatePlateRow(hasTarget)
             ic._on = nil
             ic._tenth, ic._txt = nil, nil
             changed = true
-            ic:Hide()
-            if ic._big then
-                ic._big = nil
-                local sz = db.plateSize or 30
-                ic:SetSize(sz, sz)
-            end
-            if ic._dim then ic._dim = nil ic:SetAlpha(1) end
+            ic._big, ic._dim = nil, nil
             if ic._nx then ic._nx = nil ic:SetText("nx", "") end
+            if glide then
+                -- fades out where it stands; the others close up
+                ic._out = true
+            else
+                EndLeave(ic, db.plateSize or 30)
+            end
         end
     end
     if not any then HidePlateRow() return end
     local hWas = f._rowH
-    LayoutPlateRow(f, changed)
+    LayoutPlateRow(f, changed, glide)
+    if glide and moved then StartGlide(f) end
     if not f:IsShown() then f:Show() Remeasure()
     elseif f._rowH ~= hWas then Remeasure() end
 end
@@ -1876,17 +2058,47 @@ local lastTick
 -- count. The call-out (a button you sat on) is NOT followed: it stays
 -- red on its own icon, and NEXT says what to press now (2026-10-28 audit).
 -- exeUp: Execute pressable on the target now; btOverExe: Bloodthirst
--- beats it at this attack power (both from the tick).
-local function ReadyNow(e) return e and e.plateRem == 0 and e.plateUsable and true or false end
-local function PickNext(db, exeUp, btOverExe)
+-- beats it at this attack power; wwOverExe: Whirlwind does, with the
+-- mobs for it (all from the tick).
+-- (2026-11-12, Zac, after the audit below found that under 20% it never
+-- called Whirlwind "even with 4 mobs on him".) Execute is one target;
+-- Whirlwind with the pack in reach is the pack. When the count says
+-- Whirlwind goes before Bloodthirst it goes before Execute as well -
+-- and before Bloodthirst-over-Execute, as it would above 20%.
+-- (2026-11-11 audit, Zac: "double and tripple check the logic for what it
+-- prios and the whirlwind stuff") TWO THINGS THE CALL GOT WRONG:
+--  * It only looked at what is off cooldown THIS instant. Bloodthirst's
+--    six seconds are four global cooldowns, so pressed on time it comes
+--    back exactly as the global cooldown ends - and for that whole last
+--    global cooldown the mark sat on Whirlwind (up, pressable), flipping
+--    to Bloodthirst the moment you could press anything. A button that
+--    will be up by the time the global cooldown ends (e.soon, from the
+--    tick) now counts as ready for the call, so the mark is on the
+--    button you should be about to press, not the one that happens to be
+--    free while you cannot press either.
+--  * With no Bloodthirst (an Arms warrior) the list order made Whirlwind
+--    the first call on one target, ahead of Mortal Strike: the strike of
+--    the spec takes Bloodthirst's place.
+local MS_NAME = GetSpellInfo(12294) or "Mortal Strike"
+local function ReadyNow(e)
+    return e and ((e.plateRem == 0 and e.plateUsable) or e.soon) and true or false
+end
+local function PickNext(db, exeUp, btOverExe, wwOverExe)
     if db.nextMark == false then H.nextE = nil return end
     local pick
     if exeUp and H.execEntry then
-        local bt = H.byName[BT_NAME]
-        if btOverExe and ReadyNow(bt) then pick = bt else pick = H.execEntry end
+        local bt, ww = H.byName[BT_NAME], H.byName[WW_NAME]
+        if wwOverExe and ReadyNow(ww) then
+            pick = ww
+        elseif btOverExe and ReadyNow(bt) then
+            pick = bt
+        else
+            pick = H.execEntry
+        end
     end
     if not pick then
         local p = H.prioName and H.byName[H.prioName]
+        if not p and H.prioName == BT_NAME then p = H.byName[MS_NAME] end
         if ReadyNow(p) then
             pick = p
         else
@@ -1910,6 +2122,7 @@ local function Tick()
     lastTick = now
     local gs, gd = GetSpellCooldown(ns.GCDSpell and ns.GCDSpell() or GCD_SPELL)
     local onGCD = (gs and gd and gs > 0 and gd > 0 and (gs + gd - now) > 0) and true or false
+    local gcdLeft = onGCD and (gs + gd - now) or 0
     -- the plate row wants a target at all (attacking or not)
     local plateTarget = HUD.TargetAttackable()
     local target = plateTarget
@@ -1988,6 +2201,10 @@ local function Tick()
     end
     H.prioName = wwFirst and WW_NAME or BT_NAME
     H.wwFirst = wwFirst
+    -- in execute range Whirlwind still goes first with the mobs for it
+    -- (the same count, after the same 0.6 s hold)
+    local wwOverExe = exeUp and wwFirst and db.execWW ~= false and H.byName[WW_NAME] ~= nil
+    H.wwOverExe = wwOverExe or nil
     local rage = UnitPower and UnitPower("player", 1) or 0
     -- hidden (WoW Forever): no maths on it, so "short by" sits out
     if ns.IsSecret and ns.IsSecret(rage) then rage = nil end
@@ -2032,6 +2249,10 @@ local function Tick()
             e.plateRem, e.plateStart, e.plateDur = 0, nil, nil
         end
         e.plateUsable = gate and (not onCD) and usable
+        -- on its own cooldown still, but back by the time the global
+        -- cooldown ends (a tick of slack) and the rage is there: the next
+        -- press can be this one (PickNext)
+        e.soon = (gate and onCD and usable and gcdLeft > 0 and (s + d - now) <= gcdLeft + SOON_SLACK) or nil
         -- Rage is the one thing that must not clear a running alert: the
         -- usual way to sit on Bloodthirst is to let Heroic Strike queues
         -- eat the rage it needed, which drops the button to "no rage"
@@ -2043,6 +2264,7 @@ local function Tick()
         local dumped = dumping and noPower and (not onCD) and not SWING_NAMES[e.name]
         e.dumped = dumped
         local quietExec = executing and e.name ~= EXECUTE and not (btOverExe and e.name == BT_NAME)
+            and not (wwOverExe and e.name == WW_NAME)
         local able = gate and (not onCD) and (usable or stillRageless or dumped) and not idle
             and not quietExec and not noControl and not dying
         -- how much rage it is short, while it is back or nearly (the "-6")
@@ -2122,7 +2344,7 @@ local function Tick()
         -- nothing new while a button is going down; drop an alert whose
         -- ability stopped being pressable (target died, rage gone)
         if H.showing and not showingStillReady then H:Hide() end
-        PickNext(db, exeUp, btOverExe)
+        PickNext(db, exeUp, btOverExe, wwOverExe)
         H:UpdatePlateRow(plateTarget)
         return
     end
@@ -2133,8 +2355,10 @@ local function Tick()
     end
     for i = 1, #H.watch do H.watch[i].waitPast = nil end
     -- with Bloodthirst the better button, Execute is not called out while BT is up
+    -- (nor while Whirlwind is, with the mobs for it)
     local btUp = btOverExe and H.byName[BT_NAME] and H.byName[BT_NAME].plateRem == 0
-    if not worst and executing and not noControl and not dying and not btUp and not H.byName[EXECUTE] then
+    local wwUp = wwOverExe and H.byName[WW_NAME] and H.byName[WW_NAME].plateRem == 0
+    if not worst and executing and not noControl and not dying and not btUp and not wwUp and not H.byName[EXECUTE] then
         -- Execute's own clock: from the later of "became usable" and
         -- the last press of anything
         local since = math.max(H.execSince or now, H.lastPress or 0)
@@ -2152,7 +2376,7 @@ local function Tick()
     elseif H.showing then
         H:Hide()
     end
-    PickNext(db, exeUp, btOverExe)
+    PickNext(db, exeUp, btOverExe, wwOverExe)
     H:UpdatePlateRow(plateTarget)
 end
 
@@ -2925,6 +3149,11 @@ local function Tab_General(L, cfg)
         desc = "In execute range with this much attack power, Bloodthirst is still the call and "
             .. "Execute is not called out while it is up - the Warrior HUD's Execute helper uses "
             .. "the same line." })
+    HUD.Check(L, "Whirlwind over Execute with the mobs for it", cfg.execWW ~= false, function(v)
+        cfg.execWW = v and true or false Changed()
+    end, "In execute range, once the mob count below says Whirlwind goes before Bloodthirst, it "
+        .. "goes before Execute too, and Execute is not called out while Whirlwind is up. Unticked, "
+        .. "execute range is Execute (or Bloodthirst from the attack power above) whatever is around you.")
     HUD.Check(L, "Work out when Whirlwind goes first", cfg.wwAuto ~= false, function(v)
         cfg.wwAuto = v and true or false Changed()
     end, "From your attack power and main-hand damage (the character sheet's, with your buffs): "
@@ -2941,7 +3170,8 @@ local function Tab_General(L, cfg)
         cfg.nextMark = v and true or false Changed() HUD.RefreshPage()
     end, "Of everything up and pressable, exactly one keeps the gold and comes up a size on the "
         .. "nameplate row (and on the Warrior HUD): Execute in execute range (Bloodthirst instead "
-        .. "from the attack power above), Whirlwind from the mob count above, Bloodthirst otherwise, "
+        .. "from the attack power above, Whirlwind instead with the mobs for it), Whirlwind from "
+        .. "the mob count above, Bloodthirst otherwise, "
         .. "then the list order below. The other ready buttons dim. A button you have been sitting "
         .. "on still turns red and grows - gold is what to press now, red is what you ignored.")
     if cfg.nextMark ~= false then
@@ -3079,7 +3309,7 @@ local function Tab_Look(L, cfg)
     HUD.Slider(L, "Icon size", 16, 48, cfg.plateSize or 30, function(v)
         cfg.plateSize = v
         if prow then
-            for _, ic in ipairs(prow.icons) do ic:SetSize(v, v) ic._big = nil end
+            for _, ic in ipairs(prow.icons) do ic:SetSize(v, v) ic._big = nil ic._tw = nil end
             prow._sig = nil
         end
         Changed()
@@ -3142,6 +3372,13 @@ local function Tab_Anim(L, cfg)
     HUD.Check(L, "Pulse the call-out while it is up", cfg.pulse ~= false, function(v)
         cfg.pulse = v and true or false
     end)
+    L:EndCard()
+    L:Card("Nameplate row")
+    HUD.Check(L, "Glide: icons fade, slide and grow instead of jumping", cfg.plateGlide ~= false, function(v)
+        cfg.plateGlide = v and true or false
+        if prow then prow._sig = nil end
+    end, "An icon arriving fades in, one leaving fades out, and the rest slide over to stay centred. "
+        .. "Off, everything changes in one step as it used to.")
     L:EndCard()
     HUD.SharedAnimCards(L)
 end

@@ -122,27 +122,22 @@ local function MakeMovable(f)
     grip:EnableMouse(true)
     grip:SetFrameStrata(f:GetFrameStrata())
     grip:SetFrameLevel(f:GetFrameLevel() + 10)
-    for i = 1, 3 do
-        local pip = grip:CreateTexture(nil, "OVERLAY")
-        pip:SetTexture(FLAT)
-        pip:SetSize(9 - (i - 1) * 3, 2)
-        pip:SetPoint("BOTTOMRIGHT", -1, (i - 1) * 3.5 + 1)
-        grip["_pip" .. i] = pip
-    end
-    grip._zPaint = function(self)
-        local c = Col("accent")
-        for i = 1, 3 do
-            self["_pip" .. i]:SetVertexColor(c.r, c.g, c.b, self._hot and 1 or 0.45)
-        end
-    end
+    -- (ZacUI's solid corner - UI.GripArt; three stepped bars until
+    -- 2026-11-11. The accent throughout, as the bars were: faint at
+    -- rest, full under the mouse.)
+    ns.UI.GripArt(grip, { layer = "OVERLAY", size = 8, grow = 2, inset = 2,
+        rest = function() local c = Col("accent") return c.r, c.g, c.b, 0.45 end,
+        hot = function() local c = Col("accent") return c.r, c.g, c.b, 1 end })
+    grip._zPaint = ns.UI.GripPaint
     grip:_zPaint()
-    grip:SetScript("OnEnter", function(self) self._hot = true self:_zPaint() end)
-    grip:SetScript("OnLeave", function(self) self._hot = nil self:_zPaint() end)
+    grip:SetScript("OnEnter", function(self) ns.UI.GripLit(self, true) end)
+    grip:SetScript("OnLeave", function(self) ns.UI.GripLit(self, false) end)
 
     grip:SetScript("OnMouseDown", function(self)
         if not On("bfUnlock") then return end
         local left = f:GetLeft()
         if not left then return end
+        ns.UI.GripHold(self)
         -- Throttled, because OnFrameSizeChanged makes the canvas
         -- recompute its zoom levels and that is not a per-frame cost.
         local wait = 0

@@ -2523,6 +2523,43 @@ RegisterPage("Chat", function(L)
         L:Row(pb, 17)
         L:Desc("While the raid frames are in the chat box, a 5-man party sits there too, in one row across "
             .. "the top. Off keeps the party frames where you put them.")
+        -- Readycheck's route tracker in the box (2026-11-12, Zac: "make
+        -- sure all of this is configurable in zui"). The three settings
+        -- are Readycheck's own (this character's raidRoute), read and
+        -- written through its route module and saved its way; shown only
+        -- with a Readycheck that can dock its tracker here.
+        do
+            local RC = _G.Readycheck
+            local RR = RC and RC.RaidRoute
+            local rs = RR and RR.ChatDockArea and RR.GetSettings and RR:GetSettings()
+            if type(rs) == "table" then
+                local function RouteSet(key, v)
+                    rs[key] = v
+                    if RC.SaveConfigurationToProfile then RC:SaveConfigurationToProfile() end
+                    if RR.RefreshTracker then RR:RefreshTracker() end
+                end
+                local gearBox
+                local dock = UI.Checkbox(L.current, "Readycheck's route tracker along the top of the box",
+                    rs.trackerChatDock == true, function(v) RouteSet("trackerChatDock", v and true or false) end)
+                L:Row(dock, 17)
+                L:Desc("With a Readycheck raid route running, its tracker becomes a bar across the top of the "
+                    .. "chat box and the raid frames start under it. The tracker's own spot, size and look "
+                    .. "are kept and come back when this is off.")
+                local swaps = UI.Checkbox(L.current, "Route bar: confirm gear swaps beside the step",
+                    rs.trackerBandSwaps ~= false, function(v)
+                        RouteSet("trackerBandSwaps", v and true or false)
+                        if gearBox then UI.SetEnabled(gearBox, v and true or false) end
+                    end)
+                L:Row(swaps, 17)
+                L:Desc("A tick and the set's name on the bar when Readycheck changes your gear.")
+                gearBox = UI.Checkbox(L.current, "Route bar: show your gear when a swap lands",
+                    rs.trackerBandGear ~= false, function(v) RouteSet("trackerBandGear", v and true or false) end)
+                L:Row(gearBox, 17)
+                if rs.trackerBandSwaps == false then UI.SetEnabled(gearBox, false) end
+                L:Desc("For a few seconds the bar's mob names give way to what you are wearing, slot by slot "
+                    .. "as in the character window, with the pieces that changed lit.")
+            end
+        end
         local rt = UI.Checkbox(L.current, "Raid timer on the raid strip", d.raidTimer ~= false, function(v)
             d.raidTimer = v and true or false
             local T = C.RaidMode and C.RaidMode.Timer

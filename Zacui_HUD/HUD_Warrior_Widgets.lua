@@ -97,7 +97,7 @@ glide:SetScript("OnUpdate", function(self)
             end
             f._zCX, f._zCY = cx, cy
             f:ClearAllPoints()
-            local k2 = f._pop or 1
+            local k2 = f._popCur or 1
             f:SetPoint("CENTER", f._zAnchor, "CENTER", cx / k2, cy / k2)
         end
     end
@@ -137,7 +137,7 @@ function W.Place(f, anchor, x, y)
         moving[f] = nil
         f._zAnchor, f._zCX, f._zCY, f._zTX, f._zTY = anchor, x, y, x, y
         f:ClearAllPoints()
-        local k2 = f._pop or 1
+        local k2 = f._popCur or 1
         f:SetPoint("CENTER", anchor, "CENTER", x / k2, y / k2)
         if fresh then Appear(f) end
         return
@@ -155,6 +155,52 @@ end
 -- Grows (or shrinks back) an icon around its own centre: the scale
 -- would also scale its offsets from the row's anchor, so they are
 -- divided back out and the icon stays exactly where the row put it.
+-- (2026-11-11, Zac: "i want the hud to be smoother as well ... less
+-- jittery but still responsive and dont nuke my fps") THE SIZE IS EASED:
+-- the button to press first, the NOOB and a dumped Heroic Strike used to
+-- jump a size up and back in one frame, every time the call moved
+-- between Bloodthirst and Whirlwind. f._pop is where it is going,
+-- f._popCur where it is; one driver eases every icon on its way (about
+-- nine tenths there in 0.1 s) and hides itself the frame the last one
+-- arrives, so nothing runs while the icons sit still. An entrance or
+-- exit playing on the icon owns its scale until it ends; a hidden icon,
+-- and all of it with "Smooth motion and polish" off, is one step as before.
+local POP_TAU = 0.045
+local popping = {}
+local popDriver = CreateFrame("Frame")
+popDriver:Hide()
+
+local function ApplyPop(f, s)
+    f._popCur = s
+    f:SetScale(s)
+    if f._zAnchor and f._zCX then
+        f:ClearAllPoints()
+        f:SetPoint("CENTER", f._zAnchor, "CENTER", f._zCX / s, f._zCY / s)
+    end
+end
+
+popDriver:SetScript("OnUpdate", function(self, elapsed)
+    local k = 1 - math.exp(-(elapsed or 0) / POP_TAU)
+    local M = Mo()
+    for f in pairs(popping) do
+        local target = f._pop or 1
+        if not f:IsShown() then
+            popping[f] = nil
+            ApplyPop(f, target)
+        elseif not (M and M.IsPlaying(f)) then
+            local cur = f._popCur or 1
+            cur = cur + (target - cur) * k
+            if math.abs(target - cur) < 0.004 then
+                cur = target
+                popping[f] = nil
+            end
+            ApplyPop(f, cur)
+        end
+    end
+    if not next(popping) then self:Hide() end
+end)
+W.popDriver = popDriver
+
 function W.SetPop(f, scale)
     scale = scale or 1
     if (f._pop or 1) == scale then return end
@@ -165,12 +211,81 @@ function W.SetPop(f, scale)
         if f._zLeaving then f._zLeaving = nil f:Hide() end
     end
     f._pop = scale
-    f:SetScale(scale)
-    if f._zAnchor and f._zCX then
-        f:ClearAllPoints()
-        f:SetPoint("CENTER", f._zAnchor, "CENTER", f._zCX / scale, f._zCY / scale)
+    if Smooth() and f:IsShown() then
+        popping[f] = true
+        popDriver:Show()
+    else
+        popping[f] = nil
+        ApplyPop(f, scale)
     end
 end
+
+-- A ROW HOLDS ITS SHAPE FOR A MOMENT (2026-11-11, the same ask). The rows
+-- are centred, so every icon that comes or goes slides all the others
+-- half a place - and some come and go all fight: a queued Heroic Strike
+-- with every swing, Flurry, Enrage. An icon that leaves now keeps its
+-- place for HOLD seconds (it is hidden at once: what the row SAYS is
+-- never late); back inside that time, nothing moved at all. Only then
+-- does the row close up. Anything ARRIVING lays the row out at once and
+-- drops every held place with it, so a stance change is still one move.
+--   active  the icons showing now, in row order
+--   last    the list the row was last laid out with (RememberList's)
+--   st      this row's { gone = {}, seen = {}, was = {}, out = {} }
+-- Returns the list to lay out (active itself in the steady state: no
+-- table is filled when nothing came or went) and whether a place is
+-- being held.
+local HOLD = 0.4
+W.HOLD = HOLD
+function W.HeldList(active, last, st, now)
+    local n = last.n
+    local na = #active
+    if not n or not Smooth() then
+        if st.any then st.any = false wipe(st.gone) end
+        return active, false
+    end
+    if not st.any and n == na then
+        local same = true
+        for i = 1, n do if last[i] ~= active[i] then same = false break end end
+        if same then return active, false end
+    end
+    local seen, was, out, gone = st.seen, st.was, st.out, st.gone
+    wipe(seen) wipe(was) wipe(out)
+    for i = 1, na do seen[active[i]] = true end
+    for i = 1, n do was[last[i]] = true end
+    local plain = false
+    for i = 1, na do if not was[active[i]] then plain = true break end end
+    local held = false
+    if not plain then
+        local j = 0
+        for i = 1, n do
+            local ic = last[i]
+            if seen[ic] then
+                j = j + 1
+                -- (the same icons in another order: a plain layout)
+                if active[j] ~= ic then plain = true break end
+                out[#out + 1] = ic
+                gone[ic] = nil
+            else
+                local t = gone[ic]
+                if not t then t = now gone[ic] = t end
+                if now - t < HOLD then
+                    out[#out + 1] = ic
+                    held = true
+                else
+                    gone[ic] = nil
+                end
+            end
+        end
+    end
+    if plain then
+        st.any = false
+        wipe(gone)
+        return active, false
+    end
+    st.any = held
+    return out, held
+end
+function W.NewHold() return { gone = {}, seen = {}, was = {}, out = {} } end
 
 -- Shows or hides an icon the way the HUD animates them: a hidden one
 -- comes in through W.Place (which plays the entrance once the row puts

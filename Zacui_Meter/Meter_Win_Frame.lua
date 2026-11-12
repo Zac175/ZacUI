@@ -64,7 +64,9 @@ local ICON_ALPHA = 0.4     -- the header icons at rest (match pass: 0.55 -> 0.4)
 local ICON_HOVER_A = 0.9   -- ...and under the mouse (1 -> 0.9)
 local HOVER_ALPHA = 0.92   -- the floating toolbar while the mouse is on the window
 
--- Blizzard's own art for the corner (every client ships these)
+-- Blizzard's own art for the corner (every client ships these): worn
+-- under the Classic look only. Otherwise the corner is ZacUI's solid
+-- corner, as on every other window (UI.GripArt, 2026-11-11).
 local TEX_GRIP = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up"
 -- ZacUI's own icons (Zacui/Media/Icons: drawn for ZacUI, white with a
 -- soft dark rim, tinted by SetVertexColor)
@@ -717,6 +719,10 @@ function winMeta:UpdateLock()
     if self.grip then
         self.grip:EnableMouse(not locked)
         if locked then self.grip:SetAlpha(0) end
+        -- (the corner's art follows the look, like the padlock's)
+        local classic = IsClassic() and true or false
+        if self.gripTex then self.gripTex:SetShown(classic) end
+        if self.grip.art then self.grip.art:SetShown(not classic) end
     end
 end
 
@@ -730,8 +736,14 @@ local function CreateCorner(win)
     local gt = grip:CreateTexture(nil, "ARTWORK")
     gt:SetAllPoints()
     gt:SetTexture(TEX_GRIP)
+    -- (white at rest like the padlock beside it - the button's own alpha
+    -- does the dimming - and the accent under the mouse)
+    if ns.UI and ns.UI.GripArt then
+        ns.UI.GripArt(grip, { size = 9, grow = 2, inset = 1,
+            rest = function() local c = ns.GetColor("text", "normal") return c.r, c.g, c.b, 1 end })
+    end
     grip:SetAlpha(0)
-    win.grip = grip
+    win.grip, win.gripTex = grip, gt
     -- the lock, left of it
     local lock = CreateFrame("Button", nil, f)
     lock:SetSize(14, 14)
@@ -744,10 +756,19 @@ local function CreateCorner(win)
     win.lockBtn, win.lockTex = lock, lt
     win:UpdateLock()
     if win.preview then return end
-    grip:SetScript("OnEnter", function(self) self:SetAlpha(0.7) win:ShowToolbar(true) end)
-    grip:SetScript("OnLeave", function(self) self:SetAlpha(Locked(win) and 0 or (Win.editing and 0.7 or 0.3)) win:ShowToolbar(false) end)
-    grip:SetScript("OnMouseDown", function()
-        if not Locked(win) then win.sizing = true f:StartSizing("BOTTOMRIGHT") end
+    local function Lit(on) if ns.UI and ns.UI.GripLit then ns.UI.GripLit(grip, on) end end
+    grip:SetScript("OnEnter", function(self) self:SetAlpha(0.7) Lit(true) win:ShowToolbar(true) end)
+    grip:SetScript("OnLeave", function(self)
+        self:SetAlpha(Locked(win) and 0 or (Win.editing and 0.7 or 0.3))
+        Lit(false)
+        win:ShowToolbar(false)
+    end)
+    grip:SetScript("OnMouseDown", function(self)
+        if not Locked(win) then
+            win.sizing = true
+            if ns.UI and ns.UI.GripHold then ns.UI.GripHold(self) end
+            f:StartSizing("BOTTOMRIGHT")
+        end
     end)
     grip:SetScript("OnMouseUp", function() win:StopDrag() end)
     lock:SetScript("OnEnter", function(self)

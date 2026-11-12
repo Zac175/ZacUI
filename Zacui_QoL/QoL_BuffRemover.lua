@@ -21,6 +21,10 @@
 -- raid world buff is on you - Rallying Cry, Zandalar, Warchief's
 -- Blessing, Songflower, the three Dire Maul buffs or Sayge's fortune.
 -- In combat that is decided before the fight, with the cancel buttons.
+-- And ONE SWITCH FOR ALL OF THEM (buffRemover.wbOnly, off unless switched
+-- on): with no world buff on you nothing ticked is removed at all - but
+-- for the ticks marked to go regardless ("even with no WBs": a Snowball
+-- goes whatever else is on you) and Salvation while tanking.
 --
 -- IN COMBAT addon code cannot cancel a buff; only a secure button can,
 -- and only when you press something. So there are 28 cancel buttons
@@ -43,7 +47,8 @@
 --
 -- SALVATION WHILE TANKING. A warrior in Defensive Stance, a druid in bear
 -- form or a paladin with Righteous Fury loses Blessing of Salvation
--- (ticked or not, unless that choice is off). Pausing never stops that.
+-- (ticked or not, unless that choice is off). Pausing never stops that,
+-- and neither does the world-buff switch.
 --
 -- BY NAME. Besides the ticks in the list, a buff can be ticked by its
 -- name (for buffs the list does not know, or to match a /cancelaura line
@@ -194,6 +199,9 @@ local function ClassCfg()
     -- per tick: true = only while world buffs are out
     if type(c.wb) ~= "table" then c.wb = {} end
     if type(c.wbName) ~= "table" then c.wbName = {} end
+    -- per tick: true = goes even while the master switch holds the rest
+    if type(c.always) ~= "table" then c.always = {} end
+    if type(c.alwaysName) ~= "table" then c.alwaysName = {} end
     if c.salv == nil then c.salv = TANK_CLASSES[key] or false end
     return c
 end
@@ -225,6 +233,9 @@ function BR.Phase(key) return ClassCfg().when[key] or "both" end
 function BR.PhaseName(name) return ClassCfg().whenName[name] or "both" end
 function BR.Wb(key) return ClassCfg().wb[key] == true end
 function BR.WbName(name) return ClassCfg().wbName[name] == true end
+-- ...and its "even with no WBs" tick (the master switch's exceptions)
+function BR.Always(key) return ClassCfg().always[key] == true end
+function BR.AlwaysName(name) return ClassCfg().alwaysName[name] == true end
 
 -- At least one raid world buff on you now (ids from Readycheck's list,
 -- the stored Chronoboon and the seasonal ones left out); read through the
@@ -387,19 +398,23 @@ end
 
 -- always keep > can't > Salvation while tanking > a tick > a name tick.
 -- phase ("ooc" / "combat", nil = either) leaves out ticks set to the other.
-local function Removes(a, phase)
+-- held (the master switch is holding removal back): only a tick marked
+-- "even with no WBs" counts.
+local function Removes(a, phase, held)
     local c = ClassCfg()
     if a.name and c.keep[a.name] then return false end
     local e = a.e
     if e then
         if Fixed(e) then return false end
         if SalvOff(e) then return true end
-        if c.remove[e.key] == true and Allows(c.when[e.key], phase) and WbOk(c.wb[e.key]) then return true end
-    elseif a.id ~= nil and c.remove[a.id] == true and Allows(c.when[a.id], phase) and WbOk(c.wb[a.id]) then
+        if c.remove[e.key] == true and Allows(c.when[e.key], phase) and WbOk(c.wb[e.key])
+           and (not held or c.always[e.key] == true) then return true end
+    elseif a.id ~= nil and c.remove[a.id] == true and Allows(c.when[a.id], phase) and WbOk(c.wb[a.id])
+           and (not held or c.always[a.id] == true) then
         return true
     end
     return a.name ~= nil and c.names[a.name] == true and Allows(c.whenName[a.name], phase)
-        and WbOk(c.wbName[a.name])
+        and WbOk(c.wbName[a.name]) and (not held or c.alwaysName[a.name] == true)
 end
 
 local function State(a)
@@ -410,9 +425,32 @@ end
 
 local function Paused() return Char().paused == true end
 
--- paused: only Salvation-while-tanking still goes
+-- THE MASTER SWITCH (2026-11-11, Zac: "if i have no world buffs to cancel
+-- nothing ... if i have buffs out use what i have ticked ... a master
+-- switch off by default"): buffRemover.wbOnly. On, and with no raid world
+-- buff on you, removal stands down - the ticks are left as they are and
+-- none of them goes, in or out of combat; the moment a world buff is on
+-- you they all apply again as ticked. Off (as it is until switched on)
+-- nothing changes. In combat it is decided before the fight, with the
+-- cancel buttons, like the per-buff tick.
+-- TWO THINGS IT NEVER HOLDS (2026-11-12, Zac: "cancel nothing with no
+-- world buffs out besides a couple things like snowball I should always
+-- cancel that and the salv stuff"): a tick marked "even with no WBs"
+-- (always[key] / alwaysName[name], set per buff on the page), and
+-- Salvation while tanking - a tank wants that gone whatever else is up.
+-- (For one night, 11-11 to 11-12, the switch held Salvation back too.)
+local function Held() return Cfg().wbOnly == true and not WorldBuffsUp() end
+BR.Held = Held
+-- standing down: paused by hand, or held by the master switch
+local function Idle() return Paused() or Held() end
+
+-- standing down. Paused by hand: only Salvation-while-tanking still goes.
+-- Held by the master switch: that, and the ticks marked to go regardless.
 local function RemovesNow(a, ignorePause, phase)
-    if not ignorePause and Paused() then return a.e ~= nil and SalvOff(a.e) end
+    if not ignorePause then
+        if Paused() then return a.e ~= nil and SalvOff(a.e) end
+        if Held() then return Removes(a, phase, true) end
+    end
     return Removes(a, phase)
 end
 
@@ -562,12 +600,12 @@ local sigParts = {}
 local function CombatSig(ignorePause, BC, D, c)
     local t, n = sigParts, 0
     local function add(v) n = n + 1 t[n] = tostring(v) end
-    add(ignorePause and 1 or 0) add(Paused() and 1 or 0) add(Tanking() and 1 or 0)
+    add(ignorePause and 1 or 0) add(Idle() and 1 or 0) add(Held() and 1 or 0) add(Tanking() and 1 or 0)
     add(cls) add(c) add(c.salv) add(D.ALL) add(Cfg().seen) add(seenVer) add(Hits()) add(hitsVer) add(blockedVer)
     add(WorldBuffsUp() and 1 or 0)
-    for k, v in pairs(c.remove) do add(k) add(v) add(c.when[k]) add(c.wb[k]) end
+    for k, v in pairs(c.remove) do add(k) add(v) add(c.when[k]) add(c.wb[k]) add(c.always[k]) end
     add("|")
-    for k, v in pairs(c.names) do add(k) add(v) add(c.whenName[k]) add(c.wbName[k]) end
+    for k, v in pairs(c.names) do add(k) add(v) add(c.whenName[k]) add(c.wbName[k]) add(c.alwaysName[k]) end
     add("|")
     for k in pairs(c.keep) do add(k) end
     add("|")
@@ -588,14 +626,19 @@ local function CombatNames(ignorePause)
     local hit = combatCache[slot]
     if hit and hit.sig == sig then return hit.out, hit.tankOnly end
     local keep, want, only, salv, firm = {}, {}, {}, {}, {}
+    -- paused by hand: no tick goes. Held by the master switch: only the
+    -- ticks marked to go regardless. (Salvation while tanking: either way)
     local paused = not ignorePause and Paused()
+    local held = not ignorePause and not paused and Held()
     -- only the ticks that go in combat
     local remove, byName = {}, {}
     for k, v in pairs(c.remove) do
-        if v == true and Allows(c.when[k], "combat") and WbOk(c.wb[k]) then remove[k] = true end
+        if v == true and Allows(c.when[k], "combat") and WbOk(c.wb[k])
+           and (not held or c.always[k] == true) then remove[k] = true end
     end
     for n, v in pairs(c.names) do
-        if v == true and Allows(c.whenName[n], "combat") and WbOk(c.wbName[n]) then byName[n] = true end
+        if v == true and Allows(c.whenName[n], "combat") and WbOk(c.wbName[n])
+           and (not held or c.alwaysName[n] == true) then byName[n] = true end
     end
     if not paused then
         for n in pairs(byName) do want[n] = true end
@@ -768,7 +811,7 @@ local function Sync()
     local full, only = {}, {}
     if useCombat then full, only = CombatNames(true) end
     local names = full
-    if useCombat and Paused() then names, only = CombatNames() end
+    if useCombat and Idle() then names, only = CombatNames() end
     local lines = math.min(BUTTONS, #full)
     local found, missing = {}, {}
     status.limit = nil
@@ -894,6 +937,7 @@ function BR.SetRemove(key, on)
     -- a fresh tick starts at both
     c.when[key] = nil
     c.wb[key] = nil
+    c.always[key] = nil
     Changed()
 end
 
@@ -908,8 +952,17 @@ function BR.SetPhase(key, mode)
     ClassCfg().when[key] = WhenValue(mode)
     Changed()
 end
+-- (held to world buffs, or going even without them: never both)
 function BR.SetWb(key, on)
-    ClassCfg().wb[key] = on and true or nil
+    local c = ClassCfg()
+    c.wb[key] = on and true or nil
+    if on then c.always[key] = nil end
+    Changed()
+end
+function BR.SetAlways(key, on)
+    local c = ClassCfg()
+    c.always[key] = on and true or nil
+    if on then c.wb[key] = nil end
     Changed()
 end
 function BR.SetPhaseName(name, mode)
@@ -919,7 +972,16 @@ function BR.SetPhaseName(name, mode)
 end
 function BR.SetWbName(name, on)
     if type(name) ~= "string" then return end
-    ClassCfg().wbName[name] = on and true or nil
+    local c = ClassCfg()
+    c.wbName[name] = on and true or nil
+    if on then c.alwaysName[name] = nil end
+    Changed()
+end
+function BR.SetAlwaysName(name, on)
+    if type(name) ~= "string" then return end
+    local c = ClassCfg()
+    c.alwaysName[name] = on and true or nil
+    if on then c.wbName[name] = nil end
     Changed()
 end
 
@@ -938,6 +1000,7 @@ function BR.SetName(name, on)
     c.names[name] = on and true or nil
     c.whenName[name] = nil
     c.wbName[name] = nil
+    c.alwaysName[name] = nil
     if on then c.keep[name] = nil end
     Changed()
 end
@@ -1243,6 +1306,12 @@ function BR.Export()
     for _, n in ipairs(SortedKeys(c.wbName)) do if c.names[n] then bname[#bname + 1] = SafeName(n) end end
     if #bid > 0 then parts[#parts + 1] = "wbid=" .. table.concat(bid, ",") end
     if #bname > 0 then parts[#parts + 1] = "wbname=" .. table.concat(bname, ",") end
+    -- going even while the master switch holds the rest: alid=  alname=
+    local aid, aname = {}, {}
+    for _, k in ipairs(SortedKeys(c.always)) do if c.remove[k] then aid[#aid + 1] = tostring(k) end end
+    for _, n in ipairs(SortedKeys(c.alwaysName)) do if c.names[n] then aname[#aname + 1] = SafeName(n) end end
+    if #aid > 0 then parts[#parts + 1] = "alid=" .. table.concat(aid, ",") end
+    if #aname > 0 then parts[#parts + 1] = "alname=" .. table.concat(aname, ",") end
     parts[#parts + 1] = "salv=" .. (c.salv and "1" or "0")
     local macros = {}
     for i, v in ipairs(Char().macros) do macros[i] = SafeName(v) end
@@ -1268,7 +1337,8 @@ function BR.Decode(text)
     if text:sub(1, #HEADER) ~= HEADER then return nil, "not a ZacUI buff string" end
     local body = text:sub(#HEADER + 1)
     if #body > 20000 then return nil, "the string is far too long to be a buff setup" end
-    local d = { remove = {}, names = {}, keep = {}, macros = {}, when = {}, whenName = {}, wb = {}, wbName = {} }
+    local d = { remove = {}, names = {}, keep = {}, macros = {}, when = {}, whenName = {}, wb = {}, wbName = {},
+                always = {}, alwaysName = {} }
     local first = true
     for field in (body .. ";"):gmatch("([^;]*);") do
         field = field:gsub("^%s+", ""):gsub("%s+$", "")
@@ -1303,6 +1373,10 @@ function BR.Decode(text)
                 for _, x in ipairs(List(v)) do local n = tonumber(x) if n then d.wb[n] = true end end
             elseif k == "wbname" then
                 for _, x in ipairs(List(v)) do d.wbName[x] = true end
+            elseif k == "alid" then
+                for _, x in ipairs(List(v)) do local n = tonumber(x) if n then d.always[n] = true end end
+            elseif k == "alname" then
+                for _, x in ipairs(List(v)) do d.alwaysName[x] = true end
             elseif k == "keep" then d.keep = List(v)
             elseif k == "macros" then d.macros = List(v)
             elseif k == "salv" then d.salv = (v == "1")
@@ -1359,8 +1433,11 @@ function BR.ApplyImport(text, mode)
         if type(c.whenName) ~= "table" then c.whenName = {} end
         if type(c.wb) ~= "table" then c.wb = {} end
         if type(c.wbName) ~= "table" then c.wbName = {} end
+        if type(c.always) ~= "table" then c.always = {} end
+        if type(c.alwaysName) ~= "table" then c.alwaysName = {} end
     else
         c.remove, c.names, c.keep, c.when, c.whenName, c.wb, c.wbName = {}, {}, {}, {}, {}, {}, {}
+        c.always, c.alwaysName = {}, {}
     end
     -- merge keeps a "when" already chosen here unless the string sets one
     local merge = mode == "merge"
@@ -1368,11 +1445,13 @@ function BR.ApplyImport(text, mode)
         c.remove[id] = true
         if not merge or d.when[id] ~= nil then c.when[id] = d.when[id] end
         if not merge or d.wb[id] then c.wb[id] = d.wb[id] end
+        if not merge or d.always[id] then c.always[id] = d.always[id] end
     end
     for _, n in ipairs(d.names) do
         c.names[n] = true
         if not merge or d.whenName[n] ~= nil then c.whenName[n] = d.whenName[n] end
         if not merge or d.wbName[n] then c.wbName[n] = d.wbName[n] end
+        if not merge or d.alwaysName[n] then c.alwaysName[n] = d.alwaysName[n] end
     end
     for _, n in ipairs(d.keep) do
         c.keep[n] = true
@@ -1605,139 +1684,6 @@ QoL.BuffRemoverRefresh = BR.Refresh
 function BR.Running() return running end
 function BR.HasCounter() return RCB() ~= nil end
 
--- ============================================================
--- ONE-TIME SETUPS - a setup string for one named character, applied
--- once by itself at login (out of combat, once that character's macros
--- have loaded) and never again: ZacUICharDB.buffRemover.applied holds
--- the ids already done. Applying goes through the same import as the
--- Import box, so the macros change through the game's own EditMacro
--- and only their plain /cancelaura lines come out.
--- ============================================================
-local ONE_TIME = {
-    -- every warrior: the BT / Sunder / WW cancels, Fire Shield (Oil of
-    -- Immolation's buff has the same name) always kept; each account's
-    -- own /cancelaura lines in those macros are added on top
-    {
-        id = "warriors-bt-sunder-ww-2026-10-09",
-        class = "WARRIOR",
-        text = "ZacUIBuffs:1:WARRIOR;remove=23028,27681,9910,27683,5697,25890,10060,552;"
-            .. "names=Argent Dawn Commission,Bloodthirst,Snowball;keep=Fire Shield;salv=1;"
-            .. "macros=BT,Sunder,WW;takeover=1",
-    },
-    -- every warrior: the 30-minute single-target versions Zac ticked on
-    -- Zacw (Arcane Intellect, Divine Spirit) and the healers' tier-set
-    -- procs; added to what is there, macros untouched
-    {
-        id = "warriors-30min-tier-2026-10-09",
-        class = "WARRIOR",
-        text = "ZacUIBuffs:1:WARRIOR;remove=10157,27841;"
-            .. "names=Holy Power,Armor of Faith,Totemic Power,Blessing of the Claw;keep=Fire Shield",
-    },
-    -- every warrior: Regrowth, and both Shadow Protections (the
-    -- 10-minute single one and the 20-minute Prayer); added on top
-    {
-        id = "warriors-rejuv-shadowprot-2026-10-09",
-        class = "WARRIOR",
-        text = "ZacUIBuffs:1:WARRIOR;remove=9858,10958,27683;keep=Fire Shield",
-    },
-    -- the setup above first ticked Rejuvenation by mistake; Regrowth was
-    -- meant. Once per account (the ticks are shared by every warrior on
-    -- it), so a later choice on one warrior is never undone by another.
-    {
-        id = "warriors-regrowth-not-rejuv-2026-10-09",
-        class = "WARRIOR",
-        account = true,
-        untick = { 25299 },
-        tick = { 9858 },
-    },
-    -- every character: the target dummy macro, exactly this
-    {
-        id = "dummy-macro-2026-10-09",
-        macro = {
-            name = "dummy", icon = 134400,
-            body = "#showtooltip Masterwork Target DUmmy\n/stopattack\n/stopcasting\n"
-                .. "/cast [@cursor] Masterwork Target Dummy",
-        },
-    },
-}
-
-local function MacrosLoaded()
-    if not GetNumMacros then return true end
-    local a, c = GetNumMacros()
-    return ((a or 0) + (c or 0)) > 0
-end
-
--- The macro by that name made exactly so: its body set if it differs, or
--- made as an account macro (a character macro when the account's are
--- full). Returns what it did.
-local function EnsureMacro(m)
-    local idx = GetMacroIndexByName(m.name)
-    if idx and idx ~= 0 then
-        local mName, icon, body = GetMacroInfo(idx)
-        if body == m.body then return "already" end
-        EditMacro(idx, mName, icon, m.body)
-        return "updated"
-    end
-    if not CreateMacro then return "failed" end
-    local a, c = 0, 0
-    if GetNumMacros then a, c = GetNumMacros() end
-    local maxA = MAX_ACCOUNT_MACROS or 120
-    local maxC = MAX_CHARACTER_MACROS or 18
-    -- a new macro moves the indexes after it: the shared maps are read
-    -- again (the setups that follow look macros up in the same frame)
-    if (a or 0) < maxA then
-        CreateMacro(m.name, m.icon, m.body, nil)
-        ns.Macros.Invalidate()
-        ns.ActionSlots.Invalidate()
-        return "made"
-    elseif (c or 0) < maxC then
-        CreateMacro(m.name, m.icon, m.body, true)
-        ns.Macros.Invalidate()
-        ns.ActionSlots.Invalidate()
-        return "made for this character (the account's macros are full)"
-    end
-    return "no room (account and character macros are full)"
-end
-
-local function OneTimeSetups(tries)
-    tries = tries or 0
-    if not QoL.enabled then return end
-    if InCombatLockdown() or not MacrosLoaded() then
-        if tries < 60 then C_Timer.After(2, function() OneTimeSetups(tries + 1) end) end
-        return
-    end
-    local myClass = select(2, UnitClass("player"))
-    local ch = Char()
-    if type(ch.applied) ~= "table" then ch.applied = {} end
-    for _, setup in ipairs(ONE_TIME) do
-        if not ch.applied[setup.id] then
-            if setup.macro then
-                ch.applied[setup.id] = true
-                local did = EnsureMacro(setup.macro)
-                if did ~= "already" then Print("macros: '" .. setup.macro.name .. "' " .. did .. ".") end
-            elseif setup.untick or setup.tick then
-                if setup.class == myClass then
-                    ch.applied[setup.id] = true
-                    local b = Cfg()
-                    if type(b.applied) ~= "table" then b.applied = {} end
-                    if not (setup.account and b.applied[setup.id]) then
-                        b.applied[setup.id] = true
-                        local c = ClassCfg()
-                        for _, key in ipairs(setup.untick or {}) do c.remove[key] = nil end
-                        for _, key in ipairs(setup.tick or {}) do c.remove[key] = true end
-                        Changed()
-                        Print("buffs: Regrowth now goes instead of Rejuvenation.")
-                    end
-                end
-            elseif setup.text and setup.class == myClass and RCB() then
-                ch.applied[setup.id] = true
-                local ok, msg = BR.ApplyImport(setup.text, "merge")
-                Print("buffs: " .. (ok and "set up for you. " or "setup failed: ") .. tostring(msg or ""))
-            end
-        end
-    end
-end
-
 -- PLAYER_ENTERING_WORLD comes after the apply pass at login, so
 -- QoL.enabled is settled by then (the same as the raid modes).
 if not OFF_HERE then
@@ -1746,7 +1692,5 @@ boot:RegisterEvent("PLAYER_ENTERING_WORLD")
 boot:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     BR.Refresh()
-    -- a moment later, so the macros are surely in
-    C_Timer.After(3, function() OneTimeSetups(0) end)
 end)
 end

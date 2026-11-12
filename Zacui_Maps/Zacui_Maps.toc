@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Maps|r
 ## Notes: ZacUI world map, battlefield map and minimap markers. Replaces Leatrix Maps.
 ## Author: Zac
-## Version: 3.0.9
+## Version: 3.0.10
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
