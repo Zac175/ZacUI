@@ -9,41 +9,71 @@
 -- ZUI.VERSION in Core_Boot) for the "what's new" popup to show after an
 -- update. Items are plain English for players: one short line per
 -- change, no file, function or setting names. Do not comment entries.
+--
+-- AN ITEM FOR SOME GAME VERSIONS ONLY is a table instead of a string:
+--   { "the line", feature = "buff_remover" }        shown where that feature runs
+--   { "the line", feature = { "auction", "bags" } } shown where all of them run
+--   { "the line", only = "tbc" }                    shown on that game version
+--   { "the line", only = { "era", "tbc" } }         shown on any of those
+-- feature ids are Core_Flavor's (the same table that hides a feature's
+-- settings where it does not run); game versions are "era", "tbc",
+-- "forever" and "retail". A plain string shows everywhere. Tag a line
+-- only when it is plainly about one thing; a line about several things
+-- stays a plain string. A version with nothing left for a game version
+-- is not listed there, and brings no popup. A version may also carry
+--   titles = { tbc = "...", retail = "..." }
+-- for where its title names something that game version does not have.
 
 local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.11",
+        date = "2026-11-12",
+        title = "A changelog for the game version you play",
+        sections = {
+            {
+                type = "changed",
+                items = {
+                    "What's New and the Changelog page list only the changes for the game version you are playing.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.10",
         date = "2026-11-12",
         title = "A world-buff switch for the buff remover, and a smoother warrior HUD",
+        titles = { tbc = "Whirlwind over Execute, and a smoother warrior HUD",
+                   forever = "Whirlwind over Execute, and a smoother warrior HUD",
+                   retail = "A solid resize corner" },
         sections = {
             {
                 type = "added",
                 items = {
-                    "Buff remover: an \"Only while world buffs are out\" switch. With no world buff on you nothing ticked is cancelled; once you have one, everything ticked goes as usual.",
-                    "Buff remover: while that switch is on, a buff can be marked \"even with no WBs\" so it always goes. Salvation while tanking always goes too.",
-                    "Hesitation prompts: in execute range, Whirlwind is marked ahead of Execute when there are enough mobs for it. It has its own switch.",
-                    "Hesitation prompts: a Glide option. The icons over your target fade, slide and grow instead of jumping.",
-                    "With Readycheck installed, its route tracker can sit along the top of the chat box in a raid, above the raid frames. The switch is on the Chat page under \"In a raid\", with two more for how gear swaps show on it.",
+                    { "Buff remover: an \"Only while world buffs are out\" switch. With no world buff on you nothing ticked is cancelled; once you have one, everything ticked goes as usual.", feature = "buff_remover" },
+                    { "Buff remover: while that switch is on, a buff can be marked \"even with no WBs\" so it always goes. Salvation while tanking always goes too.", feature = "buff_remover" },
+                    { "Hesitation prompts: in execute range, Whirlwind is marked ahead of Execute when there are enough mobs for it. It has its own switch.", feature = "hesitation" },
+                    { "Hesitation prompts: a Glide option. The icons over your target fade, slide and grow instead of jumping.", feature = "hesitation" },
+                    { "With Readycheck installed, its route tracker can sit along the top of the chat box in a raid, above the raid frames. The switch is on the Chat page under \"In a raid\", with two more for how gear swaps show on it.", only = { "era", "tbc" } },
                 },
             },
             {
                 type = "changed",
                 items = {
-                    "Warrior HUD: icons grow smoothly, and an icon that leaves keeps its place for a moment so the row does not jump twice.",
+                    { "Warrior HUD: icons grow smoothly, and an icon that leaves keeps its place for a moment so the row does not jump twice.", feature = "hud_warrior" },
                     "Every window's resize corner is one solid corner that lights up under the mouse and while you drag it.",
                 },
             },
             {
                 type = "fixed",
                 items = {
-                    "A first login no longer ticks buffs for removal on a warrior, changes attack macros or makes a macro called \"dummy\".",
-                    "Hesitation prompts: an ability that comes off cooldown during the global cooldown counts as ready.",
-                    "Hesitation prompts: Arms warriors get Mortal Strike where Bloodthirst would be.",
-                    "Hesitation prompts: Whirlwind was rated too high with a fast main-hand weapon.",
+                    { "A first login no longer ticks buffs for removal on a warrior, changes attack macros or makes a macro called \"dummy\".", feature = "buff_remover" },
+                    { "Hesitation prompts: an ability that comes off cooldown during the global cooldown counts as ready.", feature = "hesitation" },
+                    { "Hesitation prompts: Arms warriors get Mortal Strike where Bloodthirst would be.", feature = "hesitation" },
+                    { "Hesitation prompts: Whirlwind was rated too high with a fast main-hand weapon.", feature = "hesitation" },
                     "The map window's title bar no longer shows a lighter slab behind it.",
-                    "Auction house: the line saying what you bought no longer flickers while buying stacks.",
+                    { "Auction house: the line saying what you bought no longer flickers while buying stacks.", feature = "auction" },
                 },
             },
         },
@@ -77,9 +107,9 @@ ns.CHANGELOG = {
             {
                 type = "fixed",
                 items = {
-                    "Buff remover: going to Defensive Stance and straight back no longer cancels Salvation.",
+                    { "Buff remover: going to Defensive Stance and straight back no longer cancels Salvation.", feature = "buff_remover" },
                     "Edit Mode: a small slip of the mouse while clicking a frame no longer moves it.",
-                    "The auction buying window keeps its size when you press Buy.",
+                    { "The auction buying window keeps its size when you press Buy.", feature = "auction" },
                     "The damage meter preview's size note no longer sits under the Layout button.",
                     "The mail windows have ZacUI's scroll bars.",
                 },
@@ -90,24 +120,27 @@ ns.CHANGELOG = {
         version = "3.0.8",
         date = "2026-11-10",
         title = "TBC raid mods, and class HUDs for your spec",
+        titles = { era = "Class HUDs for your spec, and a buff filter",
+                   forever = "Class HUDs for your spec, and a buff filter",
+                   retail = "A first class HUD for Retail, and a buff filter" },
         sections = {
             {
                 type = "added",
                 items = {
-                    "Every class HUD starts on your spec's own list, with separate lists for Classic Era, TBC and WoW Forever.",
-                    "Warrior, priest and paladin HUDs follow your spec too. Characters that already use them keep exactly what they had.",
-                    "Warrior HUD: a row for debuffs on your target, such as Sunder Armor stacks and Demoralizing Shout.",
-                    "Priest HUD: a row for your own buffs. Paladin HUD: a row for your judgements on the target.",
+                    { "Every class HUD starts on your spec's own list, with separate lists for Classic Era, TBC and WoW Forever.", only = { "era", "tbc", "forever" } },
+                    { "Warrior, priest and paladin HUDs follow your spec too. Characters that already use them keep exactly what they had.", feature = "hud_classes" },
+                    { "Warrior HUD: a row for debuffs on your target, such as Sunder Armor stacks and Demoralizing Shout.", feature = "hud_warrior" },
+                    { "Priest HUD: a row for your own buffs. Paladin HUD: a row for your judgements on the target.", feature = "hud_classes" },
                     "A \"Show spells you haven't learned yet\" option on every class HUD.",
-                    "A first class HUD for Retail, for all classes. It is off until you switch it on and has not been tested in the game yet.",
+                    { "A first class HUD for Retail, for all classes. It is off until you switch it on and has not been tested in the game yet.", only = "retail" },
                     "A filter for buffs and debuffs on unit frames and on the nameplates' simple debuff row: pick what shows, add spells to always or never show, and set limits. Your old settings carry over.",
                     "Edit Mode has a bar across the top, and the box you click shows its own actions. Class HUDs show their real icons while you place them.",
-                    "The raid mods' boxes stay out of Edit Mode until you press \"Raid mods\" on the bar.",
+                    { "The raid mods' boxes stay out of Edit Mode until you press \"Raid mods\" on the bar.", feature = "raidmods" },
                     "Bags can be split into groups by kind with the Groups button. New items get a gold edge, and a small bar shows how full your bags are.",
-                    "The auction buy window shows the item's quality and a progress bar, and can list every auction it will buy.",
-                    "TBC raid mods are filled out for all nine raids, Karazhan to Sunwell: cast bars with a KICK mark, debuff lists, tank icons, stand-in-it alarms and many more boss timers.",
-                    "Buff reminders on TBC: Commanding Shout, Earth Shield and the Master Soulstone. Fear Ward for priests who know it.",
-                    "Buff reminders can be limited to TBC's raids.",
+                    { "The auction buy window shows the item's quality and a progress bar, and can list every auction it will buy.", feature = "auction" },
+                    { "TBC raid mods are filled out for all nine raids, Karazhan to Sunwell: cast bars with a KICK mark, debuff lists, tank icons, stand-in-it alarms and many more boss timers.", only = "tbc" },
+                    { "Buff reminders on TBC: Commanding Shout, Earth Shield and the Master Soulstone. Fear Ward for priests who know it.", only = "tbc" },
+                    { "Buff reminders can be limited to TBC's raids.", only = "tbc" },
                     "Your own buffs and debuffs by the minimap can use the buff filter, and party and raid frames can have a filter of their own.",
                     "A \"Seen lately\" list on the filter page: always show or never show a buff with one click.",
                     "Bags: an option to put Search and Sort on the title bar.",
@@ -120,12 +153,12 @@ ns.CHANGELOG = {
                     "Custom nameplate debuffs can be added by name as well as by spell ID.",
                     "The window's corner buttons (reload, size, fold, close) are small raised buttons.",
                     "Options that do nothing on a game version are hidden on that version.",
-                    "The Darkmoon Faire mark on the damage meter hides while you have the fortune yourself, and is offered on Classic Era only.",
+                    { "The Darkmoon Faire mark on the damage meter hides while you have the fortune yourself, and is offered on Classic Era only.", feature = "meter_dmf" },
                     "The \"What's New\" window and the scroll bars match Readycheck's.",
                     "The map and the skinned game windows have the same flat header as the rest of ZacUI.",
                     "Edit Mode is easier to use: a line under the bar says how it works, the list shows what you can move first, and the box you click only offers what it can do.",
                     "Windows outside the settings window are a lighter grey instead of near-black.",
-                    "The auction buying window is much smaller.",
+                    { "The auction buying window is much smaller.", feature = "auction" },
                     "On a fresh install more frames start in spots where they don't overlap. Setups you already have are not moved.",
                     "The settings search remembers what it has read, so it no longer stalls the first time you search each session.",
                 },
@@ -138,7 +171,7 @@ ns.CHANGELOG = {
                     "Scrolling a long page no longer slows down near the top and bottom.",
                     "Slider handles were dark instead of gold.",
                     "A line no longer runs through the percent text on the nameplate threat bar.",
-                    "Retail: the backpack icon was invisible, bag icons had black corners, and a gold line crossed the character window.",
+                    { "Retail: the backpack icon was invisible, bag icons had black corners, and a gold line crossed the character window.", only = "retail" },
                     "Typing in the bag search or the Edit Mode search no longer lags.",
                     "Text on the Edit Mode bar no longer overlaps.",
                     "Features that are switched on can be placed in Edit Mode before they first appear.",
@@ -178,7 +211,7 @@ ns.CHANGELOG = {
                     "The game options window under the 2004 style has one close button, not two.",
                     "Quest and gossip text under the game styles is no longer heavy black.",
                     "No more blocked-action error when hovering an action button in combat.",
-                    "Action bar icons under the live style on WoW Forever fill their slots again.",
+                    { "Action bar icons under the live style on WoW Forever fill their slots again.", only = "forever" },
                 },
             },
         },
@@ -198,7 +231,7 @@ ns.CHANGELOG = {
                 type = "changed",
                 items = {
                     "Party frames wear the game's own small party frame under the Classic, WoW Forever and Blizzard styles.",
-                    "The auction house buy window is redesigned: the item with its icon, what you've bought and spent, and one clear price button.",
+                    { "The auction house buy window is redesigned: the item with its icon, what you've bought and spent, and one clear price button.", feature = "auction" },
                     "The key ring is a square slot with its own icon, like the bags beside it.",
                 },
             },
@@ -235,22 +268,22 @@ ns.CHANGELOG = {
                     "The \"Move in Edit Mode\" tag on the settings pages is gone; Edit Mode is in the sidebar.",
                     "Windows use the flat header from the settings, with no sparkle.",
                     "Bags under the WoW Forever and Blizzard looks use the game's own bag window: the portrait, rim, title, close button and coin box.",
-                    "Classic WoW UI on WoW Forever: the minimap gets the 2004 grey ring and zone bar, the character pane and spellbook the 2004 look, and the bag bar and menu buttons their 2004 art.",
+                    { "Classic WoW UI on WoW Forever: the minimap gets the 2004 grey ring and zone bar, the character pane and spellbook the 2004 look, and the bag bar and menu buttons their 2004 art.", only = "forever" },
                     "Nameplates: the hesitation icons sit above the mob's name instead of on it, and Demoralizing Shout shows with your other debuffs under the bar.",
                     "The changelog window is more compact.",
-                    "Classic WoW UI on WoW Forever: the game's own windows (character, spellbook, vendors, quests, mail, bank, friends, options, popups, tooltips and more) wear the 2004 border, gold title, round close button, old tabs and old buttons.",
+                    { "Classic WoW UI on WoW Forever: the game's own windows (character, spellbook, vendors, quests, mail, bank, friends, options, popups, tooltips and more) wear the 2004 border, gold title, round close button, old tabs and old buttons.", only = "forever" },
                     "Known issue: a few windows may still not fully match the look you picked (the world map keeps ZacUI's own frame). Keep sending screenshots.",
                 },
             },
             {
                 type = "fixed",
                 items = {
-                    "Buffs and the bag bar were not getting ZacUI's look on Era and TBC.",
-                    "A second close button on the loot window on Era and TBC.",
+                    { "Buffs and the bag bar were not getting ZacUI's look on Era and TBC.", only = { "era", "tbc" } },
+                    { "A second close button on the loot window on Era and TBC.", only = { "era", "tbc" } },
                     "Square corners on the nameplate target glow.",
-                    "The colour picker's colour wheel was blank on Era and TBC, and the picker could open behind the settings.",
-                    "The mount button on Era and TBC used a call that only works on WoW Forever and never mounted you; it uses your mount from your bags again.",
-                    "The auction house buy window: the Buy button no longer covers the text, and it shows the amount and price again.",
+                    { "The colour picker's colour wheel was blank on Era and TBC, and the picker could open behind the settings.", only = { "era", "tbc" } },
+                    { "The mount button on Era and TBC used a call that only works on WoW Forever and never mounted you; it uses your mount from your bags again.", only = { "era", "tbc" } },
+                    { "The auction house buy window: the Buy button no longer covers the text, and it shows the amount and price again.", feature = "auction" },
                     "An error in the unit frame preview.",
                 },
             },
@@ -296,7 +329,7 @@ ns.CHANGELOG = {
             {
                 type = "fixed",
                 items = {
-                    "An error from nameplates on WoW Forever.",
+                    { "An error from nameplates on WoW Forever.", only = "forever" },
                     "An error from the chat rail at login.",
                     "Tooltip boxes in the settings showing white.",
                     "Overlapping pieces in the settings preview.",
@@ -318,7 +351,7 @@ ns.CHANGELOG = {
                     "The look cards on the Style page and in the setup wizard preview the style before you reload.",
                     "Chat: an icon rail beside the chat with friends (and how many are online), copy chat, chat settings and scroll to newest. Guild, durability, channels and the chat menu can be added. Everything can be turned off.",
                     "Chat: a polished style for the panel, tabs and text, on by default and one switch to turn off.",
-                    "Damage meter: on WoW Forever and Retail, the game's own meter is used by default under the Forever and Blizzard looks. The Meter page lets you pick either one.",
+                    { "Damage meter: on WoW Forever and Retail, the game's own meter is used by default under the Forever and Blizzard looks. The Meter page lets you pick either one.", only = { "forever", "retail" } },
                     "Damage meter: a Classic-style meter for the Classic look.",
                     "Quests: hand-in and accept for you (never picks a reward or pays gold), objective and quest-complete sounds, progress told to your party, and the quest tracker hidden in raids.",
                     "Alerts: entering and leaving combat, group members dying, the instance reset line, and the screenshot text hidden.",

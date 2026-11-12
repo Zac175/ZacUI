@@ -50,7 +50,67 @@ local function DB()
     return ZacUIDB.changelog
 end
 
-local function Versions() return ns.CHANGELOG or {} end
+-- WHAT THIS GAME VERSION SEES (2026-11-12, Zac: "can the changelog only
+-- show relevant things for that version of the game ... the buff stuff
+-- forever tbc and retail players dont need to see that because its
+-- classic era only"). An item may say where it belongs (Changelog_Data:
+-- a feature id, or the game versions); the list everything here reads
+-- is the history with the other game versions' lines taken out, the
+-- sections and versions that are left empty dropped. Worked out once
+-- per game version (the flavor is fixed for a session once it is read).
+local function Relevant(item, flavor)
+    if type(item) ~= "table" then return true end
+    local f = item.feature
+    if ns.FeatureOn then
+        if type(f) == "string" then
+            if not ns.FeatureOn(f) then return false end
+        elseif type(f) == "table" then
+            for _, id in ipairs(f) do
+                if not ns.FeatureOn(id) then return false end
+            end
+        end
+    end
+    local only = item.only
+    if type(only) == "string" then
+        return only == flavor
+    elseif type(only) == "table" then
+        for _, fl in ipairs(only) do
+            if fl == flavor then return true end
+        end
+        return false
+    end
+    return true
+end
+Changelog.Relevant = Relevant
+
+local shown, shownFor, shownFrom
+local function Versions()
+    local all = ns.CHANGELOG or {}
+    local flavor = ns.Flavor and ns.Flavor() or "era"
+    if shown and shownFor == flavor and shownFrom == all then return shown end
+    local out = {}
+    for _, v in ipairs(all) do
+        local secs = {}
+        for _, sec in ipairs(v.sections or {}) do
+            local items = {}
+            for _, item in ipairs(sec.items or {}) do
+                if Relevant(item, flavor) then
+                    items[#items + 1] = type(item) == "table" and item[1] or item
+                end
+            end
+            if #items > 0 then secs[#secs + 1] = { type = sec.type, items = items } end
+        end
+        if #secs > 0 then
+            -- (titles = { tbc = "..." }: where the title names something
+            -- that game version does not have)
+            out[#out + 1] = { version = v.version, date = v.date,
+                title = (type(v.titles) == "table" and v.titles[flavor]) or v.title, sections = secs }
+        end
+    end
+    shown, shownFor, shownFrom = out, flavor, all
+    return out
+end
+Changelog.Versions = Versions
 function Changelog.Current() return ZUI.VERSION end
 
 local function Parts(v)
@@ -100,6 +160,7 @@ function Changelog.Visible(showAll)
     for _, v in ipairs(list) do
         if Compare(v.version, Changelog.Current()) <= 0 then return { v } end
     end
+    if not list[1] then return {} end
     return { list[1] }
 end
 
