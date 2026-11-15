@@ -144,7 +144,15 @@ local function Grip(corner)
 	-- sizes from either) but unseen and untouchable. The button stays bigger than the corner drawn
 	-- so it is easy to catch. (Six dots in a triangle until 2026-11-11.)
 	local face
-	if left then
+	if ns.GameLook() then
+		-- (under a game look: the game's own size grabber in both corners, as the engine shipped it)
+		g:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+		g:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+		g:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+		if left then   -- (the chat frame's grabber points right: mirrored)
+			for _, tex in ipairs({ g:GetNormalTexture(), g:GetHighlightTexture(), g:GetPushedTexture() }) do tex:SetTexCoord(1, 0, 0, 1) end
+		end
+	elseif left then
 		g:SetAlpha(0)
 		g:EnableMouse(false)
 	else

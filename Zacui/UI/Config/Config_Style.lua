@@ -530,6 +530,14 @@ local PAGE_PART = {
     sbt = "sct", maps = "maps", auras = "auraengine", auction = "bags", lootroll = "blizzard",
 }
 Look.PAGE_PART = PAGE_PART
+-- the module a page is about, where that module is a skin or replacement
+-- of the game's own UI (Look.STOCK): stood down under a game look, the
+-- banner says what the player is looking at
+local PAGE_MODULE = {
+    tooltips = { "tooltip", "tooltips are" }, minimap = { "minimap", "minimap is" }, chat = { "chat", "chat is" },
+    lootroll = { "lootroll", "loot rolls are" }, auction = { "auctionhouse", "auction house is" },
+}
+Look.PAGE_MODULE = PAGE_MODULE
 
 function ns.LookBanner(L)
     local part = L and PAGE_PART[L.pageId]
@@ -542,6 +550,13 @@ function ns.LookBanner(L)
     local card = L:Card("Look")
     local text = label .. " wear the " .. l.name .. " look. Some options here only affect ZacUI's own look; "
         .. "they are kept for when it is back."
+    -- (2026-11-14) a page whose module stands down under the look: what is
+    -- on screen is the game's own, and ZacUI's version is not running
+    local pm = PAGE_MODULE[L.pageId]
+    if pm and Look.StandsDown and Look.StandsDown(pm[1]) then
+        text = "Under the " .. l.name .. " look the " .. pm[2] .. " the game's own: ZacUI's version has no "
+            .. l.name .. " art yet, so it stays off there. The options here are kept for ZacUI's look."
+    end
     local fs = UI.Font(card, F.DESC, { text = text, cat = "text", key = "normal",
         width = math.max(120, (UI.Room(card) or 400) - 120) })
     fs:SetPoint("TOPLEFT", card, "TOPLEFT", M.DESC_X or 12, card._y + 3)

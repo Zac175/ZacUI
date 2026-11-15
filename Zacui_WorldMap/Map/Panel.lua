@@ -36,15 +36,32 @@ local TOGGLE = 36               -- the OpenMap button (an action button's size)
 local FAV = 30                  -- a favourite's button
 local TILE_H = 60               -- an action's tile in the menu (room for a label on two lines)
 -- (ZacUI's palette: the accent for what's lit and for headings, the border colour for rules)
+-- (under a game look: the engine's own bronze and gold - ns.GameLook, Core.lua)
 local function ZC(key, r, g, b)
 	local z = _G.ZacUI
-	local c = z and z.Col and z.Col(key)
+	local c = (not ns.GameLook()) and z and z.Col and z.Col(key)
 	if c then return { c.r, c.g, c.b } end
 	return { r, g, b }
 end
 local BRONZE = ZC("border", 0.66, 0.49, 0.28)
 local LIT = ZC("accent", 1, 0.82, 0.3)
 local HEAD = ZC("accent", 0.96, 0.80, 0.50)
+-- (the look is only final at PLAYER_LOGIN - a worn profile is copied in by then - so the three are
+-- read again there, in place: everything below holds these same tables)
+do
+	local f = CreateFrame("Frame")
+	f:RegisterEvent("PLAYER_LOGIN")
+	f:SetScript("OnEvent", function(self)
+		self:UnregisterEvent("PLAYER_LOGIN")
+		local function Fill(t, key, r, g, b)
+			local c = ZC(key, r, g, b)
+			t[1], t[2], t[3] = c[1], c[2], c[3]
+		end
+		Fill(BRONZE, "border", 0.66, 0.49, 0.28)
+		Fill(LIT, "accent", 1, 0.82, 0.3)
+		Fill(HEAD, "accent", 0.96, 0.80, 0.50)
+	end)
+end
 local STAR = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_1"   -- (the raid marker's star: every client has it)
 
 local function HasAtlas(name)

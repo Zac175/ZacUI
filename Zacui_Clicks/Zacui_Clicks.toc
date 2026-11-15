@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Click casting|r
 ## Notes: ZacUI click casting: spells, macros, target and menu on any mouse button or key over your unit frames. Replaces Clique.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -14,6 +14,8 @@
 # ClickCastFrames table and ClickCastHeader it provides exist from file
 # load, so they are there when the unit frames build at PLAYER_LOGIN.
 
-CC_Core.lua
-CC_Import.lua
-CC_Config.lua
+Core\CC_Core.lua
+Import\CC_Import.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, Clicks folder (2026-11-13).

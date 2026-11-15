@@ -2,7 +2,7 @@
 ## Title: ZacUI
 ## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB
@@ -211,44 +211,31 @@ Boot\Boot_Identify.lua
 UI\Minimap\Minimap_Options.lua
 
 # ---------- Config window ----------
+# What files that load at login write into: the menu, the page registry,
+# the tabs added from outside, the layout kit. And the door to the window
+# itself, its search, its preview strip and the pages, which load on
+# demand from the Zacui_Options addon (2026-11-13): ns.LoadOptions, and
+# ns.OpenConfig / RefreshConfig / ConfigIsOpen for every file that takes
+# them when it loads.
 UI\Config\Config_Base.lua
-UI\Config\Config_Search.lua
-# The search box and its dropdown of results (the index above draws
-# nothing; the window below lends it the nav column).
-UI\Config\Config_SearchBox.lua
-# The preview dock pages declare with L:Preview. Before the window,
-# which drives it around every page build.
-UI\Config\Config_Preview.lua
-UI\Config\Config_Window.lua
-UI\Config\Config_PagesMain.lua
-UI\Config\Config_PagesStyle.lua
-# The look picker: the Style page, the look cards, the first-run look
-# popup and the part pages' look banner (Core_Look's model).
+# The look picker: the look cards, the first-run look popup (shown at a
+# first login, so it stays here) and the part pages' look banner
+# (Core_Look's model).
 UI\Config\Config_Style.lua
-UI\Config\Config_PagesMotion.lua
-UI\Config\Config_PagesMinimap.lua
-# General > Game versions: what runs on Era, TBC and Forever, and the
-# "Test as" override.
-UI\Config\Config_PagesFlavor.lua
-# Draws AceConfig-shaped option tables in ZacUI widgets (the aura engine's
-# editor and the world map's options use it).
-UI\Config\Config_AceRender.lua
+# Settings adopted from other addons: the first-run offer (asked at
+# login, so it stays here) and the Profiles > Import page.
 UI\Config\Config_Import.lua
-UI\Config\Config_Profiles.lua
-# Drag to customise: the tooltip, buffs and minimap previews' pieces,
-# registered by preview key (UIF_PreviewDrag). After the pages.
-UI\Config\Config_PreviewDrag.lua
-# "Move in Edit Mode" on every page that styles a movable frame (wraps
-# the page header). After Config_Base; makes nothing at load.
-UI\Config\Config_EditLinks.lua
-# The aura filter's panel (Core_AuraFilter). After Config_Base.
-UI\Config\Config_AuraFilter.lua
 
 # ---------- Changelog ----------
 # The version history (data, newest first), then the popup after an
 # update and the General > Changelog page.
 UI\Changelog\Changelog_Data.lua
 UI\Changelog\Changelog.lua
+
+# ---------- Performance ----------
+# /zui perf: what ZacUI, Readycheck and the busiest other addons cost,
+# read from the game's own addon profiler. Builds nothing until asked.
+UI\Perf\Perf.lua
 
 # ---------- Tutorial ----------
 # The first-run welcome and its bookkeeping, quick setup, and the guided

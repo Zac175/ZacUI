@@ -867,7 +867,66 @@ local TAB_ART = { "common-sidetab-c60", "common-sidetab-selected-c60", "common-s
 local TAB_MASK = "common-sidetab-mask-c60"
 local ART_OUT, ART_ALONG, SHOW_OUT, SHOW_ALONG = 55, 60, 52, 54
 local FACE_OUT, FACE_ALONG, FACE_IN = 43, 44, 2
+-- (under a game look: the game's own side-tab art, as the engine shipped it - ns.GameLook, Core.lua)
+local function FaceTabStock(b, turn, on)
+	if turn == true then turn = "right" elseif turn == false then turn = "left" end
+	local w, h = b:GetWidth(), b:GetHeight()
+	local upright = turn == "left" or turn == "right"
+	local out, along = upright and w or h, upright and h or w
+	-- the art at the tab's size, its flat side flush with the tab's (its clear strip is on its open side)
+	local ao, aa = out * ART_OUT / SHOW_OUT, along * ART_ALONG / SHOW_ALONG
+	local aw, ah = upright and ao or aa, upright and aa or ao
+	local edge = TOWARD[turn]
+	local shift = (ao - out) / 2                -- (away from the edge)
+	local cx, cy = -edge[1] * shift, -edge[2] * shift
+	local art = { b.bg, b.selected, b.hover }
+	for i, tex in ipairs(art) do
+		local ok = Atlas(tex, TAB_ART[i], turn, true) or Atlas(tex, (TAB_ART[i]:gsub("%-c60$", "")), turn, true)
+		if ok then
+			tex:SetSize(aw, ah)
+			tex:ClearAllPoints()
+			tex:SetPoint("CENTER", cx, cy)
+		elseif i == 1 then
+			b.bg:SetAllPoints()
+			b.bg:SetColorTexture(0.1, 0.08, 0.06, 0.95)
+		end
+	end
+	if on ~= nil then b.selected:SetShown(on) end
+	if not b.icon then return end
+	if b.fill and b.icon.square ~= false then
+		-- (OpenMap's own: the picture filling the face, cut to its shape; the face's middle is nearer the flat side)
+		if not b.mask then
+			b.mask = b:CreateMaskTexture()
+			if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(TAB_MASK) then
+				b.mask:SetAtlas(TAB_MASK)
+				b.icon:AddMaskTexture(b.mask)
+			end
+		end
+		b.mask:SetSize(aw, ah)
+		b.mask:ClearAllPoints()
+		b.mask:SetPoint("CENTER", cx, cy)
+		pcall(Turned, b.mask, 0, 1, 0, 1, turn)   -- (the mask is its whole file)
+		local side = math.max(FACE_OUT * ao / ART_OUT, FACE_ALONG * aa / ART_ALONG)
+		local toward = (ART_OUT / 2 - FACE_IN - FACE_OUT / 2) * ao / ART_OUT   -- (the face's middle from the art's)
+		b.icon:SetSize(side, side)
+		b.icon:ClearAllPoints()
+		b.icon:SetPoint("CENTER", cx + edge[1] * toward, cy + edge[2] * toward)
+		return
+	end
+	if b.on and Atlas(b.icon, (on or not b.off) and b.on or b.off, false, true) then
+		b.icon:SetSize(b.iconSize or 24, b.iconSize or 24)
+		if not b.off then                       -- (one icon for both: dimmed when it's not the one shown)
+			b.icon:SetDesaturated(not on)
+			b.icon:SetAlpha(on and 1 or 0.75)
+		end
+	end
+	-- (an icon of its own size: in the face's middle)
+	local toward = (ART_OUT / 2 - FACE_IN - FACE_OUT / 2) * ao / ART_OUT
+	b.icon:ClearAllPoints()
+	b.icon:SetPoint("CENTER", cx + edge[1] * toward, cy + edge[2] * toward)
+end
 local function FaceTab(b, turn, on)
+	if ns.GameLook() then return FaceTabStock(b, turn, on) end
 	if turn == true then turn = "right" elseif turn == false then turn = "left" end
 	local w, h = b:GetWidth(), b:GetHeight()
 	local upright = turn == "left" or turn == "right"

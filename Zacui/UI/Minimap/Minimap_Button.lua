@@ -125,7 +125,12 @@ function MB.ShowMenu()
           tooltip = "The options window (/zui)." },
         { text = "Edit Mode", func = function() if ns.ToggleEditMode then ns.ToggleEditMode() end end,
           tooltip = "Every movable ZacUI frame at once over a grid. Drag them into place, then close it to lock." },
-        { text = "Pages", children = function() return PageItems() end },
+        -- (the pages register when the settings load, Config_Base: the list
+        -- needs them, so opening it loads them)
+        { text = "Pages", children = function()
+            if ns.LoadOptions then ns.LoadOptions() end
+            return PageItems()
+        end },
         { text = "Profiles", children = ProfileItems },
         { text = "Aura engine", func = OpenAuras,
           tooltip = (WeakAuras and WeakAuras.OpenOptions) and "Opens the aura editor."

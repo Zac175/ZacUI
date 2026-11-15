@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Bags|r
 ## Notes: ZacUI combined bag and auction house.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -15,13 +15,16 @@
 # variables; every setting still lives in ZacUIDB and in profiles.
 # Load order within this file is the same as it was inside ZacUI.
 
-Bags_Core.lua
-Bags_Sort.lua
-Bags_Frame.lua
+Bags\Bags_Core.lua
+Bags\Bags_Sort.lua
+Bags\Bags_Frame.lua
+# The rail window (2026-11-13): the bags, the keyring and the views down
+# the left, pinned row, sections. After Bags_Frame, which calls into it.
+Bags\Bags_Rail.lua
 # Your other characters: the footer's gold list, remembered bags and bank,
 # tooltip counts (after Bags_Frame: it dresses its windows)
-Bags_Alts.lua
+Bags\Bags_Alts.lua
 # Overnight gap build (2026-11-08): item level and BoE text on gear slots.
-Bags_Extras.lua
-AH_Core.lua
-AH_Frame.lua
+Bags\Bags_Extras.lua
+AuctionHouse\AH_Core.lua
+AuctionHouse\AH_Frame.lua

@@ -1,8 +1,16 @@
 --------------------------------------------------------------------------------
--- The first time the map opens on a new install: how it starts out. "Classic" is closer to
--- Blizzard's map: unexplored areas hidden, none of OpenMap's own icons or zone levels, the
--- favourites folded away. "ZacUI Map" keeps OpenMap's defaults. Settings saved before this are
--- never asked about, or changed. /openmap welcome asks again.
+-- The first time the map opens: which map. (The engine asked "Classic" or its own full map here;
+-- ZacUI switched the question off on 2026-10-31 and put it back on 2026-11-14 - Zac: "also should
+-- prompt on map first open why did you get rid of that" - as the choice that matters in ZacUI:)
+--   The game's map      the world map as the game draws it; the seamless map is off
+--   Seamless, classic   the seamless map, started closer to the game's: unexplored areas hidden,
+--                       none of its own icons or zone levels, the favourites folded away
+--   Seamless map        the seamless map with everything it ships with
+-- Who is asked is Init.lua's (ns.MapAskDecide): a new install, and a save whose seamless map a game
+-- look turned off; settings saved before this are never asked about, or changed. Closing the
+-- window without choosing asks again at the first opening of the next login. /zuimap welcome asks
+-- any time, map on or off. The window is ZacUI's own popup (UI.Popup: its look, its scale, and the
+-- game look's dialog under a game look), not a frame of this engine's.
 --------------------------------------------------------------------------------
 
 local _, ns = ...
@@ -16,56 +24,73 @@ local L = ns.L
 local CLASSIC = { unexplored = "hide", icons = false, boats = false, zeppelins = false, flight = false, routes = false, zoneLevels = false,
 	dungeonLevels = false, trayOpen = false }
 
-local frame
+local dialog
+local askedThisLogin
 
-local function Choose(classic)
-	mod.db.presetAsked = true
-	if classic then
-		for k, v in pairs(CLASSIC) do mod.db[k] = v end
-		mod:Refresh()
-		if ns.NotifyOptions then ns.NotifyOptions() end
-	end
-	frame:Hide()
+local function AskReload(text)
+	local z = _G.ZacUI
+	if type(z) == "table" and z.AskReload then z.AskReload(text) else ns:Print(text) end
 end
 
-local function Build(map)
-	frame = CreateFrame("Frame", nil, map)
-	frame:SetSize(480, 196)
-	frame:SetPoint("CENTER", map.ScrollContainer or map, "CENTER")
-	frame:SetFrameStrata("DIALOG")
-	frame:EnableMouse(true)         -- (clicks don't reach the map under it)
-	if mod.padRoots then mod.padRoots[#mod.padRoots + 1] = frame end   -- (the gamepad's cursor presses its buttons: Gamepad.lua)
-	-- (in the map window's own frame, as What's new is; no X: a choice is wanted, and the map's own
-	-- close asks again next time)
-	local top, _, close = ns.Look:Window(frame, L["Choose your map"])
-	close:Hide()
-	local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	text:SetPoint("TOP", 0, -top - 14)
-	text:SetWidth(440)
-	text:SetText(L["You can change any of it later in ZacUI Map's menu (its button on the map, or /zuimap)."])
-	local function Choice(x, label, desc, classic)
-		local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-		b:SetSize(180, 28)
-		b:SetPoint("TOP", frame, "TOP", x, -top - 54)
-		b:SetText(label)
-		b:SetScript("OnClick", function() Choose(classic) end)
-		local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		fs:SetPoint("TOP", b, "BOTTOM", 0, -8)
-		fs:SetWidth(200)
-		fs:SetText(desc)
+-- which: "game" | "classic" | "full"
+local function Choose(which)
+	local db = mod.db
+	db.mapAsked, db.presetAsked = true, true
+	local want = which ~= "game"
+	if which == "classic" then
+		for k, v in pairs(CLASSIC) do db[k] = v end
 	end
-	Choice(-106, L["Classic"], L["Unexplored areas hidden. No dungeon or flight master icons and no zone levels."], true)
-	Choice(106, L["ZacUI Map"], L["Show the whole map, with dungeon entrances, flight masters, zone levels and favourite buttons."], false)
-	frame:Hide()
+	db.enabled = want
+	local z = _G.ZacUI
+	if dialog and z and z.UI and z.UI.CloseWindow then z.UI.CloseWindow(dialog) end
+	local running = mod.enabled and true or false
+	if want == running then
+		-- (no change of map: the preset alone, where the map is drawn)
+		if which == "classic" and running then
+			mod:Refresh()
+			if ns.NotifyOptions then ns.NotifyOptions() end
+		end
+		return
+	end
+	AskReload(want and L["The seamless map is on after a reload."] or L["The game's own map is back after a reload."])
+end
+mod.ChooseMap = Choose
+
+local W, BTN_W = 500, 144
+local function Build()
+	local z = _G.ZacUI
+	local UI = type(z) == "table" and z.UI
+	if not (UI and UI.Popup and UI.PopupText and UI.OpenWindow) then return nil end
+	local f = UI.Popup("ZacUIMapChoice", W, 240, L["Choose your map style"], { strata = "FULLSCREEN_DIALOG", level = 120, part = "maps" })
+	f.message = UI.PopupText(f, "body", { justify = "LEFT", width = W - 2 * f.pad })
+	f.message:SetPoint("TOPLEFT", f, "TOPLEFT", f.pad, -f.headerHeight)
+	f.message:SetText(L["ZacUI has a seamless world map: every zone stitched into one, the wheel from the whole world down to street level."]
+		.. "\n\n" .. L["The game's map"] .. ": " .. L["The world map as the game draws it."]
+		.. "\n" .. L["Seamless, classic"] .. ": " .. L["The seamless map with unexplored areas hidden and no dungeon, flight master or zone level marks."]
+		.. "\n" .. L["Seamless map"] .. ": " .. L["The whole map, with dungeon entrances, flight masters, zone levels and favourite buttons."]
+		.. "\n\n" .. L["You can change this any time: /zui, Maps."])
+	f:SetButtons({
+		{ text = L["The game's map"], width = BTN_W, onClick = function() Choose("game") end },
+		{ text = L["Seamless, classic"], width = BTN_W, onClick = function() Choose("classic") end },
+		{ text = L["Seamless map"], width = BTN_W, onClick = function() Choose("full") end },
+	})
+	local ok, h = pcall(f.message.GetStringHeight, f.message)
+	f:FitHeight(math.max(18, math.ceil((ok and type(h) == "number") and h or 0)))
+	return f
 end
 
 function mod:ShowWelcome()
-	local map = WorldMapFrame
-	if not map then return end
-	if not frame then Build(map) end
-	if map:IsShown() then frame:Show() return end
-	ToggleWorldMap()
-	C_Timer.After(0, function() if map:IsShown() then frame:Show() end end)
+	if not dialog then dialog = Build() end
+	if not dialog then return end
+	-- the accent button is the map in use now
+	local b = dialog.buttons
+	if b and b[1] and b[1].SetKind then
+		local on = mod.enabled and true or false
+		b[1]:SetKind((not on) and "primary" or nil)
+		b[2]:SetKind(nil)
+		b[3]:SetKind(on and "primary" or nil)
+	end
+	_G.ZacUI.UI.OpenWindow(dialog)
 end
 
 if ns.flavorOff then return end   -- (ZacUI: off on this game version, Core.lua)
@@ -73,12 +98,19 @@ local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent", function(self)
 	self:UnregisterEvent("PLAYER_LOGIN")
-	-- (ZacUI: never asked - the full map is the one ZacUI ships; /zuimap welcome still offers the choice)
+	-- (the engine's own preset question is part of the one above: never asked by itself)
 	if mod.db.presetAsked == nil then mod.db.presetAsked = true end
-	if mod.db.presetAsked then return end
-	EventUtil.ContinueOnAddOnLoaded("Blizzard_WorldMap", function()
+	-- asked at the map's first opening of this login while db.mapAsked is false (Init.lua decides
+	-- that after this handler may have run, so it is read when the map opens); never in a fight
+	local function Hook()
 		WorldMapFrame:HookScript("OnShow", function()
-			if mod.enabled and mod.db.presetAsked == false and not (frame and frame:IsShown()) then mod:ShowWelcome() end
+			if mod.db.mapAsked ~= false or askedThisLogin then return end
+			if InCombatLockdown and InCombatLockdown() then return end
+			askedThisLogin = true
+			mod:ShowWelcome()
 		end)
-	end)
+	end
+	-- (as the map itself waits, WorldMap.lua: the frame is there already, or comes with its addon)
+	if WorldMapFrame then Hook()
+	elseif EventUtil and EventUtil.ContinueOnAddOnLoaded then EventUtil.ContinueOnAddOnLoaded("Blizzard_WorldMap", Hook) end
 end)

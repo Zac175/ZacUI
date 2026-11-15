@@ -197,6 +197,27 @@ end
 local SCol = UI.SCol
 local function Accent() return GetColor("ui", "accent") end
 
+-- THE SCROLL THUMB'S COLOUR, one for every scroll bar (2026-11-14, Zac:
+-- "some sliders in the addons were still brown by default they should all
+-- match the like greyish slider"). Outside the settings window a thumb was
+-- the palette's brown at 0.6 and the accent while lit; the settings
+-- window's is white at 0.27, a fifth brighter while lit. Now that grey is
+-- every bar's, as long as no thumb colour is picked on the Colours page;
+-- a picked one is painted as it always was (the pick at 0.6, the accent
+-- while lit). Returns r, g, b, a.
+function UI.ScrollThumbColor(lit)
+    local c = GetColor("scrollbar", "thumb")
+    if ns.DefaultColor and c == ns.DefaultColor("scrollbar", "thumb") then
+        local ka = S.SCROLL_THUMB_A
+        return 1, 1, 1, lit and math.min(1, ka + 0.2) or ka
+    end
+    if lit then
+        local a = Accent()
+        return a.r, a.g, a.b, 1
+    end
+    return c.r, c.g, c.b, 0.6
+end
+
 -- ROUND ART (2026-11-08): EllesmereUI draws its toggles and slider tracks
 -- as pills and its knobs and thumbs as circles. Ours: plain white
 -- anti-aliased discs (Media/Icons/disc<n>, zui_tests/icons/make_icons.py
@@ -287,6 +308,9 @@ end
 -- is handed back through it too)
 -- (the face, size and outline alone: what a change of ZacUI's font redoes)
 local function FontDress(fs, size, outline, fixedSize)
+    -- (2026-11-14) a text that wears a game look's font (Core_LookPanels
+    -- Kit.Font) keeps it: ZacUI's font passes leave it alone
+    if rawget(fs, "_zKitFont") then return end
     local cfg = ZacUIDB and ZacUIDB.font or {}
     local delta = fixedSize and 0 or (cfg.delta or 0)
     local path = ResolveFontPath(cfg.name)
@@ -359,7 +383,18 @@ function UI.Font(parent, size, opts)
     opts = opts or {}
     local layer = opts.layer or "OVERLAY"
     local fs = parent:CreateFontString(nil, layer, opts.template or "GameFontNormal")
-    return FontApply(fs, size, opts)
+    FontApply(fs, size, opts)
+    rawset(fs, "_zIs", "text")
+    if opts.look == false then rawset(fs, "_zNoLook", true) end
+    -- (2026-11-14) in a window or popup that wears a game look the text is
+    -- the game's font at the size it was made (Kit.live: nothing is asked
+    -- until some window wears one)
+    local Kit = ns.Look and ns.Look.Kit
+    if Kit and Kit.live and opts.look ~= false and Kit.Host(parent) then
+        local _, at = fs:GetFont()
+        Kit.Font(fs, type(at) == "number" and at > 0 and at or (size or F.LABEL))
+    end
+    return fs
 end
 UI.RepaintTree = function(root) Repaint(root) end
 
@@ -920,6 +955,21 @@ function UI.Button(parent, text, opts)
     if opts.onClick then b:SetScript("OnClick", opts.onClick) end
     if opts.tooltip then UI.Tooltip(b, opts.tooltipTitle or text, opts.tooltip) end
     b:_zPaint()
+    -- (2026-11-14, the look framework: the building blocks ask the look
+    -- themselves) a worded button inside a ZacUI window or popup that
+    -- wears a game look is that look's panel button (Core_LookPanels'
+    -- kit) - no window dresses its buttons one by one. Not a tab, not the
+    -- settings window (it never wears a game look), not a window that
+    -- dresses itself (the bag: no _zLookAuto on it).
+    -- (what it is, for a window that is dressed after it was built:
+    -- Kit.Adopt)
+    if not opts.tab and type(text) == "string" and text ~= "" then rawset(b, "_zIs", "button") end
+    if opts.look == false then rawset(b, "_zNoLook", true) end
+    local Kit = ns.Look and ns.Look.Kit
+    if Kit and Kit.Host and not opts.tab and opts.look ~= false and type(text) == "string" and text ~= ""
+       and Kit.Host(parent) then
+        Kit.Button(b)
+    end
     return b
 end
 
@@ -1156,6 +1206,13 @@ function UI.Checkbox(parent, label, checked, onToggle, opts)
     host:SetChecked(checked)
     host:_zPaint()
     if opts.tooltip then UI.Tooltip(host, label, opts.tooltip) end
+    -- (2026-11-14) in a window or popup that wears a game look, the stock
+    -- checkbox (Core_LookPanels Kit.Check; never in the settings window,
+    -- which no look dresses)
+    rawset(host, "_zIs", "check")
+    if opts.look == false then rawset(host, "_zNoLook", true) end
+    local Kit = ns.Look and ns.Look.Kit
+    if Kit and Kit.Host and Kit.Check and opts.look ~= false and Kit.Host(parent) then Kit.Check(host) end
     return host
 end
 
@@ -1482,6 +1539,16 @@ local function SetSlider(parent, opts)
         end)
     end
     host.slider, host.valueText, host.valueBox = slider, value, box
+    -- (2026-11-15) its parts, for the look's slider (Core_LookPanels
+    -- Kit.Slider), and what it is; in a window that wears a game look it
+    -- is the stock slider at once
+    rawset(host, "_zSl", { track = track, trackPill = trackPill, fillPill = fillPill, thumb = thumb, block = block, box = box, value = value })
+    rawset(host, "_zIs", "slider")
+    if opts.look == false then rawset(host, "_zNoLook", true) end
+    do
+        local Kit = ns.Look and ns.Look.Kit
+        if Kit and Kit.Host and Kit.Slider and opts.look ~= false and Kit.Host(parent) then Kit.Slider(host) end
+    end
     function host:SetValue(v) slider:SetValue(v) end
     host._zSetQuiet = function(v)
         local x = v or lo
@@ -1707,6 +1774,14 @@ function UI.Slider(parent, opts)
         end)
     end
     host.slider, host.valueText = slider, value
+    -- (2026-11-15) see the settings-size slider above
+    rawset(host, "_zSl", { track = track, trackPill = trackPill, fillPill = fillPill, thumb = thumb, block = block, ring = ring })
+    rawset(host, "_zIs", "slider")
+    if opts.look == false then rawset(host, "_zNoLook", true) end
+    do
+        local Kit = ns.Look and ns.Look.Kit
+        if Kit and Kit.Host and Kit.Slider and opts.look ~= false and Kit.Host(parent) then Kit.Slider(host) end
+    end
     function host:SetValue(v) slider:SetValue(v) end
     -- a value from the settings, not from the user: no onChange, no signal
     -- (exactly what building it with this value does: the value as given,
@@ -1901,8 +1976,8 @@ function UI.Dropdown(parent, opts)
             rail:ClearAllPoints()
             rail:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -2,
                 -2 - math.floor(range * frac + 0.5))
-            local rc = GetColor("scrollbar", "thumb")
-            rail:SetVertexColor(rc.r, rc.g, rc.b, 0.8)
+            -- (a list's rail is lit: it only shows while the list is open)
+            rail:SetVertexColor(UI.ScrollThumbColor(true))
             rail:Show()
         else
             rail:Hide()
@@ -2369,6 +2444,12 @@ function UI.EditBox(parent, opts)
     host.editBox = eb
     function host:GetText() return eb:GetText() end
     function host:SetText(t) eb:SetText(t or "") end
+    -- (2026-11-14) in a window or popup that wears a game look, the stock
+    -- input box (Core_LookPanels Kit.Field)
+    rawset(host, "_zIs", "field")
+    if opts.look == false then rawset(host, "_zNoLook", true) end
+    local Kit = ns.Look and ns.Look.Kit
+    if Kit and Kit.Host and Kit.Field and opts.look ~= false and Kit.Host(parent) then Kit.Field(host) end
     return host
 end
 
@@ -2447,6 +2528,15 @@ function UI.TextBox(parent, opts)
     end
     function host:Focus() eb:SetFocus() end
     function host:_zUnfit() eb:SetWidth(width - 14) end
+    -- (2026-11-15) what it is; in a window that wears a game look it sits
+    -- in the look's small box (Core_LookPanels Kit.TextBox)
+    rawset(host, "_zIs", "textbox")
+    if opts.look == false then rawset(host, "_zNoLook", true) end
+    do
+        local Kit = ns.Look and ns.Look.Kit
+        local hostWin = Kit and Kit.Host and Kit.TextBox and opts.look ~= false and Kit.Host(parent)
+        if hostWin then Kit.TextBox(host, rawget(hostWin, "_zLookPart")) end
+    end
     return host
 end
 
@@ -2515,6 +2605,8 @@ function UI.ScrollArea(parent, opts)
     local REST, LIT = 0.5, 1
     local lit, serial = false, 0
     local function PaintThumb()
+        -- (the look's knob keeps its own colour: Core_LookPanels Kit.Scroll)
+        if rawget(bar, "_zKitKnob") then thumb:SetVertexColor(1, 1, 1, 1) return end
         if thin then
             local ta, ka = S.SCROLL_TRACK_A, S.SCROLL_THUMB_A
             if style == "nav" then ta, ka = S.NAV_TRACK_A, S.NAV_THUMB_A end
@@ -2523,8 +2615,7 @@ function UI.ScrollArea(parent, opts)
             return
         end
         local on = lit or bar._zHot or bar._zDrag
-        local tc = on and GetColor("ui", "accent") or GetColor("scrollbar", "thumb")
-        thumb:SetVertexColor(tc.r, tc.g, tc.b, on and 1 or 0.6)
+        thumb:SetVertexColor(UI.ScrollThumbColor(on))
     end
     -- lit for a moment after a scroll (one timer, checked when it fires)
     local function Flash()
@@ -2651,7 +2742,7 @@ function UI.ScrollArea(parent, opts)
         bar:SetMinMaxValues(0, maxScroll)
         if bar:GetValue() > maxScroll then bar:SetValue(maxScroll) end
         bar:SetShown(maxScroll > 1)
-        if maxScroll > 1 then
+        if maxScroll > 1 and not rawget(bar, "_zKitKnob") then
             local frac = view / h
             thumb:SetHeight(math.max(thin and 30 or 28, math.floor(view * frac)))
         end
@@ -2660,6 +2751,16 @@ function UI.ScrollArea(parent, opts)
     scroll.bar, scroll.child = bar, child
     scroll._zPaint = function() PaintThumb() end
     scroll:_zPaint()
+    -- (2026-11-15) its parts and what it is; in a window that wears a
+    -- game look the bar is the stock one at once
+    rawset(bar, "_zThumb", thumb)
+    rawset(bar, "_zTrack", track)
+    rawset(bar, "_zIs", "scroll")
+    do
+        local Kit = ns.Look and ns.Look.Kit
+        local host = Kit and Kit.Host and Kit.Scroll and not (type(opts) == "table" and opts.look == false) and Kit.Host(parent)
+        if host then Kit.Scroll(bar, rawget(host, "_zLookPart")) end
+    end
     return scroll, child, bar
 end
 
@@ -2830,6 +2931,13 @@ function UI.Card(parent, title, y, opts)
         return self:GetHeight()
     end
     card:_zPaint()
+    -- (2026-11-14) in a window that wears a game look, the look's small box
+    -- (Core_LookPanels Kit.Card)
+    rawset(card, "_zIs", "card")
+    if opts.look == false then rawset(card, "_zNoLook", true) end
+    local Kit = ns.Look and ns.Look.Kit
+    local host = Kit and Kit.Host and Kit.Card and opts.look ~= false and Kit.Host(parent)
+    if host then Kit.Card(card, rawget(host, "_zLookPart")) end
     return card
 end
 
@@ -2911,8 +3019,9 @@ end
 -- COLOUR PICKER (the game's dialog)
 -- ============================================================
 -- UI.OpenColorPicker({ r, g, b, a, alpha = true,
---     onChange = function(r, g, b, a) end,   -- every move while dragging
---     onCancel = function(r, g, b, a) end }) -- the values it opened with
+--     onChange = function(r, g, b, a) end,   -- while dragging (see below)
+--     onCancel = function(r, g, b, a) end,   -- the values it opened with
+--     owner = widget })                      -- optional: whose colour this is
 -- The one place ZacUI talks to ColorPickerFrame. Two client generations
 -- of the same dialog: the modern one takes an options table and reports
 -- alpha as alpha; the classic one wants fields poked onto the frame
@@ -2920,9 +3029,50 @@ end
 -- optional to support on 11509. Cancel hands back the values captured
 -- here rather than trusting the dialog's previousValues, whose shape
 -- differs between the two.
+--
+-- A DRAG NEVER HITCHES (2026-11-08 and 11-13, Zac: "the color picker is
+-- super laggy"). The wheel fires on every mouse move, and what one change
+-- costs is the caller's: a text colour is nothing, a unit-frame colour
+-- puts every frame's settings on again, and much of ZacUI restyles on the
+-- frame after (the settings listeners). So:
+--   * the latest colour is applied at most ten times a second;
+--   * every apply is timed. Its own run by the clock; what it sets going
+--     by the frames: while the picker is up one small frame reads how long
+--     each frame took, and the three frames after an apply are held
+--     against the quiet ones. An apply whose own run costs most of a frame,
+--     or two applies that each stretched a frame by as much, make this
+--     colour HEAVY: from then on it is applied when the wheel rests (no
+--     move for PICK_REST seconds), never in the middle of a drag. The
+--     owner is remembered as heavy, so its next drag starts that way;
+--   * the last colour is always applied - also when the picker is shut,
+--     or opened for another colour, before the wait is over.
+local PICK_LIVE = 0.1      -- seconds between applies while a colour is cheap
+local PICK_REST = 0.12     -- a heavy colour: applied once the wheel has been still this long
+local PICK_HEAVY_MS = 10   -- an apply that costs this much is heavy
+UI.PICK_LIVE, UI.PICK_REST, UI.PICK_HEAVY_MS = PICK_LIVE, PICK_REST, PICK_HEAVY_MS
+local heavyOwners = setmetatable({}, { __mode = "k" })
+local finishOpen            -- the picker that is open: applies what it still holds and stands down
+-- how long each frame took, for whichever colour the picker is open for
+-- (shown only then: the one OnUpdate here runs while a colour is being picked)
+local pickWatch
+local function PickWatch(fn)
+    if not pickWatch then
+        if not fn then return end
+        pickWatch = CreateFrame("Frame")
+        pickWatch:Hide()
+        pickWatch:SetScript("OnUpdate", function(self, elapsed)
+            if self.fn then self.fn((elapsed or 0) * 1000) end
+        end)
+        UI._zPickWatch = pickWatch
+    end
+    pickWatch.fn = fn
+    pickWatch:SetShown(fn ~= nil)
+end
 function UI.OpenColorPicker(o)
     local CPF = ColorPickerFrame
     if not CPF then return false end
+    -- (opened for another colour while the last one still waits)
+    if finishOpen then finishOpen() end
     local r0, g0, b0 = o.r or 1, o.g or 1, o.b or 1
     local a0 = o.a or 1
     local withAlpha = o.alpha and true or false
@@ -2937,42 +3087,110 @@ function UI.OpenColorPicker(o)
         end
         return a0
     end
-    -- (2026-11-08, Zac: "the color picker is super laggy") the wheel fires
-    -- on every mouse move and each change repaints the UI: the latest
-    -- colour is applied at most ten times a second, the last one always
+    local Now = function() return GetTime and GetTime() or 0 end
+    local Clock = debugprofilestop
+    local After = C_Timer and C_Timer.After
+    local owner = o.owner
+    local heavy = (owner ~= nil and heavyOwners[owner]) and true or false
+    local pr, pg, pb, pa                  -- the latest colour, not applied yet
     local pending, waiting, gen = false, false, 0
-    local function Flush()
-        waiting = false
+    local last, lastMove = -1, -1
+    local lastByTimer = false             -- the last apply came off the timer, not straight from a move
+    local quiet                           -- what a frame takes with nothing going on (ms)
+    local sinceApply, stretched, strikes = nil, false, 0
+    local function Heavy()
+        heavy = true
+        if owner ~= nil then heavyOwners[owner] = true end
+    end
+    local function Apply()
         if not pending then return end
         pending = false
-        local r, g, b = CPF:GetColorRGB()
-        if o.onChange then o.onChange(r, g, b, Alpha()) end
+        local t0 = Clock and Clock()
+        if o.onChange then o.onChange(pr, pg, pb, pa) end
+        last = Now()
+        lastByTimer = false
+        if heavy then return end
+        if t0 and Clock() - t0 >= PICK_HEAVY_MS then Heavy() return end
+        sinceApply, stretched = 0, false   -- (the next three frames are this apply's)
     end
-    local last = -1
-    local function Commit()
-        pending = true
+    -- one frame went by, in `ms`
+    local function OnFrame(ms)
+        if not (pending or waiting) and not CPF:IsShown() then PickWatch(nil) return end
+        if heavy then return end
+        if sinceApply then
+            sinceApply = sinceApply + 1
+            if quiet and ms - quiet >= PICK_HEAVY_MS then stretched = true end
+            if sinceApply >= 3 then
+                if stretched then
+                    strikes = strikes + 1
+                    if strikes >= 2 then Heavy() end
+                end
+                sinceApply, stretched = nil, false
+            end
+        else
+            -- a quiet frame (down at once, up slowly: one stray hitch does not lift it)
+            if not quiet or ms < quiet then quiet = ms else quiet = quiet + (ms - quiet) * 0.1 end
+        end
+    end
+    -- heavy: once the wheel has been still for PICK_REST
+    local function Rest()
         if waiting then return end
-        local now = GetTime and GetTime() or 0
+        waiting = true
+        local my = gen
+        local function Check()
+            if my ~= gen then return end
+            local still = Now() - lastMove
+            if still >= PICK_REST - 0.001 then
+                waiting = false
+                Apply()
+            else
+                After(PICK_REST - still, Check)
+            end
+        end
+        After(PICK_REST, Check)
+    end
+    local function Commit()
+        local r, g, b = CPF:GetColorRGB()
+        pr, pg, pb, pa = r, g, b, Alpha()
+        pending = true
+        local now = Now()
+        lastMove = now
+        if not After then Apply() return end
+        if heavy then Rest() return end
+        if waiting then return end
         -- the first change after a pause applies at once (the drag starts
-        -- live); changes inside the next tenth of a second fold into one
-        if now - last >= 0.1 or now == last then
-            last = now
-            Flush()
+        -- live), and so does another in the very same frame as it (a
+        -- colour typed in, then nudged); changes inside the next tenth of
+        -- a second fold into one
+        if now - last >= PICK_LIVE or (now == last and not lastByTimer) then
+            Apply()
             return
         end
         waiting = true
         local my = gen
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0.1, function() if my == gen then last = GetTime and GetTime() or 0 Flush() end end)
-        else
-            Flush()
-        end
+        After(PICK_LIVE - (now - last), function()
+            if my ~= gen then return end
+            waiting = false
+            -- (it turned heavy meanwhile: this one waits for the wheel to rest too)
+            if heavy and pending then Rest() else Apply() lastByTimer = true end
+        end)
+    end
+    local function Stop()
+        gen = gen + 1
+        waiting = false
+        finishOpen = nil
+        PickWatch(nil)
     end
     local function Cancel()
-        gen = gen + 1
-        pending, waiting = false, false
+        Stop()
+        pending = false
         if o.onCancel then o.onCancel(r0, g0, b0, a0) end
     end
+    finishOpen = function()
+        Stop()
+        Apply()
+    end
+    PickWatch(OnFrame)
     if CPF.SetupColorPickerAndShow then
         CPF:SetupColorPickerAndShow({
             r = r0, g = g0, b = b0,
@@ -3028,7 +3246,7 @@ function UI.Swatch(parent, cat, key, onChange)
             Changed("color")
         end
         UI.OpenColorPicker({ r = cur.r, g = cur.g, b = cur.b, a = cur.a,
-            onChange = Put, onCancel = Put })
+            onChange = Put, onCancel = Put, owner = self })
     end)
     -- right-click: back to the theme's colour (Zac 2026-11-08)
     sw:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -3441,6 +3659,13 @@ function UI.AttachResizeGrip(frame, opts)
 
     grip._zPaint = UI.GripPaint
     frame._zGrip = grip
+    -- (2026-11-15) what it is; on a window that wears a game look it is
+    -- the game's own size grabber (Core_LookPanels Kit.Grip)
+    rawset(grip, "_zIs", "grip")
+    do
+        local Kit = ns.Look and ns.Look.Kit
+        if Kit and Kit.Host and Kit.Grip and opts.look ~= false and Kit.Host(frame) then Kit.Grip(grip) end
+    end
     return grip
 end
 
@@ -3568,6 +3793,9 @@ end
 --              sparkle and the returning sheen are left to main windows
 --   opts.lead  seconds the drop waits once frames are flowing - set it to
 --              the length of the window's own fade-in, if it has one
+--   opts.sheen false = the mark's own light only (the ring, the flare,
+--              the twinkle), no band of light across the bar: a flat
+--              title bar has none (Zac 2026-11-08)
 --
 -- The scripts sit on a frame of this function's own. A window's OnShow
 -- belongs to whoever builds the window - the config window SetScript()s
@@ -3968,10 +4196,16 @@ function UI.AnimateMark(icon, bar, opts)
 
     -- the bar's sheen is shared with AnimateBar; from here the mark runs
     -- it, timed to the landing
-    local sheen = Sheen(bar, opts.inset)
-    sheen.auto = false
-    sheen.clip:SetScript("OnUpdate", nil)
-    sheen.SetLevel(K)
+    local sheen
+    if opts.sheen == false then
+        local function none() end
+        sheen = { Stop = none, Sweep = none, StartIdle = none, Tint = none }
+    else
+        sheen = Sheen(bar, opts.inset)
+        sheen.auto = false
+        sheen.clip:SetScript("OnUpdate", nil)
+        sheen.SetLevel(K)
+    end
 
     -- COLOUR ONLY. A texture's vertex colour carries its alpha, so after
     -- tinting each is put straight back to what Light()/Dark() last said.
@@ -4274,10 +4508,77 @@ function UI.Window(name, width, height, title, opts)
         label:SetPoint("LEFT", icon, "RIGHT", 7, 1)
         label._zPaint = function(self) self:SetTextColor(1, 1, 1, 1) end
         UI.FlatBar(bar, { title = label, close = close })
+        -- (2026-11-14, Zac: "why ... does readycheck have the like gold
+        -- circle and sparkle on the changelog but zui doesnt" / "its all zui
+        -- popups that dont have it") ZacUI's mark is a living one on every
+        -- title bar: the drop and the turn on opening, the gold ring and
+        -- flare behind it, the twinkle, the turn under the mouse. The bar
+        -- stays flat - no band of light across it. A game window's own
+        -- picture (opts.icon: the bags, the mail) stays a still picture.
+        if not opts.icon then UI.AnimateMark(icon, bar, { idle = false, sheen = false }) end
     end
 
     f.titleBar, f.titleText, f.closeButton, f.titleIcon = bar, label, close, icon
+    -- (2026-11-15, Zac: "even in a different styling keep the zui popus
+    -- main menu etc the same") a ZacUI window is ZacUI's style under every
+    -- look: nothing here asks the look. The bag dresses itself (its own
+    -- kit); see Look.Dress.
+    -- ZacUI's own windows open at the settings window's scale (ONE SCALE,
+    -- below); a game window (opts.icon) keeps its own size
+    if not opts.icon and UI.FollowWindowScale then UI.FollowWindowScale(f) end
     return f
+end
+
+-- ============================================================
+-- ONE SCALE (2026-11-14)
+-- ============================================================
+-- Zac: "most of the ui menus and stuff popups etc are like super big by
+-- default". The settings window has a scale of its own (its -/+, saved as
+-- ZacUIDB.config.scale); the popups and ZacUI's other small windows stood
+-- at 100% whatever it said - beside a window at 75% they were a third
+-- bigger than it. Now every popup (UI.Popup) and every ZacUI window that
+-- is not a game window (UI.Window without opts.icon) opens at the settings
+-- window's scale and follows its -/+. A game window (the bags, the auction
+-- house) keeps its own size. An install that never touched the scale has
+-- none saved = 100%: nothing changes size on an update. A FRESH install
+-- starts at ns.NEW_WINDOW_SCALE (Boot_Events).
+ns.NEW_WINDOW_SCALE = 0.8
+function ns.WindowScale()
+    local s = (type(ZacUIDB) == "table" and type(ZacUIDB.config) == "table" and tonumber(ZacUIDB.config.scale)) or 1
+    if s <= 0 then s = 1 end
+    -- (the same whole-pixel nudge the settings window takes: Config_Base)
+    if ns.ConfigExactScale then s = ns.ConfigExactScale(s) end
+    return s
+end
+local followers = setmetatable({}, { __mode = "k" })
+local function ApplyWindowScale(f)
+    -- (mid-pop the frame is between two scales: the pop ends on its base)
+    if not followers[f] or f._zPopBase then return end
+    local v = ns.WindowScale()
+    -- a window that is a child of a scaled one is sized against the
+    -- screen, not twice
+    local parent = f:GetParent()
+    if parent and parent ~= UIParent and parent.GetEffectiveScale and UIParent and UIParent.GetEffectiveScale then
+        local pe, ue = parent:GetEffectiveScale(), UIParent:GetEffectiveScale()
+        if type(pe) == "number" and type(ue) == "number" and pe > 0 and ue > 0 then v = v * ue / pe end
+    end
+    if math.abs((f:GetScale() or 1) - v) > 0.0005 then f:SetScale(v) end
+end
+function UI.FollowWindowScale(f)
+    if not f or followers[f] then return f end
+    followers[f] = true
+    f:HookScript("OnShow", ApplyWindowScale)
+    ApplyWindowScale(f)
+    return f
+end
+function UI.FollowsWindowScale(f) return followers[f] == true end
+-- the settings window's -/+ : what is on screen follows at once
+function ns.RescaleWindows()
+    for f in pairs(followers) do
+        -- (one in the middle of its pop finishes it as it began; its next
+        -- opening takes the new scale)
+        if f.IsShown and f:IsShown() then ApplyWindowScale(f) end
+    end
 end
 
 function UI.OpenWindow(f)
@@ -4287,6 +4588,11 @@ function UI.OpenWindow(f)
     -- An in-flight animation means "not settled", not "already open".
     if f:IsShown() and not f._zAnim then return end
     ns.StopAnim(f)
+    -- (the scale it follows, before the pop takes its base from it)
+    if followers[f] then
+        f._zPopBase = nil
+        ApplyWindowScale(f)
+    end
     ns.PopIn(f, 0.15)
 end
 

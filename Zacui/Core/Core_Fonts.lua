@@ -203,7 +203,11 @@ local function ApplyFonts()
     end
     -- and every string ZacUI dressed itself, when the font moved
     local epoch = FontEpoch()
-    if houseEpoch ~= nil and epoch ~= houseEpoch then ReapplyHouseFonts() end
+    if houseEpoch ~= nil and epoch ~= houseEpoch then
+        ReapplyHouseFonts()
+        -- (Readycheck's windows wear this face: Core_Colors, StyleChanged)
+        if ns.StyleChanged then ns.StyleChanged() end
+    end
     houseEpoch = epoch
 end
 

@@ -58,6 +58,18 @@ end
 -- bar.Track.Thumb is a textured BUTTON, bar.Back/bar.Forward are atlas
 -- arrow buttons, and there is no GetThumbTexture. The classic path did
 -- literally nothing on these - the "still broken bars/thumbs/buttons".
+-- A skinned game scroll bar's thumb: the one thumb colour every ZacUI
+-- scroll bar has (UI.ScrollThumbColor, UIF_Controls - the settings
+-- window's grey unless a thumb colour is picked). It was the accent at
+-- 0.7, a brown under the shipped gold (2026-11-14, Zac: "some sliders ...
+-- were still brown by default").
+local function SkinThumbColor()
+    local SC = ns.UI and ns.UI.ScrollThumbColor
+    if SC then return SC(false) end
+    local a = Col("accent")
+    return a.r * 0.7, a.g * 0.7, a.b * 0.7, 0.9
+end
+
 local function SkinModernScrollBar(bar, look)
     if not bar or ZUI.skinned[bar] then return end
     ZUI.skinned[bar] = true
@@ -84,8 +96,7 @@ local function SkinModernScrollBar(bar, look)
         t._zui_own = true
         t:SetAllPoints()
         t:SetTexture(TEX_THUMB)
-        local a = Col("accent")
-        t:SetVertexColor(a.r * 0.7, a.g * 0.7, a.b * 0.7, 0.9)
+        t:SetVertexColor(SkinThumbColor())
     end
 
     -- Arrows: keyed if present; otherwise any Button child of the bar
@@ -127,8 +138,7 @@ local function SkinAnyScrollBar(bar, look)
     local thumb = bar:GetThumbTexture()
     if thumb then
         thumb:SetTexture(TEX_THUMB)
-        local a = Col("accent")
-        thumb:SetVertexColor(a.r * 0.7, a.g * 0.7, a.b * 0.7, 0.9)
+        thumb:SetVertexColor(SkinThumbColor())
         thumb:SetWidth(8)
         -- The strip above Hide()s every region, the thumb included, and a
         -- hidden texture stays hidden whatever it is retextured with.

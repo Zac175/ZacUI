@@ -626,6 +626,8 @@ SlashCmdList["ZACUI"] = function(msg)
         return
     elseif cmd == "move" or cmd == "resetmove" then
         local key = msg:match("^%S+%s+(%S+)")
+        -- (a mover that is only registered once its part's files are read in)
+        if key and not MOVERS[key] and ns.MoversAsk then ns.MoversAsk() end
         if key == "tip" or key == "tooltip" then
             if cmd == "move" then
                 ToggleTipMover()
@@ -641,6 +643,7 @@ SlashCmdList["ZACUI"] = function(msg)
             end
         else
             local keys = { "tip" }
+            if ns.MoversAsk then ns.MoversAsk() end
             for _, mv in ipairs(MOVERS) do keys[#keys + 1] = mv.key end
             Print("movers: " .. table.concat(keys, ", "))
         end

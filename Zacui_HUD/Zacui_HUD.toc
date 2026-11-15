@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Class HUDs|r
 ## Notes: ZacUI class HUDs for every class, and the Drink Ticker. Native ports of the class-pack WeakAuras.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -15,35 +15,35 @@
 # variables; every setting still lives in ZacUIDB and in profiles.
 # Load order within this file is the same as it was inside ZacUI.
 
-HUD_Shared.lua
-HUD_Warrior_Core.lua
-HUD_Warrior_Widgets.lua
-HUD_Warrior_Display.lua
-HUD_Warrior_UI.lua
-HUD_Priest.lua
-HUD_ClassHUD.lua
-HUD_V2_Sources.lua
-HUD_V2_Specs.lua
-HUD_V2_Modern.lua
-HUD_V2_Keybinds.lua
-HUD_V2_Rows.lua
-HUD_V2_Icon.lua
-HUD_V2_Glows.lua
-HUD_V2_Page.lua
-HUD_V2_BuffBars.lua
-HUD_V2_Resources.lua
+Shared\HUD_Shared.lua
+Warrior\HUD_Warrior_Core.lua
+Warrior\HUD_Warrior_Widgets.lua
+Warrior\HUD_Warrior_Display.lua
+Warrior\HUD_Warrior_UI.lua
+Classes\HUD_Priest.lua
+Engine\HUD_ClassHUD.lua
+Engine\HUD_V2_Sources.lua
+Engine\HUD_V2_Specs.lua
+Engine\HUD_V2_Modern.lua
+Engine\HUD_V2_Keybinds.lua
+Engine\HUD_V2_Rows.lua
+Engine\HUD_V2_Icon.lua
+Engine\HUD_V2_Glows.lua
+Engine\HUD_V2_Page.lua
+Engine\HUD_V2_BuffBars.lua
+Engine\HUD_V2_Resources.lua
 # Retail (Mainline 12.x): one class HUD for every class, from the game's
 # own Cooldown Manager list. Returns on its first lines everywhere else.
-HUD_Retail.lua
-HUD_Paladin.lua
-HUD_Hunter.lua
-HUD_Rogue.lua
-HUD_Shaman.lua
-HUD_Mage.lua
-HUD_Warlock.lua
-HUD_Druid.lua
-HUD_DrinkTicker.lua
-HUD_Hesitation.lua
+Engine\HUD_Retail.lua
+Classes\HUD_Paladin.lua
+Classes\HUD_Hunter.lua
+Classes\HUD_Rogue.lua
+Classes\HUD_Shaman.lua
+Classes\HUD_Mage.lua
+Classes\HUD_Warlock.lua
+Classes\HUD_Druid.lua
+Extras\HUD_DrinkTicker.lua
+Warrior\HUD_Hesitation.lua
 # Drag to customise in the class HUD previews (ZacUI's UIF_PreviewDrag):
 # the rows' icon order.
-HUD_PreviewDrag.lua
+Shared\HUD_PreviewDrag.lua

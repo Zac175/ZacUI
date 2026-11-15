@@ -3,7 +3,7 @@
 ## Title: ZacUI |cff33ff99Raid mods|r
 ## Notes: Boss mods for the Classic Era raids (Molten Core to Naxxramas) and, on TBC, Karazhan to the Sunwell, as part of ZacUI: timers, warnings, icons, lists, raid frame and nameplate marks, driven by the combat log. ZacUI's own code - no aura engine needed.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui, Zacui_RaidTools
@@ -34,29 +34,22 @@ Libs\LibRangeCheck-3.0.lua
 Libs\LibCustomGlow-1.0.lua
 
 # THE ENGINE
-RM_Core.lua
-RM_Triggers.lua
-RM_Widgets.lua
-RM_Anchors.lua
-RM_Config.lua
+Engine\RM_Core.lua
+Engine\RM_Triggers.lua
+Engine\RM_Widgets.lua
+Engine\RM_Anchors.lua
+Engine\RM_Config.lua
 # hand-written helpers on top of the packs (Razuvious on you)
-RM_Extras.lua
+Engine\RM_Extras.lua
 
 # How a raid module is put together, and the behaviours they share
-RM_Own.lua
-RM_OwnKit.lua
+Own\RM_Own.lua
+Own\RM_OwnKit.lua
 
-# THE RAIDS: settings (<RAID>_Data) and behaviour (<RAID>)
-Own\MC_Data.lua
-Own\MC.lua
-Own\BWL_Data.lua
-Own\BWL.lua
-Own\ZG_Data.lua
-Own\ZG.lua
-Own\AQ40_Data.lua
-Own\AQ40.lua
-Own\NX_Data.lua
-Own\NX.lua
+# THE CLASSIC RAIDS (Molten Core, Blackwing Lair, Zul'Gurub, Ahn'Qiraj,
+# Naxxramas): their settings and behaviour files moved to the
+# Zacui_RaidPacks addon (2026-11-13), which the game loads on demand - the
+# first time one of their pieces could load where you stand (RM_Own.lua).
 # The TBC Anniversary raids (ZacUI running as TBC only): facts per raid
 # (<RAID>_Data), built into pieces by TBC_Kit
 Own\TBC_Kit.lua

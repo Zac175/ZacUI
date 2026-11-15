@@ -590,7 +590,7 @@ function UI.ColorPicker(parent, opts)
         end
         local r, g, b, a = Read()
         UI.OpenColorPicker({ r = r, g = g, b = b, a = a, alpha = opts.alpha,
-            onChange = Put, onCancel = Put })
+            onChange = Put, onCancel = Put, owner = host })
     end)
     if opts.tooltip then UI.Tooltip(host, opts.label or "Colour", opts.tooltip) end
     host.Refresh = function() host:_zPaint() end

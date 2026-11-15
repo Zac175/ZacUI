@@ -91,6 +91,7 @@ function LP.Targets()
     local function Add(t) out[#out + 1] = t end
 
     -- the mover registry
+    if ns.MoversAsk then ns.MoversAsk() end
     for _, m in ipairs(ns.MOVERS or {}) do
         local key = m.key
         local f = m.getFrame and m.getFrame()

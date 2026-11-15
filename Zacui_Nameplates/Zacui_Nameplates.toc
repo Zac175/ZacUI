@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Nameplates|r
 ## Notes: ZacUI nameplates, plate scripts, soft targeting and the crosshair. Replaces Plater.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -15,27 +15,25 @@
 # variables; every setting still lives in ZacUIDB and in profiles.
 # Load order within this file is the same as it was inside ZacUI.
 
-NP_PortData.lua
-NP_Core.lua
-NP_FX.lua
-NP_Health.lua
-NP_Cast.lua
+Data\NP_PortData.lua
+Core\NP_Core.lua
+Plate\NP_FX.lua
+Plate\NP_Health.lua
+Plate\NP_Cast.lua
 # the Classic look's vanilla plate border (wraps the two layout passes above)
-NP_ClassicPlate.lua
+Plate\NP_ClassicPlate.lua
 # Feature cluster 2 (2026-11-07): the interrupt-ready tint on the cast bars
 # (off by default; nothing made or ticking while off)
-NP_Interrupt.lua
-NP_Auras.lua
-NP_Extras.lua
-NP_Threat.lua
-NP_Scripts.lua
-NP_SoftTarget.lua
-NP_Debuffs.lua
-NP_Preview.lua
-Crosshair_Core.lua
-NP_Crosshair.lua
-Config_PagesNameplates.lua
-Config_PagesNPScripts.lua
-# Drag to customise in the plates preview (ZacUI's UIF_PreviewDrag): the
-# sample plate's pieces. After the pages (it registers by preview key).
-NP_PreviewDrag.lua
+Features\NP_Interrupt.lua
+Features\NP_Auras.lua
+Features\NP_Extras.lua
+Features\NP_Threat.lua
+Core\NP_Scripts.lua
+Features\NP_SoftTarget.lua
+Features\NP_Debuffs.lua
+Core\NP_Preview.lua
+Crosshair\Crosshair_Core.lua
+Crosshair\NP_Crosshair.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, Nameplates folder (2026-11-13).

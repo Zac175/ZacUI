@@ -1176,6 +1176,21 @@ ns.MoverBlocked = MoverBlocked
 -- nil, HUD.RegisterMover returned at its first line, and not one HUD
 -- anchor ever reached the Movers page or Edit Mode - nor did the HUD
 -- pages' own "Unlock / lock HUD anchors" button have anything to unlock.
+-- EVERY MOVER, PLEASE. A part whose frames are only all there once
+-- something of its own has been read in (the raid mods' five Classic raids
+-- load on demand) hears here that the whole list is about to be shown or
+-- walked for the player - the Movers page, Edit Mode, a layout, /zui
+-- movers - and registers what is missing first.
+--   ns.OnMoversAsk(fn)   fn() runs at every such moment
+--   ns.MoversAsk()       the moment (called by whoever is about to walk ns.MOVERS for the player)
+local askers = {}
+function ns.OnMoversAsk(fn)
+    if type(fn) == "function" then askers[#askers + 1] = fn end
+end
+function ns.MoversAsk()
+    for i = 1, #askers do pcall(askers[i]) end
+end
+
 ns.RegisterMover = RegisterMover
 ns.ShowMover = ShowMover
 ns.ResetMover = ResetMover

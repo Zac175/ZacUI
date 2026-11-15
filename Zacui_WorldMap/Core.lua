@@ -221,6 +221,20 @@ ns.Look = Look
 local HEADER_H = 22
 
 local function Z() return _G.ZacUI end
+
+-- UNDER A GAME LOOK THE ENGINE WEARS ITS OWN STOCK LOOK (ZacUI, 2026-11-14; Zac, with the seamless
+-- map on under the WoW Forever look: "its fucked up and not forever style"). A game look on ZacUI's
+-- Maps part (WoW Forever, Blizzard style, Classic WoW UI) means the game's art, and this engine came
+-- with exactly that: the game's font, the map window's own metal border over its rock for a window
+-- (bronze on WoW Forever), the game's dropdown panel, a plain dark panel. Those are the branches
+-- below, as the engine shipped them; ZacUI's flat look is for ZacUI's look only. (Asked each time,
+-- not kept: it is one table read, and the engine's windows are built once.)
+local function GameLook()
+	local z = Z()
+	local l = z and z.Look
+	return (l and l.Stock and l.Stock("maps")) and true or false
+end
+ns.GameLook = GameLook
 local function ZCol(key)
 	local z = Z()
 	if z and z.Col then return z.Col(key) end
@@ -234,6 +248,12 @@ local function TrySetFont(fs, path, size, flags)
 	return (ok and set) and true or false
 end
 function Look:Font(fs, size, flags)
+	if GameLook() then
+		if not fs:SetFont(STANDARD_TEXT_FONT, size or 12, flags or "") then fs:SetFontObject(GameFontHighlight) end
+		fs:SetShadowColor(0, 0, 0, 1)
+		fs:SetShadowOffset(1, -1)
+		return fs
+	end
 	local z = Z()
 	local cfg = _G.ZacUIDB and _G.ZacUIDB.font or {}
 	local path = z and z.ResolveFontPath and z.ResolveFontPath(cfg.name)
@@ -266,6 +286,7 @@ function Look:Panel(frame, opts)
 	bd:SetPoint("BOTTOMRIGHT", inset, -inset)
 	bd:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	local bg, br = ZCol("windowBg"), ZCol("border")
+	if GameLook() then bg, br = nil, nil end       -- (the engine's own dark panel)
 	if bg then bd:SetBackdropColor(bg.r, bg.g, bg.b, opts.alpha or bg.a or 0.95)
 	else bd:SetBackdropColor(0.06, 0.06, 0.07, opts.alpha or 0.9) end
 	if br then bd:SetBackdropBorderColor(br.r, br.g, br.b, br.a or 1)
@@ -275,6 +296,21 @@ end
 
 -- a dropdown list: the same flat panel. Returns the room to leave inside it: left, top, right, bottom
 function Look:Dropdown(frame)
+	if GameLook() then
+		-- (the game's own menus' look: its dark rounded panel, which WoW Forever edges in bronze -
+		-- Blizzard_Menu's MenuStyle1, the same offsets - else the plain panel with a bronze edge)
+		if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("common-dropdown-bg") then
+			local bg = frame:CreateTexture(nil, "BACKGROUND")
+			bg:SetAtlas("common-dropdown-bg")
+			bg:SetPoint("TOPLEFT", -10, 3)
+			bg:SetPoint("BOTTOMRIGHT", 10, -3)
+			bg:SetAlpha(0.925)
+			return 8, 8, 8, 15
+		end
+		local bd = Look:Panel(frame, { alpha = 0.97 })
+		bd:SetBackdropBorderColor(0.66, 0.49, 0.28, 1)
+		return 6, 6, 6, 6
+	end
 	Look:Panel(frame, { alpha = 0.97 })
 	return 6, 6, 6, 6
 end
@@ -304,7 +340,49 @@ end
 
 -- a ZacUI window on `frame`: the flat panel, the header band, a gold title in it and a
 -- ZacUI close button. Returns the header's height (content starts below it), the title and the X.
+-- (under a game look: the game's own frame - the map window's metal border, Blizzard's nine-slice
+-- without the portrait, which WoW Forever draws in bronze, over its dark rock, a title in its title
+-- bar and its close button; a client without that layout gets the plain panel)
+local function StockWindow(frame, title, onClose)
+	local util = _G.NineSliceUtil
+	local top = 0
+	local layout = util and util.GetLayout and util.GetLayout("ButtonFrameTemplateNoPortrait") and "ButtonFrameTemplateNoPortrait"
+	local ok, nine = false, nil
+	if layout then ok, nine = pcall(CreateFrame, "Frame", nil, frame, "NineSlicePanelTemplate") end
+	if ok and nine and pcall(util.ApplyLayoutByName, nine, layout) then
+		nine:SetAllPoints()
+		nine:SetFrameLevel(frame:GetFrameLevel())
+		local bg = frame:CreateTexture(nil, "BACKGROUND")
+		bg:SetPoint("TOPLEFT", 6, -21)
+		bg:SetPoint("BOTTOMRIGHT", -2, 3)
+		if bg:SetTexture("Interface\\FrameGeneral\\UI-Background-Rock", "REPEAT", "REPEAT") == false then
+			bg:SetColorTexture(0.1, 0.09, 0.08, 1)
+		end
+		bg:SetHorizTile(true)
+		bg:SetVertTile(true)
+		local shade = frame:CreateTexture(nil, "BACKGROUND", nil, 1)
+		shade:SetAllPoints(bg)
+		shade:SetColorTexture(0, 0, 0, 0.45)       -- (the rock darkened, so the small print reads)
+		top = 21
+	else
+		Look:Panel(frame, { alpha = 0.96 })
+	end
+	local text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	text:SetPoint("TOPLEFT", top > 0 and 30 or 12, top > 0 and -4 or -10)
+	text:SetPoint("TOPRIGHT", -30, top > 0 and -4 or -10)
+	text:SetJustifyH(top > 0 and "CENTER" or "LEFT")
+	text:SetWordWrap(false)
+	text:SetText(title or "")
+	local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+	close:SetFrameLevel(frame:GetFrameLevel() + 20)
+	close:SetHitRectInsets(-4, -4, -4, -4)
+	if top > 0 then close:SetPoint("TOPRIGHT", 1, 0) else close:SetPoint("TOPRIGHT", 2, 2) end
+	close:SetScript("OnClick", onClose or function() frame:Hide() end)
+	return top, text, close
+end
+
 function Look:Window(frame, title, onClose)
+	if GameLook() then return StockWindow(frame, title, onClose) end
 	Look:Panel(frame, { alpha = 0.96 })
 	local bar = Header(frame)
 	local text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -330,6 +408,7 @@ end
 -- the same chrome on a frame that is its own backdrop (the menu): header height back
 function Look:Chrome(frame)
 	Look:Panel(frame, { alpha = 0.96 })
+	if GameLook() then return 0 end                 -- (the plain panel: no ZacUI header band)
 	Header(frame)
 	return HEADER_H
 end

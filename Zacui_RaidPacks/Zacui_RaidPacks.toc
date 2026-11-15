@@ -1,0 +1,35 @@
+## Interface: 11509, 20506, 16001
+## AllowLoadGameType: vanilla, tbc, camelot
+## Title: ZacUI |cff33ff99Raid mods: Classic raids|r
+## Notes: The boss mods for Molten Core, Blackwing Lair, Zul'Gurub, Ahn'Qiraj and Naxxramas. Loads by itself the first time you enter one of them (or open their settings).
+## Author: Zac
+## Version: 3.0.12
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui, Zacui_RaidMods
+## LoadOnDemand: 1
+## X-ZacUI-Part: Raid mods: Classic raids
+
+# Part of ZacUI. The five Classic Era raids of the raid mods, lifted out
+# of Zacui_RaidMods (2026-11-13) so none of it is read at login or on a
+# reload: 2.6 MB of the raid mods' 3.3, and not one of its pieces can load
+# outside its raid. The game loads this folder the first time something
+# of theirs could load where you stand, when the Raid mods page or /rm is
+# opened, for a preview, or when every mover is about to be shown
+# (Zacui_RaidMods\RM_Own.lua, O.LoadPacks). The files share ZacUI's
+# namespace (_G.ZacUI, published by Core_Boot) and hand their pieces to
+# the raid mods' engine exactly as they did from its folder; nothing is
+# saved here. The raids' shapes and sounds stay in Zacui_RaidMods\Media.
+#
+# The order is the order the files had in the raid mods' own list: each
+# raid's settings (<RAID>_Data), then its behaviour (<RAID>).
+MoltenCore\MC_Data.lua
+MoltenCore\MC.lua
+BlackwingLair\BWL_Data.lua
+BlackwingLair\BWL.lua
+ZulGurub\ZG_Data.lua
+ZulGurub\ZG.lua
+AhnQiraj\AQ40_Data.lua
+AhnQiraj\AQ40.lua
+Naxxramas\NX_Data.lua
+Naxxramas\NX.lua

@@ -1483,8 +1483,10 @@ end
 -- shown whatever the mouse is doing: a whisper in another tab should not
 -- depend on where the cursor happens to be.
 --
--- Driven by one small frame's OnUpdate: ten looks a second at rest, every
--- frame only while something is fading.
+-- Ten looks a second at rest, every frame only while something is fading.
+-- AT REST NOTHING RUNS PER FRAME (2026-11-13, the idle pass): the ten
+-- looks come from a ticker; the small frame's OnUpdate exists only while
+-- a fade or a linger is in progress and hides itself when it is done.
 local hover = { dock = { alpha = 0, away = 99 }, own = {} }
 -- defaults; Refresh copies the settings (tabFadeIn / Out / Linger) here
 local FADE_IN, FADE_OUT, LINGER = 0.12, 0.30, 0.6
@@ -1568,14 +1570,27 @@ local function BuildHoverDriver()
     if dock.hoverDriver then return end
     local driver = CreateFrame("Frame", nil, UIParent)
     driver:Hide()
-    driver:SetScript("OnShow", function(self) self.t, self.busy = 0, true end)
+    -- every frame, while something moves: gone the frame it settles
     driver:SetScript("OnUpdate", function(self, dt)
-        self.t = (self.t or 0) + dt
-        if not self.busy and self.t < 0.1 then return end
-        local step = math.min(self.t, 0.1)
-        self.t = 0
-        self.busy = HoverUpdate(step)
+        if not HoverUpdate(math.min(dt, 0.1)) then self:Hide() end
     end)
+    -- at rest: one look every tenth of a second; the first that finds
+    -- something to fade hands over to the frame above
+    local function Look()
+        if driver:IsShown() then return end
+        if HoverUpdate(0.1) then driver:Show() end
+    end
+    -- hover mode on (again: nothing changes) / off
+    function driver.Start()
+        if driver.ticker then return end
+        driver.ticker = C_Timer.NewTicker(0.1, Look)
+        if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(driver.ticker, "chat.tabHover") end
+        driver:Show()        -- (the first pass at once, as showing it always did)
+    end
+    function driver.Stop()
+        if driver.ticker then driver.ticker:Cancel() driver.ticker = nil end
+        driver:Hide()
+    end
     dock.hoverDriver = driver
 end
 
@@ -1584,7 +1599,9 @@ end
 local function ApplyTabVisibility()
     local d = DB()
     local mode = d.tabs and d.tabsVisible or "blizzard"
-    if dock.hoverDriver then dock.hoverDriver:SetShown(mode == "hover") end
+    if dock.hoverDriver then
+        if mode == "hover" then dock.hoverDriver.Start() else dock.hoverDriver.Stop() end
+    end
     if mode == "hover" then
         HoverApply()
     elseif dock.head then
@@ -1937,7 +1954,7 @@ local function BuildChips()
         if button == "RightButton" then BarMenu() return end
         local cf = SelectedFrame()
         if cf and cf.ScrollToBottom then cf:ScrollToBottom() end
-        dock.fast = 99
+        if dock.Soon then dock.Soon() end
     end)
     PaintChip(l)
     SizeChip(l)
@@ -2148,14 +2165,38 @@ local function BuildBar()
     BuildItems()
 
     bar:SetScript("OnSizeChanged", function() dock.dirty = true; LayoutBar() end)
-    bar:SetScript("OnShow", function() dock.fast, dock.slow = 99, 99 end)
-    bar:SetScript("OnUpdate", function(_, dt)
-        dock.fast = (dock.fast or 99) + dt
-        if dock.fast < 0.25 then return end
-        local step = math.min(dock.fast, 5)
-        dock.fast = 0
-        Tick(step)
+    -- The bar's clock: four looks a second from a ticker that lives while
+    -- the bar is shown (2026-11-13, the idle pass: it was an OnUpdate that
+    -- counted to a quarter second on every rendered frame). dock.Soon():
+    -- a look on the next frame, with the once-a-second part too.
+    function dock.Soon()
+        if dock.soon then return end
+        dock.soon = true
+        C_Timer.After(0, function()
+            dock.soon = nil
+            if bar:IsShown() then Tick(5) end
+        end)
+    end
+    local function BarTick() Tick(0.25) end
+    local function BarClock(on)
+        if on and not dock.clock then
+            dock.clock = C_Timer.NewTicker(0.25, BarTick)
+            if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(dock.clock, "chat.bar") end
+        elseif not on and dock.clock then
+            dock.clock:Cancel()
+            dock.clock = nil
+        end
+    end
+    bar:SetScript("OnShow", function()
+        dock.slow = 99
+        BarClock(true)
+        dock.Soon()
     end)
+    bar:SetScript("OnHide", function() BarClock(false) end)
+    if bar:IsVisible() then
+        BarClock(true)
+        dock.Soon()
+    end
 
     dock.money0 = GetMoney and GetMoney() or nil
 
@@ -2389,7 +2430,8 @@ function Chat.Refresh()
     if dock.bar and dock.items then
         -- read every number again now rather than on its own clock
         for _, b in pairs(dock.items) do b._t = 99 end
-        dock.fast, dock.slow, dock.dirty = 99, 99, true
+        dock.slow, dock.dirty = 99, true
+        if dock.Soon then dock.Soon() end
         if dock.content then dock.content:SetShown(not Typing()) end
     end
     if Chat.ApplyWidth then Chat.ApplyWidth() end

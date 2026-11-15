@@ -390,8 +390,7 @@ end
 local function KitBlizzBorder(b)
     return b._zBlizzBorder or b.DebuffBorder or b.TempEnchantBorder or b.Border or b.border
 end
-local function KitFitBorder(b, s)
-    local bd = KitBlizzBorder(b)
+local function KitFitOne(bd, s)
     if not (bd and bd.GetSize and bd.SetSize) then return end
     local nat = rawget(bd, "_zKitNat")
     if not nat then
@@ -402,6 +401,13 @@ local function KitFitBorder(b, s)
     end
     local k = (s or 30) / 30
     bd:SetSize(nat[1] * k, nat[2] * k)
+end
+local function KitFitBorder(b, s)
+    local bd = KitBlizzBorder(b)
+    KitFitOne(bd, s)
+    -- (a pooled button carries both: the weapon enchant's ring as well)
+    local ring = b.TempEnchantBorder
+    if ring and ring ~= bd then KitFitOne(ring, s) end
 end
 
 -- Bumped whenever a setting changes; a button restyles itself when its
@@ -1458,6 +1464,24 @@ Modules.auras = function()
         -- SetAlpha(0) ONLY - never SetTexture(nil), never a blanket strip
         -- (the pooled blanking law). The kit keeps Blizzard's art.
         if blizz and blizz.SetAlpha and not Kit() then blizz:SetAlpha(0) end
+        -- THE WEAPON ENCHANT'S RING IS A SECOND TEXTURE ON THE SAME BUTTON
+        -- (2026-11-14, Zac on Era under ZacUI's look, two weapon stones in
+        -- purple rings: "why do my weapon stones have this weird border").
+        -- A pooled button carries DebuffBorder AND TempEnchantBorder, and
+        -- the line above stops at the first of them, so the purple ring
+        -- was never hidden. It is hidden the same keyed way, never tinted
+        -- from (baked-colour art), and the button is an "enchant" while
+        -- the game shows that ring - our border takes the enchant colour
+        -- when one is set, as the classic TempEnchant buttons do below.
+        local ring = b.TempEnchantBorder
+        if ring and ring ~= blizz then
+            if ring.SetAlpha and not Kit() then ring:SetAlpha(0) end
+            local kind = (ring.IsShown and ring:IsShown()) and "enchant" or nil
+            if b._zKind ~= kind and (kind or b._zKind == "enchant") then
+                b._zKind = kind
+                PaintBorder(b)
+            end
+        end
         SetupTimer(b)
         if b._zStyleVer ~= styleVer then StyleButton(b) end
     end

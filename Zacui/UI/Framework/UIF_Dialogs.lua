@@ -174,6 +174,9 @@ function UI.Popup(name, width, height, title, opts)
     end
     local f = UI.Window(name, width, height, title, { bare = true })
     f._zPopup = true
+    -- every popup opens at the settings window's scale and follows it
+    -- (UIF_Controls: ONE SCALE)
+    if UI.FollowWindowScale then UI.FollowWindowScale(f) end
     f.pad, f._zPop = P.PAD, P
     if opts.strata then f:SetFrameStrata(opts.strata) end
     if opts.level then f:SetFrameLevel(opts.level) end
@@ -218,10 +221,20 @@ function UI.Popup(name, width, height, title, opts)
         bar:SetFrameLevel(lv + 1)
         if close then close:SetFrameLevel(lv + 30) end
         for _, c in ipairs({ f:GetChildren() }) do
-            if c ~= bar and c ~= close and c.GetFrameLevel and (c:GetFrameLevel() or 0) <= lv then
+            if rawget(c, "_zLookUnder") then
+                -- (2026-11-14) a game look's background: UNDER the popup,
+                -- behind its text. It used to be lifted with the rest and
+                -- lay over the title and the words (Zac: "it needs to be
+                -- behind the text").
+                c:SetFrameLevel(math.max(0, lv - 1))
+            elseif c ~= bar and c ~= close and not rawget(c, "_zLookOver")
+               and c.GetFrameLevel and (c:GetFrameLevel() or 0) <= lv then
                 c:SetFrameLevel(lv + 5)
             end
         end
+        -- (the look's own panel keeps its levels: Core_LookPanels Kit.Chrome)
+        local levels = rawget(f, "_zLookLevels")
+        if levels then levels() end
     end
     Relevel()
     hooksecurefunc(f, "SetFrameLevel", Relevel)
@@ -245,6 +258,7 @@ function UI.Popup(name, width, height, title, opts)
     -- picture of its own (opts.icon) or that asks for none (opts.mark =
     -- false) has none.
     local mark, markW = nil, 0
+    -- (under every look: a popup is ZacUI's own, 2026-11-15)
     if not icon and opts.mark ~= false and ns.TEX_ICON then
         local ms = math.max(13, math.min(26, P.T + 2))
         mark = bar:CreateTexture(nil, "ARTWORK")
@@ -254,6 +268,9 @@ function UI.Popup(name, width, height, title, opts)
         mark:SetTexture(ns.TEX_ICON)
         if ns.SharpenIcon then ns.SharpenIcon(mark) end
         markW = ms + math.max(5, math.floor(P.T / 3 + 0.5))
+        -- (2026-11-14) the living mark, as on every other title bar: see
+        -- UI.Window. No band of light across a popup's header.
+        if UI.AnimateMark then UI.AnimateMark(mark, bar, { idle = false, sheen = false }) end
     end
     local x = P.PAD + (icon and 44 or 0) + markW
     local right = POP.CLOSE_X + POP.CLOSE + 6
@@ -363,13 +380,9 @@ function UI.Popup(name, width, height, title, opts)
 
     f.titleText, f.descText, f.titleIcon, f.headerRule, f.titleMark = tt, dt, icon, rule, mark
     f:SetTitle(title, opts.desc or "")
-    -- a game window of ZacUI's (opts.part: the look part it follows) wears
-    -- the look's dialog under a game look (Core_LookPanels' one helper);
-    -- under ZacUI's own look Look.Dress returns on its first line
-    if opts.part and ns.Look and ns.Look.Dress then
-        rawset(f, "_zDialogParts", { title = tt, close = close })
-        ns.Look.Dress(f, "dialog", opts.part)
-    end
+    -- EVERY popup is ZacUI's style under EVERY look (2026-11-15, Zac: "even
+    -- in a different styling keep the zui popus main menu etc the same").
+    -- Nothing here asks the look, whatever part a popup names (opts.part).
     return f
 end
 

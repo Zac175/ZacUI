@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Maps|r
 ## Notes: ZacUI world map, battlefield map and minimap markers. Replaces Leatrix Maps.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -15,21 +15,23 @@
 # variables; every setting still lives in ZacUIDB and in profiles.
 # Load order within this file is the same as it was inside ZacUI.
 
-Maps_Data.lua
-Maps_Core.lua
+Core\Maps_Data.lua
+Core\Maps_Core.lua
 Maps_Pins.xml
-Maps_Frame.lua
-Maps_Skin.lua
-Maps_Reveal.lua
-Maps_HDTiles.lua
-Maps_HD.lua
-Maps_Icons.lua
-Maps_Group.lua
-Maps_Battlefield.lua
-Maps_Module.lua
+Map\Maps_Frame.lua
+Map\Maps_Skin.lua
+Map\Maps_Reveal.lua
+Map\Maps_HDTiles.lua
+Map\Maps_HD.lua
+Pins\Maps_Icons.lua
+Pins\Maps_Group.lua
+Battlefield\Maps_Battlefield.lua
+Core\Maps_Module.lua
 # Feature cluster 3 (2026-11-07): the game's own map fade (mapFade, through the
 # CVar helper) and a dim behind the maximized map, off by default. After
 # Maps_Module (it rides the module's apply).
-Maps_GameFade.lua
-Minimap_Pins.lua
-Config_PagesMaps.lua
+Map\Maps_GameFade.lua
+Pins\Minimap_Pins.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, Maps folder (2026-11-13).

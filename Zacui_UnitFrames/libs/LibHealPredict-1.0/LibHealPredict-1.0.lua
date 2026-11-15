@@ -14,19 +14,67 @@ here without the same discipline; a wrong assumption here breaks every consumer 
 This library does not touch AceDB, does not create any UI, and does not know what a frame is.
 Consumers own their own toggles (see SetTrackHots/SetPreciseHotTracking below) and decide for
 themselves what to draw and how.
-]] local MAJOR, MINOR = "LibHealPredict-1.0", 2
+]] local MAJOR, MINOR = "LibHealPredict-1.0", 3
+-- Version 2 differs from this one only on the clients that have no UnitAura (the modern ones:
+-- WoW Forever, Retail - the ones with issecretvalue). Its frames and state were private to it
+-- and cannot be taken over, so where it works it is left to carry on, exactly as before; where
+-- it cannot read auras this one replaces it.
+do
+    local loaded, loadedMinor = LibStub:GetLibrary(MAJOR, true)
+    if loaded and loadedMinor == 2 and type(issecretvalue) ~= "function" then
+        return
+    end
+end
 local LibHealPredict = LibStub:NewLibrary(MAJOR, MINOR)
 if not LibHealPredict then
     return
 end
 
-LibHealPredict.callbacks = LibStub("CallbackHandler-1.0"):New(LibHealPredict)
+-- (kept across a replacement: what an addon registered with the copy before this one stays)
+LibHealPredict.callbacks = LibHealPredict.callbacks or LibStub("CallbackHandler-1.0"):New(LibHealPredict)
+
+-- The event frames are kept on the library from this version on, so that a later version can
+-- stand the ones before it down instead of running beside them.
+if LibHealPredict.frames then
+    for _, f in pairs(LibHealPredict.frames) do
+        f:UnregisterAllEvents()
+        f:SetScript("OnEvent", nil)
+    end
+end
+LibHealPredict.frames = {}
 
 -- ==========================================
 -- Hot-path local upvalues
 -- ==========================================
 local GetTime = GetTime
+-- The aura reader. UnitAura is gone from the modern clients (WoW Forever, Retail); there the
+-- same row is read from C_UnitAuras.GetAuraDataByIndex. It is made HERE, not taken from a
+-- global that another addon may or may not have filled in by the time this file loads: of the
+-- addons that embed this library, whichever loads first supplies the copy all of them use.
+-- (MINOR 2 held whatever UnitAura was at load. OldRaidFrames loads before ZacUI, so on WoW
+-- Forever its copy held nil while ZacUI's unit frames called into it: "attempt to call a nil
+-- value" in ScanAuras on every scan. 2026-11-14.)
 local UnitAura = UnitAura
+if type(UnitAura) ~= "function" then
+    local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+    local IsSecret = type(issecretvalue) == "function" and issecretvalue or nil
+    UnitAura = function(unit, index, filter)
+        if not GetAuraDataByIndex then
+            return nil
+        end
+        -- the game can refuse the read outright in combat ("Auras cannot be accessed when
+        -- secret while tainted"): that is "no aura" too
+        local ok, a = pcall(GetAuraDataByIndex, unit, index, filter)
+        if not ok or type(a) ~= "table" then
+            return nil
+        end
+        if IsSecret and (IsSecret(a.name) or IsSecret(a.spellId) or IsSecret(a.expirationTime)) then
+            return nil
+        end
+        return a.name, a.icon, a.applications, a.dispelName, a.duration, a.expirationTime, a.sourceUnit,
+            a.isStealable, a.nameplateShowPersonal, a.spellId
+    end
+end
 local UnitGUID = UnitGUID
 local UnitName = UnitName
 local UnitSpellTargetName = UnitSpellTargetName
@@ -579,7 +627,7 @@ local function RegisterCastEndTime(unit, isChannel, castGUID)
     if not spellID then
         return
     end
-    -- (ZacUI) WoW Forever hides other units' casts (secret values): no
+    -- The modern clients (WoW Forever, Retail) hide other units' casts (secret values): no
     -- maths on them, so such a cast isn't tracked
     if issecretvalue ~= nil and (issecretvalue(spellID) or issecretvalue(startMS) or issecretvalue(endMS)
         or issecretvalue(castGUID)) then
@@ -743,6 +791,7 @@ local function HandleCastDelayed(unit, castGUID, isChannel)
 end
 
 local castTrackerFrame = CreateFrame("Frame")
+LibHealPredict.frames.casts = castTrackerFrame
 castTrackerFrame:RegisterEvent("UNIT_SPELLCAST_START")
 castTrackerFrame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
 castTrackerFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
@@ -896,7 +945,13 @@ end
 -- Precise HoT tracking (combat log) -- opt-in via SetPreciseHotTracking(true)
 -- ==========================================
 local combatLogFrame = CreateFrame("Frame")
-if not (_G.ZACUI_MODERN or (_G.ZacUI and _G.ZacUI.NoCombatLog and _G.ZacUI.NoCombatLog())) then combatLogFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED") end   -- (no combat log on WoW Forever or Retail, or under ZacUI's game-version override's Forever)
+LibHealPredict.frames.combatLog = combatLogFrame
+-- (no combat log for addons on the modern clients - WoW Forever, Retail - or where ZacUI
+-- runs by their rules)
+if not (type(issecretvalue) == "function" or _G.ZACUI_MODERN
+        or (_G.ZacUI and _G.ZacUI.NoCombatLog and _G.ZacUI.NoCombatLog())) then
+    combatLogFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+end
 combatLogFrame:SetScript("OnEvent", function(self, event)
     local _, subEvent, _, sourceGUID, _, _, _, destGUID, _, _, _, spellID, _, _, amount = CombatLogGetCurrentEventInfo()
 
@@ -988,8 +1043,8 @@ local function BuildSegmentList(destGUID, destUnit)
 
     local calculatedTotalHeals = 0
     local totalIncoming = UnitGetIncomingHeals(destUnit) or 0
-    -- WoW Forever can hand the incoming heals back hidden (a secret value):
-    -- no maths on it, so the game's own numbers sit out and only the
+    -- the modern clients can hand the incoming heals back hidden (a secret
+    -- value): no maths on it, so the game's own numbers sit out and only the
     -- library's own tracked casts count
     if issecretvalue ~= nil and issecretvalue(totalIncoming) then totalIncoming = 0 end
 
@@ -1153,6 +1208,7 @@ if IsLoggedIn() then
     RebuildRoster()
 else
     local initFrame = CreateFrame("Frame")
+    LibHealPredict.frames.init = initFrame
     initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     initFrame:SetScript("OnEvent", function(self)
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")

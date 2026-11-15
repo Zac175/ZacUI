@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Consumables|r
 ## Notes: ZacUI consumable bars: flasks, elixirs, food and jujus, potions, weapon stones and oils - one click each. Readycheck's consumables, potion and weapon bars, ZacUI's way.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -15,12 +15,16 @@
 # Every bar is off until turned on. Readycheck keeps its own bars; the
 # page copies their settings over and can switch Readycheck's off.
 
-CB_Data_TBC.lua
-CB_Data_Forever.lua
-CB_Data.lua
-CB_Core.lua
-CB_Button.lua
-CB_Voice.lua
-CB_Bars.lua
-CB_Import.lua
-CB_Config.lua
+Data\CB_Data_TBC.lua
+Data\CB_Data_Forever.lua
+Data\CB_Data.lua
+Core\CB_Core.lua
+Display\CB_Button.lua
+Core\CB_Voice.lua
+Display\CB_Bars.lua
+Import\CB_Import.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, Consumables folder (2026-11-13). Their rows in the
+# settings menu are put there at login, by this file.
+Settings\CB_Menu.lua

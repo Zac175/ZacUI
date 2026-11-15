@@ -1,0 +1,92 @@
+## Interface: 11509, 20506, 16001, 120105
+## Title: ZacUI |cff33ff99Options|r
+## Notes: ZacUI's settings window and its pages. Loads by itself the first time you open the settings (/zui).
+## Author: Zac
+## Version: 3.0.12
+## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
+## X-Category: Interface Enhancements
+## Dependencies: Zacui
+## LoadOnDemand: 1
+## X-ZacUI-Part: Options
+
+# Part of ZacUI. The settings window, its search, its preview strip and
+# every settings page, lifted out of the main addon and its parts
+# (2026-11-13) so none of it is read at login or on a reload: the game
+# loads this folder the first time the settings are asked for
+# (ZacUI's UI\Config\Config_Base.lua, ns.LoadOptions). The files share
+# ZacUI's namespace (_G.ZacUI, published by Core_Boot) and its saved
+# variables; nothing is saved here.
+#
+# A part's pages sit in a folder of its name and stop at their first
+# lines when that part is not loaded. Load order inside each folder is the
+# order the files had in their own TOC; the folders follow the order the
+# game loads the parts in.
+
+# Marks the settings as loaded (ns.optionsLoaded). First.
+Options.lua
+
+# ---------- ZacUI: the window, the search, the preview strip, the core pages ----------
+Core\Config_Search.lua
+Core\Config_SearchBox.lua
+Core\Config_Preview.lua
+Core\Config_Window.lua
+Core\Config_PagesMain.lua
+Core\Config_PagesStyle.lua
+Core\Config_PagesMotion.lua
+Core\Config_PagesMinimap.lua
+Core\Config_PagesFlavor.lua
+Core\Config_AceRender.lua
+Core\Config_Profiles.lua
+Core\Config_PreviewDrag.lua
+Core\Config_EditLinks.lua
+Core\Config_AuraFilter.lua
+
+# ---------- Zacui_Auras ----------
+Auras\AE_Options.lua
+Auras\AE_OptionsTriggers.lua
+Auras\AE_Page.lua
+
+# ---------- Zacui_Bars ----------
+Bars\AB_Preview.lua
+Bars\Config_PagesBars.lua
+Bars\AB_PreviewDrag.lua
+
+# ---------- Zacui_Blessings ----------
+Blessings\BL_Config.lua
+
+# ---------- Zacui_BuffReminders ----------
+BuffReminders\BR_Config.lua
+BuffReminders\BR_PreviewDrag.lua
+
+# ---------- Zacui_Clicks ----------
+Clicks\CC_Config.lua
+
+# ---------- Zacui_Consumables ----------
+Consumables\CB_Config.lua
+
+# ---------- Zacui_Maps ----------
+Maps\Config_PagesMaps.lua
+
+# ---------- Zacui_Meter ----------
+Meter\Config_PagesMeter.lua
+Meter\Meter_PreviewDrag.lua
+
+# ---------- Zacui_Nameplates ----------
+Nameplates\Config_PagesNameplates.lua
+Nameplates\Config_PagesNPScripts.lua
+Nameplates\NP_PreviewDrag.lua
+
+# ---------- Zacui_QoL ----------
+QoL\Config_PagesQoL.lua
+
+# ---------- Zacui_SBT ----------
+SBT\Config_PagesSCT.lua
+
+# ---------- Zacui_UnitFrames ----------
+UnitFrames\Options.lua
+UnitFrames\PreviewDrag.lua
+
+# ---------- Zacui_Windows ----------
+Windows\Config_PagesWindows.lua
+Windows\Config_PagesFlight.lua
+Windows\Config_PagesClassicBook.lua

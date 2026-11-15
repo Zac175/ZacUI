@@ -28,6 +28,57 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.12",
+        date = "2026-11-15",
+        title = "Shorter loading screens, a faster threat meter, and game styles on more of the screen",
+        titles = { retail = "Shorter loading screens and game styles on more of the screen" },
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "The settings window loads when you first open it, so logging in is quicker.",
+                    { "The boss mods for the five Classic raids load when you walk into the raid, not at login.", feature = "raidmods", only = "era" },
+                    { "Threat meter: your row, the tank's row and \"You pull at\" update the moment your threat changes.", feature = "meter_threat" },
+                    { "Threat meter: \"Make my row stand out\", with a colour of its own. On the Damage meter page, General tab.", feature = "meter_threat" },
+                    { "Warrior HUD: Blood Fury, Berserking, War Stomp and Will of the Forsaken. On for Horde warriors.", feature = "hud_warrior" },
+                    { "Warrior HUD: Fetish of the Sand Reaver's buff shows on the buff row with the trinket's icon.", feature = "hud_warrior", only = "era" },
+                    { "Bags: a side-rail window style with a keyring, a pinned row and All, Kind and New views. Bags page, Look tab.", feature = "bags" },
+                    { "World map: a new install is asked which map style to use the first time the map opens.", feature = "worldmap" },
+                    "Under WoW Forever, Blizzard style and Classic WoW UI, ZacUI's raid timers, flight timer, buff reminder tracker, HUD icons and the raid mods' bars and icons now wear that style.",
+                    "/zui perf shows what ZacUI is costing you.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "New installs open ZacUI's windows at 80% size, and popups follow the settings window's size.",
+                    "Every scroll bar is the same grey.",
+                    "The colour picker no longer stutters while you drag.",
+                    { "Under a game style the world map is the game's own window. ZacUI's map window and the seamless map are ticks on the Maps page.", feature = "maps" },
+                    { "Under a game style the auction house is the game's own.", feature = "auction" },
+                    { "A new install that picks a game style starts on the game's own bags.", feature = "bags" },
+                    { "Raid mods: bars and warnings match ZacUI's look under ZacUI's style.", feature = "raidmods" },
+                    { "Warrior HUD: a buff that ends fades out where it stands. No more empty slot on the buff row.", feature = "hud_warrior" },
+                    { "Horde warriors on Classic Era: the Salvation icons and \"Drop Salvation while tanking\" are gone. There are no paladins to give it.", only = "era" },
+                    { "Weapon stones: the menu and tooltip show your pick even when you carry none, and which stone is used instead.", feature = "consbars", only = "era" },
+                    "Chat and unit frames do less work while nothing is happening.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    { "The on/off switches in the settings sidebar did nothing on WoW Forever.", only = "forever" },
+                    { "An error from heal prediction on WoW Forever with OldRaidFrames installed.", only = "forever" },
+                    { "An error from the seamless map when zoomed far in.", feature = "worldmap" },
+                    { "A purple ring on weapon stone buffs on the buff bar.", feature = "buffs", only = "era" },
+                    { "Quick Keybind Mode: Escape no longer leaves the mode, and the game's extra action button no longer takes your key presses.", feature = "bars" },
+                    { "Dropping a spell on a bar in combat no longer raises an \"action blocked\" error. A chat line says to drop it after the fight.", feature = "bars" },
+                    { "The trade window's header matches the other windows.", feature = "windows" },
+                },
+            },
+        },
+    },
+    {
         version = "3.0.11",
         date = "2026-11-12",
         title = "A changelog for the game version you play",

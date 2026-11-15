@@ -3,7 +3,7 @@
 ## Title: ZacUI |cff33ff99Blessings|r
 ## Notes: ZacUI paladin blessings: who blesses which class, the casting bar, auras. Talks to paladins running PallyPower. Replaces PallyPower.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -16,10 +16,12 @@
 # channel, so PallyPower users in the group see and set the same
 # assignments.
 
-BL_Data.lua
-BL_Core.lua
-BL_Comm.lua
-BL_Bar.lua
-BL_Grid.lua
-BL_Import.lua
-BL_Config.lua
+Data\BL_Data.lua
+Core\BL_Core.lua
+Core\BL_Comm.lua
+Display\BL_Bar.lua
+Display\BL_Grid.lua
+Import\BL_Import.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, Blessings folder (2026-11-13).

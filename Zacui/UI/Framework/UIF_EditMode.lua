@@ -150,6 +150,7 @@ end
 
 local function Movables()
     local list = {}
+    if ns.MoversAsk then ns.MoversAsk() end
     for _, m in ipairs(MOVERS) do
         local key = m.key
         list[#list + 1] = {

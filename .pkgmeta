@@ -26,8 +26,10 @@ move-folders:
   Zacui/Zacui_Maps: Zacui_Maps
   Zacui/Zacui_Meter: Zacui_Meter
   Zacui/Zacui_Nameplates: Zacui_Nameplates
+  Zacui/Zacui_Options: Zacui_Options
   Zacui/Zacui_QoL: Zacui_QoL
   Zacui/Zacui_RaidMods: Zacui_RaidMods
+  Zacui/Zacui_RaidPacks: Zacui_RaidPacks
   Zacui/Zacui_RaidTools: Zacui_RaidTools
   Zacui/Zacui_SBT: Zacui_SBT
   Zacui/Zacui_UnitFrames: Zacui_UnitFrames

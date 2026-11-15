@@ -1,7 +1,7 @@
 ## Interface: 11509, 20506, 16001, 120105
 ## Title: ZacUI |cff33ff99Auras|r
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\Icons\Spell_Nature_WispSplode
 ## Notes: ZacUI's aura engine: runs auras in the WeakAuras format and imports their strings. Turn it on from ZacUI's Aura engine page.
 ## X-Category: Interface Enhancements
@@ -14,25 +14,25 @@
 # the WeakAuras format so existing auras and strings work unchanged.
 # Media\ and PowerAurasMedia\ are the art and sounds auras name.
 
-AE_Core.lua
-AE_Load.lua
-AE_Env.lua
-AE_Text.lua
-AE_Regions.lua
-AE_Glow.lua
-AE_SubRegions.lua
-AE_Groups.lua
-AE_Display.lua
-AE_Triggers.lua
-AE_Protos.lua
-AE_TriggerAura.lua
-AE_TriggerGeneric.lua
-AE_Conditions.lua
-AE_Actions.lua
-AE_Codec.lua
-AE_Modernize.lua
-AE_Comm.lua
-AE_Edit.lua
-AE_Options.lua
-AE_OptionsTriggers.lua
-AE_Page.lua
+Engine\AE_Core.lua
+Engine\AE_Load.lua
+Engine\AE_Env.lua
+Display\AE_Text.lua
+Display\AE_Regions.lua
+Display\AE_Glow.lua
+Display\AE_SubRegions.lua
+Display\AE_Groups.lua
+Display\AE_Display.lua
+Triggers\AE_Triggers.lua
+Triggers\AE_Protos.lua
+Triggers\AE_TriggerAura.lua
+Triggers\AE_TriggerGeneric.lua
+Triggers\AE_Conditions.lua
+Triggers\AE_Actions.lua
+Engine\AE_Codec.lua
+Engine\AE_Modernize.lua
+Engine\AE_Comm.lua
+Editor\AE_Edit.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, Auras folder (2026-11-13).

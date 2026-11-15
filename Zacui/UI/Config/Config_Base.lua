@@ -1,5 +1,7 @@
--- Config_Base - the config window's menu tree, its state, and the page
--- registry every page file writes into.
+-- Config_Base - the config window's menu tree, its state, the page
+-- registry every page file writes into, and the door to the window
+-- itself, which loads on demand (the Zacui_Options addon; THE SETTINGS
+-- LOAD ON DEMAND, below).
 -- Part of ZacUI; load order is set by the TOC.
 --
 -- Pages are DATA, not code paths. A menu entry names a page; the page
@@ -1327,7 +1329,25 @@ end
 --   ns.PartState(addon)  "on" / "off" (loaded or not), "missing" (not in
 --                        the AddOns folder), and whether the next load
 --                        changes that (the second value: true = pending)
---   ns.AskPart(addon, label, on)  the "Turn off and reload" question
+--   ns.AskPart(addon, label, on)  the switch: writes the AddOns list, then
+--                        asks for the reload
+--
+-- (2026-11-14, Zac on WoW Forever: "quality of life is not turning off even
+-- after i reload its still on".) The list used to be written AFTER the
+-- reload was asked for, in the same click, for the character's NAME, and
+-- nothing looked whether it had taken: a write the client turned down was
+-- a reload that changed nothing. Now:
+--   * the switch writes the list at once, inside its own click, and READS
+--     IT BACK; the reload question comes after and its click only reloads
+--     (WoW Forever wants the reload first in a click - UIF_Dialogs)
+--   * the character is named the way this client's list knows it: by name
+--     or by GUID, whichever ZacUI itself reads as on under (Me)
+--   * the list is saved (SaveAddOns), so the game's own AddOns window does
+--     not put it back
+--   * a write that cannot be read back says so, instead of reloading
+--   * a part turned off here that the game loads anyway is noticed at the
+--     next login (ns.PartsStillOn): the offer is to turn it off for every
+--     character, which is the write every client keeps
 local function AddonApi()
     local C = C_AddOns
     return {
@@ -1336,13 +1356,100 @@ local function AddonApi()
         exists = C and C.DoesAddOnExist,
         enable = (C and C.EnableAddOn) or EnableAddOn,
         disable = (C and C.DisableAddOn) or DisableAddOn,
+        save = (C and C.SaveAddOns) or SaveAddOns,
         -- the new call takes (name, character), the old one (character, name)
         state = (C and C.GetAddOnEnableState) and function(name, who) return C.GetAddOnEnableState(name, who) end
             or (GetAddOnEnableState and function(name, who) return GetAddOnEnableState(who, name) end),
     }
 end
 
-local function Me() return (UnitName and UnitName("player")) or nil end
+-- THIS CHARACTER, as this client's AddOns list knows it. ZacUI is loaded,
+-- so it is on for this character: a name under which the list says so for
+-- ZacUI is one the list knows. The character's name (every client until
+-- now) and its GUID are both asked; Known() is those that answer, the name
+-- first. Me() is the first of them - or the name, on a client that cannot
+-- be asked at all.
+local function Ids()
+    local name = (UnitName and UnitName("player")) or nil
+    local guid = (UnitGUID and UnitGUID("player")) or nil
+    if type(name) ~= "string" or name == "" then name = nil end
+    if type(guid) ~= "string" or guid == "" then guid = nil end
+    return name, guid
+end
+-- (2026-11-14 13:34, Zac on WoW Forever, whose list answered "on" for the
+-- name, the GUID and no character alike: "still nothing when i click the
+-- slider". A client that knows its characters by GUID answers for a name it
+-- does not know as it does for no character at all - on while the part is
+-- on for anyone - and takes no write under it. The switch wrote under the
+-- GUID, which took, then asked the list under the NAME whether anything
+-- was waiting, heard "on", and so asked for no reload. Two rules since:
+--   * a part is on for this character at the next load only when EVERY
+--     name the list answers under says so (NextOn): the one the client
+--     really keeps is the one that can say off while the others say on
+--   * the GUID is written first on a client of the new kind (the ones with
+--     issecretvalue), the name first on the others, as it always was there)
+local function GuidFirst()
+    return type(issecretvalue) == "function" or _G.ZACUI_MODERN and true or false
+end
+local function Known(A)
+    local name, guid = Ids()
+    local out = {}
+    if A.state then
+        local first, second = name, guid
+        if GuidFirst() then first, second = guid, name end
+        for i = 1, 2 do
+            local id = (i == 1) and first or second
+            if id then
+                local ok, st = pcall(A.state, ADDON_NAME, id)
+                if ok and type(st) == "number" and st > 0 then out[#out + 1] = id end
+            end
+        end
+    end
+    return out, name, guid
+end
+-- HOW THIS CLIENT'S LIST CAN BE ASKED (2026-11-14 13:22, Zac on WoW
+-- Forever, after the first version of this: "now on forever clicking the
+-- sliders do absolutly nothing ... sliders work on era but not forever".
+-- Forever's list answers for neither the character's name nor its GUID, so
+-- the switch wrote, saw nothing change, and asked for no reload):
+--   "me"    the list answers for this character (Era, TBC): the switch is
+--           this character's
+--   "all"   it answers only when no character is named (WoW Forever): the
+--           switch is every character's on the account, and says so
+--   "blind" it cannot be asked at all: written under the character's name
+--           as it always was, and the reload asked for all the same
+-- Returns the scope and the name the list is asked under (nil for "all").
+local function Scope(A)
+    local known, name, guid = Known(A)
+    if #known > 0 then return "me", known[1], known, name, guid end
+    if A.state then
+        local ok, st = pcall(A.state, ADDON_NAME, nil)
+        if ok and type(st) == "number" and st > 0 then return "all", nil, known, name, guid end
+    end
+    return "blind", name, known, name, guid
+end
+function ns.PartScope() return (Scope(AddonApi())) end
+
+-- Does the list load this part for this character next time? nil when it
+-- cannot say. "me": on only when every name the list answers under says on.
+local function NextOn(A, addon, scope, known)
+    if not A.state or scope == "blind" then return nil end
+    if scope == "all" then
+        local ok, st = pcall(A.state, addon, nil)
+        if ok and type(st) == "number" then return st > 0 end
+        return nil
+    end
+    local any, on = false, true
+    for _, id in ipairs(known) do
+        local ok, st = pcall(A.state, addon, id)
+        if ok and type(st) == "number" then
+            any = true
+            if st <= 0 then on = false end
+        end
+    end
+    if not any then return nil end
+    return on
+end
 
 function ns.PartState(addon)
     if type(addon) ~= "string" then return nil end
@@ -1361,38 +1468,215 @@ function ns.PartState(addon)
     end
     if not exists then return "missing", false end
     local next = loaded
-    if A.state then
-        local ok, st = pcall(A.state, addon, Me())
-        if ok and type(st) == "number" then next = st > 0 end
-    end
+    local scope, _, known = Scope(A)
+    local says = NextOn(A, addon, scope, known)
+    if says ~= nil then next = says end
     return loaded and "on" or "off", (next ~= loaded)
 end
 
--- Turns the part on or off for the next load. The reload is asked for
--- FIRST, inside the click (WoW Forever; UIF_Dialogs' ns.AskReload), then
--- the AddOns list is written.
-function ns.SetPartEnabled(addon, on)
+-- The parts this character turned off here, until a login shows the game
+-- kept it: { [addon] = label }.
+local function Asked(make)
+    if type(ZacUICharDB) ~= "table" then
+        if not make then return nil end
+        ZacUICharDB = {}
+    end
+    if type(ZacUICharDB.partsOff) ~= "table" then
+        if not make then return nil end
+        ZacUICharDB.partsOff = {}
+    end
+    return ZacUICharDB.partsOff
+end
+
+-- Turns the part on or off for the next load: for this character, or for
+-- every character on the account (everyone = true). Returns whether the
+-- AddOns list now says so - read back, not assumed - and the client's own
+-- error when it gave one.
+function ns.SetPartEnabled(addon, on, everyone)
     local A = AddonApi()
     local fn = on and A.enable or A.disable
-    if not fn then return false end
-    return pcall(fn, addon, Me())
+    if not fn or type(addon) ~= "string" then return false end
+    on = on and true or false
+    local err
+    local scope, _, known, name, guid = Scope(A)
+    if everyone and scope ~= "blind" then scope = "all" end
+    -- does the list say so now?
+    local function Says()
+        return NextOn(A, addon, scope, known) == on
+    end
+    local function Write(id)
+        local ok, e
+        if id then ok, e = pcall(fn, addon, id) else ok, e = pcall(fn, addon) end
+        if not ok then err = tostring(e) end
+        return ok
+    end
+    local took = false
+    if scope == "all" then
+        -- no character named: every character on the account
+        took = Write(nil) and Says()
+    elseif scope == "blind" then
+        -- a list that cannot be asked: written and believed when the
+        -- client raised nothing (for every character when asked so)
+        if everyone then took = Write(nil)
+        else took = (name ~= nil and Write(name)) or false end
+    else
+        -- under the name the list knows; then under the other one (a list
+        -- read by one and written by the other); read back each time
+        local tried = {}
+        for _, id in ipairs({ known[1], known[2] or false, name or false, guid or false }) do
+            if id and not tried[id] then
+                tried[id] = true
+                if Write(id) and Says() then took = true break end
+            end
+        end
+        -- a list that keeps nothing for one character from here: for
+        -- every character, the write every client keeps (and AskPart says
+        -- whose switch it was)
+        if not took then
+            scope = "all"
+            took = Write(nil) and Says()
+            if not took then scope = "me" end
+        end
+    end
+    if took and A.save then pcall(A.save) end
+    -- a turn-off for this character is noted whether or not the list took
+    -- it (the setup writes after its reload is asked for and cannot say):
+    -- the next login looks whether the part stayed off (ns.PartsStillOn).
+    -- One made for every character is the last word: not noted.
+    local mine = not on and scope ~= "all"
+    local asked = Asked(mine)
+    if asked then
+        if mine then asked[addon] = asked[addon] or true
+        elseif took then asked[addon] = nil end
+    end
+    return took, err, scope
 end
 
 function ns.AskPart(addon, label, on)
     if not (ns.AskReload and addon) then return end
     label = label or addon
+    on = on and true or false
+    -- the list first, in this click; the question after
+    local took, _, scope = ns.SetPartEnabled(addon, on)
+    if not took then
+        -- (said here and now: nothing to look for at the next login)
+        local asked = Asked(false)
+        if asked then asked[addon] = nil end
+        if UI.Confirm then
+            UI.Confirm({
+                title = label,
+                text = label .. " could not be turned " .. (on and "on" or "off") .. " from here: the game did not take "
+                    .. "the change to its AddOns list. Open the game menu, AddOns, " .. (on and "tick" or "untick")
+                    .. " \"" .. addon .. "\" there and reload.",
+                noCancel = true,
+            })
+        end
+        -- (in chat as well: a click on the switch always leaves something
+        -- to read)
+        if Print then
+            Print(label .. " could not be turned " .. (on and "on" or "off") .. " from here. Use the game's AddOns list.")
+        end
+        return false
+    end
+    if not on and scope ~= "all" then
+        local asked = Asked(true)
+        asked[addon] = label
+    end
+    -- back to what is loaded now (a waiting change undone): nothing to
+    -- reload for. A list that cannot be asked cannot say so: it always asks.
+    if scope ~= "blind" then
+        local _, pending = ns.PartState(addon)
+        if not pending then return true end
+    end
+    -- whose switch it is, said as it is
+    local who = (scope == "all") and "for every character on this account" or "for this character"
     local text
     if on then
-        text = label .. " turns on for this character after the reload."
+        text = label .. " turns on " .. who .. " at the next reload."
     else
-        text = label .. " turns off for this character. The game's own version comes back after the reload, "
-            .. "and its settings are kept. Turn it on again here any time."
+        text = label .. " turns off " .. who .. " at the next reload. The game's own version comes back "
+            .. "then, and its settings are kept. Turn it on again here any time."
+    end
+    if scope == "all" then
+        text = text .. " (This game version keeps no switch for one character.)"
     end
     ns.AskReload(text, {
         title = (on and "Turn on " or "Turn off ") .. label,
         acceptText = on and "Turn on and reload" or "Turn off and reload",
-        apply = function() ns.SetPartEnabled(addon, on) end,
     })
+    return true
+end
+
+-- AT LOGIN: a part this character turned off here that the game loaded all
+-- the same. The list did not keep it for one character (the game's own
+-- AddOns window may have put it back, or this game version does not keep a
+-- switch for one character from an addon). Asked once: off for every
+-- character on the account - the write every client keeps - or left on.
+-- A part that did stay off is simply forgotten.
+function ns.PartsStillOn()
+    local asked = Asked(false)
+    if not asked then return nil end
+    local still
+    for addon, label in pairs(asked) do
+        local state, pending = ns.PartState(addon)
+        if state == "on" and not pending then
+            still = still or {}
+            -- (turned off by the setup: the name its sidebar row has)
+            if type(label) ~= "string" then
+                label = addon
+                for _, item in ipairs(MENU) do
+                    if item.addon == addon and item.label then label = item.label break end
+                    for _, child in ipairs(item.children or {}) do
+                        if child.addon == addon and child.label then label = child.label break end
+                    end
+                    if label ~= addon then break end
+                end
+            end
+            still[#still + 1] = { addon = addon, label = label }
+        elseif state ~= "on" then
+            asked[addon] = nil
+        end
+    end
+    if still then table.sort(still, function(a, b) return a.label < b.label end) end
+    return still
+end
+
+local function AskStillOn()
+    local still = ns.PartsStillOn()
+    if not (still and ns.AskReload) then return nil end
+    local names = {}
+    for i, p in ipairs(still) do names[i] = p.label end
+    local what = table.concat(names, ", ")
+    local function Forget()
+        local asked = Asked(false)
+        if asked then for _, p in ipairs(still) do asked[p.addon] = nil end end
+    end
+    return ns.AskReload(what .. " was turned off for this character, and the game loaded it anyway: its AddOns "
+        .. "list did not keep that for one character. It can be turned off for every character on this account "
+        .. "instead. Later leaves it on.", {
+        title = "Still on: " .. what,
+        acceptText = "Turn off for all and reload",
+        apply = function()
+            for _, p in ipairs(still) do ns.SetPartEnabled(p.addon, false, true) end
+            Forget()
+        end,
+        onCancel = Forget,
+    })
+end
+ns.AskPartsStillOn = AskStillOn
+
+do
+    local f = CreateFrame("Frame")
+    f:RegisterEvent("PLAYER_LOGIN")
+    f:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        if not ns.PartsStillOn() then return end
+        if ns.Popups and ns.Popups.Want then
+            ns.Popups.Want("partsoff", AskStillOn, { delay = 2, order = 45 })
+        elseif C_Timer and C_Timer.After then
+            C_Timer.After(2, AskStillOn)
+        end
+    end)
 end
 
 -- A part that adds its own sidebar group when it loads (Class HUDs) keeps a
@@ -1404,6 +1688,129 @@ function ns.KeepPartRow(id, label, addon, afterId)
     local at = #MENU + 1
     for i, item in ipairs(MENU) do if item.id == afterId then at = i + 1 break end end
     table.insert(MENU, at, { id = id, label = label, addon = addon, keywords = addon:lower() })
+end
+
+-- ============================================================
+-- THE SETTINGS LOAD ON DEMAND (2026-11-13)
+-- ============================================================
+-- (Zac: "better load times would always be helpfull") The window, its
+-- search, its preview strip and the pages are 1.4 MB of Lua, about a
+-- tenth of what the game read and compiled at every login and reload,
+-- and most sessions never open them. They live in a companion addon now
+-- - Zacui_Options, LoadOnDemand - and this is the door to it:
+--
+--   ns.LoadOptions()     loads the companion (once); true when it is in.
+--                        Says why in chat, once, when it cannot.
+--   ns.OptionsLoaded()   whether it is in
+--
+-- What stays in this file is what files that load at login write into:
+-- the menu, the page registry, the tabs added from outside, the layout
+-- kit. A page builder is only ever run by the window, so by then
+-- everything the companion brings (the preview strip, the page kit, the
+-- search) is there.
+--
+-- THE NAMES OTHER FILES CALL. ns.OpenConfig, ns.ToggleConfig,
+-- ns.RefreshConfig, ns.ConfigIsOpen and ns.ConfigSearchOpen are taken as
+-- locals by files all over the suite when they load, so they exist from
+-- here on: each hands on to the companion's own once that is in. Asking
+-- to open loads it; asking to refresh or whether it is open never does -
+-- with nothing loaded there is nothing to refresh and nothing open.
+--
+-- HERE, AND NOT IN A FILE OF ITS OWN: this file is in ZacUI's TOC before
+-- the split and after it. The game reads an addon's file list and its
+-- folders when it starts, so someone who updates with the game running
+-- and reloads gets this file's new contents but none of the new folder -
+-- /zui then says to restart the game instead of failing without a word.
+local OPTIONS = "Zacui_Options"
+ns.OPTIONS_ADDON = OPTIONS
+
+-- The window's own code is in: the companion has run (its first file sets
+-- the mark), or - the file list from before the split, see above - the
+-- window's files loaded with ZacUI as they used to.
+function ns.OptionsLoaded()
+    return ns.optionsLoaded == true or ns.ConfigWindowCard ~= nil
+end
+
+local told = {}
+local function Tell(why, text)
+    if told[why] then return end
+    told[why] = true
+    if Print then Print(text) end
+end
+
+-- Returns true when the companion is loaded. The client's reason for a
+-- refusal ("DISABLED", "MISSING", ...) comes back as the second value.
+function ns.LoadOptions()
+    if ns.OptionsLoaded() then return true end
+    local C = C_AddOns
+    local load = (C and C.LoadAddOn) or LoadAddOn
+    if not load then
+        Tell("NOAPI", "|cFFFF6666The settings could not be loaded:|r this game version has no way to load an addon on demand.")
+        return false, "NOAPI"
+    end
+    local ok, loaded, reason = pcall(load, OPTIONS)
+    -- switched off in the AddOns list: it is ZacUI's own window, so it is
+    -- switched back on for this character (ns.SetPartEnabled, above) and
+    -- asked for again
+    if not (ok and loaded) and reason == "DISABLED" then
+        ns.SetPartEnabled(OPTIONS, true)
+        ok, loaded, reason = pcall(load, OPTIONS)
+    end
+    if ns.OptionsLoaded() then return true end
+    reason = (ok and reason) or (not ok and tostring(loaded)) or nil
+    if reason == "MISSING" then
+        Tell("MISSING", "|cFFFF6666The settings are not loaded yet.|r If ZacUI was updated while the game was running, "
+            .. "close the game completely and start it again to finish the update. If it still says this afterwards, the "
+            .. OPTIONS .. " folder is missing from Interface\\AddOns: install ZacUI again.")
+    elseif reason == "DISABLED" then
+        Tell("DISABLED", "|cFFFF6666The settings are switched off:|r tick " .. OPTIONS .. " in the AddOns list, then /reload.")
+    else
+        Tell("OTHER", "|cFFFF6666The settings could not be loaded|r (" .. tostring(reason or "no reason given") .. "). "
+            .. "Check that the " .. OPTIONS .. " folder is in Interface\\AddOns and ticked in the AddOns list.")
+    end
+    return false, reason
+end
+
+-- A name that hands on to the companion's function of the same name once
+-- it has put one there. load: asking loads the companion first; idle:
+-- the answer while there is nothing to hand on to.
+local function Forward(name, load, idle)
+    local fwd
+    fwd = function(...)
+        local real = ns[name]
+        if real == fwd then
+            if not (load and ns.LoadOptions()) then return idle end
+            real = ns[name]
+            if real == fwd or type(real) ~= "function" then return idle end
+        end
+        return real(...)
+    end
+    ns[name] = fwd
+end
+Forward("OpenConfig", true)
+Forward("ToggleConfig", true)
+Forward("ConfigSearchOpen", true)
+Forward("RefreshConfig", false)
+Forward("ConfigIsOpen", false, false)
+
+-- PIXEL-EXACT (finish pass; the ZacUI look, through ns.Pixel). One unit
+-- of the settings window is (window scale / one physical pixel) screen
+-- pixels: 1.055 at 1080p and UI scale 0.75, so its 11 px text and 1 px
+-- rules land between pixels. When that is within 10% of a whole number
+-- the window's scale is nudged onto it (one unit = exactly 1 or 2 px);
+-- further off the size is left as chosen. Off under the other looks
+-- (ns.Pixel.On), so they are as before. Here and not with the window: the
+-- first-time setup sizes itself by it too, at a login where the window
+-- may never be asked for.
+function ns.ConfigExactScale(s)
+    local P = ns.Pixel
+    if not (P and P.On and P.On() and P.One) then return s end
+    local unit = P.One(UIParent)
+    if not (type(unit) == "number" and unit > 0) then return s end
+    local r = s / unit
+    local n = math.floor(r + 0.5)
+    if n >= 1 and math.abs(r - n) <= 0.10 * r then return n * unit end
+    return s
 end
 
 -- shared with later ZacUI files

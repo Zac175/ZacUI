@@ -503,6 +503,13 @@ Look.STOCK = {
     -- ... the bags and bank (Blizzard's frames; ZacUI's combined bag is a
     -- feature and stays) ...
     bags = "bags", bank = "bags",
+    -- ... ZacUI's auction window (2026-11-14, the styling rules: a ZacUI
+    -- replacement of a game window is either off, the game's own untouched,
+    -- or on AND dressed in the look - never on and flat). It is a ZacUI
+    -- window that puts the game's auction house off screen, and it has no
+    -- game-look art yet, so under a game look it is the game's. Its page
+    -- says so (Config_Style's banner; the Auction page follows "bags") ...
+    auctionhouse = "bags",
     -- ... the world map's skin (Zacui_Maps' behaviour stays) ...
     worldmap = "maps",
     -- ... and ZacUI's covers over them (Zacui_Windows)
@@ -646,7 +653,19 @@ end
 -- ZacUI's look. Otherwise the role's dresser lays the look's window
 -- chrome over it (Look.dressers below). Idempotent: covers re-style on
 -- every repaint and call it again.
+-- ZACUI'S OWN INTERFACE IS NOT DRESSED (2026-11-15, Zac: "even in a different
+-- styling keep the zui popus main menu etc the same"; "go back to how it
+-- was before I told you to style zui like the style picked ingame"). The
+-- settings window, every popup and question, a plain ZacUI window, the
+-- callouts, Edit Mode's bar, the keybind strip, the bug window: ZacUI's
+-- style under EVERY look. A picked look changes what stands in for the
+-- game's own screen: the bags, the covers over the game's windows, the
+-- meter, the bars, the unit frames, the nameplates, the map. The two roles
+-- below were the own-interface ones (2026-11-14 / 15); they return here
+-- whoever calls, so nothing of ZacUI's own is dressed by mistake.
+local OWN_ROLES = { dialog = true, box = true }
 function Look.Dress(frame, role, part)
+    if OWN_ROLES[role] then return end
     local look = Look.For(part or "windows")
     if look.id == "zacui" then return end
     if not frame then return end
@@ -656,20 +675,49 @@ function Look.Dress(frame, role, part)
 end
 Look.dressers = {}
 
+-- A PIECE OF ZACUI'S OWN THAT STEPS BACK STAYS BACK (2026-11-15). The
+-- client keeps ONE alpha per region: a texture's SetVertexColor(r, g, b, a)
+-- and a text's SetTextColor(r, g, b, a) write the very alpha SetAlpha
+-- does (Blz_Chat: "a vertex colour's alpha IS the texture's alpha"). So a
+-- ZacUI fill, edge or label hidden with SetAlpha(0) was back the moment
+-- one of ZacUI's paints gave it its colour again - Zac, under WoW Forever:
+-- "duplicate text here" (ZacUI's button label drawn through the look's
+-- own). Back() hides the piece and holds it hidden whatever colours it is
+-- given after. Only for pieces ZacUI made: a piece of the game's is hidden
+-- with Quiet() and never hooked.
+local function Back(x)
+    if not (type(x) == "table" and x.SetAlpha) then return end
+    local had = rawget(x, "_zBack")
+    rawset(x, "_zBack", true)
+    x:SetAlpha(0)
+    if had ~= nil or not hooksecurefunc then return end
+    local holding = false
+    local function Hold(self)
+        if holding or not rawget(self, "_zBack") then return end
+        holding = true
+        self:SetAlpha(0)
+        holding = false
+    end
+    for _, m in ipairs({ "SetAlpha", "SetVertexColor", "SetTextColor" }) do
+        if type(x[m]) == "function" then pcall(hooksecurefunc, x, m, Hold) end
+    end
+end
+Look.Back = Back
+
 -- A window in another look: ZacUI's flat fill and pixel strips step back
 -- (alpha 0, so a later return to ZacUI's look at the next reload finds
 -- them as they were) and the look's window backdrop goes on: the dialog
 -- border and background (Classic), the client's metal / bronze rim on
 -- the rock fill (the modern looks). Only frames ZacUI made reach here.
 local function DressWindow(f, look)
-    local fill = rawget(f, "_zFill")
-    if fill and fill.SetAlpha then fill:SetAlpha(0) end
-    for _, t in ipairs(rawget(f, "_zBorder") or {}) do if t.SetAlpha then t:SetAlpha(0) end end
+    -- (held back, 2026-11-15: the window's own paint colours them again)
+    Back(rawget(f, "_zFill"))
+    for _, t in ipairs(rawget(f, "_zBorder") or {}) do Back(t) end
     local cbg = rawget(f, "_zui_cbg")
-    if cbg and cbg ~= rawget(f, "_zui_edge") and cbg.SetAlpha then cbg:SetAlpha(0) end
+    if cbg and cbg ~= rawget(f, "_zui_edge") then Back(cbg) end
     local strips = rawget(f, "_zui_borderTex")
     if strips and not strips._zEdge then
-        for _, t in ipairs(strips) do if t.SetAlpha then t:SetAlpha(0) end end
+        for _, t in ipairs(strips) do Back(t) end
     end
     -- the edge sits UNDER the window's own regions and children (a level
     -- below the window), its rim outside the box (borderCover.out)
@@ -678,14 +726,11 @@ local function DressWindow(f, look)
     -- a title bar ZacUI drew keeps its words, loses its flat band
     local bar = rawget(f, "titleBar")
     if bar then
-        local bfill = rawget(bar, "_zFill")
-        if bfill and bfill.SetAlpha then bfill:SetAlpha(0) end
-        local art = rawget(bar, "_zArt")
-        if art and art.SetAlpha then art:SetAlpha(0) end
+        Back(rawget(bar, "_zFill"))
+        Back(rawget(bar, "_zArt"))
         -- the flat header's hairline is ZacUI's too: under a game look it
         -- drew a line straight through the title (Zac 2026-11-08)
-        local rule = rawget(bar, "_zFlatRule")
-        if rule and rule.SetAlpha then rule:SetAlpha(0) end
+        Back(rawget(bar, "_zFlatRule"))
     end
 end
 Look.dressers.window = DressWindow
@@ -1082,6 +1127,168 @@ function Look.AddFill(frame, spec, file, alpha)
 end
 
 -- ============================================================
+-- ZACUI'S ON-SCREEN PIECES UNDER A GAME LOOK (2026-11-15)
+-- ============================================================
+-- Zac: "use the kit I want everything styled to what the user picks for
+-- game windows etc just not zui menus". What ZacUI puts ON THE GAME SCREEN
+-- and the game has no version of - a tracker, a timer bar, a HUD icon -
+-- wears the look through ONE of the three helpers below, so no piece
+-- carries a look of its own. ZacUI's own menus never call them (see
+-- Look.Dress). Under ZacUI's look each returns on its first lines and
+-- nothing is made, so that look is byte for byte what it was. Each runs
+-- when a piece is built or restyled, never per frame, and a fault in the
+-- look never breaks the piece (pcall).
+--
+-- Look.Piece(frame, part, opts) -> true under a game look
+--   the look's small box (its tooltip edge and fill: look.border /
+--   look.bgSmall, sized to the frame by AddEdge) on `frame`.
+--   opts.hide   ZacUI's flat pieces that step back and stay back (Look.Back)
+--   opts.fill   false: the edge alone, OVER the frame's content (a bar)
+--   opts.over   how many frame levels above the frame that edge sits (5)
+--   opts.on     false: the piece's own "background" switch is off - no box
+--   opts.alpha  the fill's alpha (1)
+-- The filled box sits AT the frame's own level, under its child frames (a
+-- frame put a level under its owner was not drawn on WoW Forever).
+-- Back under ZacUI's look in the same session (a look is reload-gated, so
+-- this is a sample drawn under another look and then under ZacUI's): the
+-- look's edge and ring go, and the flat pieces it held hidden are let go
+-- (shown again at their next paint).
+function Look.PieceOff(frame, hide)
+    if not (frame and rawget(frame, "_zLookPiece")) then return end
+    rawset(frame, "_zLookPiece", nil)
+    local e = rawget(frame, "_zui_edge")
+    if e and e.Hide then e:Hide() end
+    local r = rawget(frame, "_zLookRing")
+    if r and r.Hide then r:Hide() end
+    for _, t in ipairs(hide or {}) do
+        if type(t) == "table" and rawget(t, "_zBack") then
+            rawset(t, "_zBack", false)
+            if t.SetAlpha then t:SetAlpha(1) end
+        end
+    end
+end
+
+function Look.Piece(frame, part, opts)
+    if not frame then return false end
+    local look = Look.For(part)
+    if look.id == "zacui" then Look.PieceOff(frame, opts and opts.hide) return false end
+    opts = opts or {}
+    for _, t in ipairs(opts.hide or {}) do Back(t) end
+    local spec = look.border
+    if type(spec) ~= "table" or spec.style ~= "edge" then return true end
+    pcall(function()
+        local edge = rawget(frame, "_zui_edge")
+        if opts.on == false then
+            if edge then edge:Hide() end
+            return
+        end
+        -- (laid again only when the look, the kind or the frame's size class changes)
+        local key = look.id .. (opts.fill == false and ":e:" or ":f:") .. EdgeSizeFor(frame, spec)
+            .. ":" .. tostring(NineFor(frame, spec)) .. ":" .. tostring(opts.alpha or 1)
+        if not edge or rawget(edge, "_zPieceKey") ~= key then
+            if opts.fill == false then
+                edge = Look.AddEdge(frame, spec, 1, 1, 1, 1)
+            else
+                edge = Look.AddFill(frame, spec, look.bgSmall or look.bgTexture, opts.alpha or 1)
+            end
+            rawset(edge, "_zPieceKey", key)
+        end
+        if edge.SetFrameLevel and frame.GetFrameLevel then
+            local lv = frame:GetFrameLevel() or 1
+            edge:SetFrameLevel(opts.fill == false and (lv + (opts.over or 5)) or lv)
+        end
+        if edge.Show then edge:Show() end
+        rawset(frame, "_zLookPiece", look.id)
+    end)
+    return true
+end
+
+-- Look.TimerBar(bar, part, on): a ZacUI countdown bar (the raid timers, the
+-- flight timer; their shape: bar._zBorder pixel strips, bar.div between the
+-- icon and the fill, bar.bg the track, bar.sb the fill). The look's edge
+-- round the whole bar over the fill; the pixel edge and the divider step
+-- back; the track is the fill's own file, dark, where the look says so
+-- (look.barBacking == "same"). The fill's file already follows the look
+-- (Core_Media) unless the player chose one.
+function Look.TimerBar(bar, part, on)
+    if not bar then return false end
+    local look = Look.For(part)
+    if look.id == "zacui" then Look.PieceOff(bar, rawget(bar, "_zLookHide")) return false end
+    local hide = rawget(bar, "_zLookHide")
+    if not hide then
+        hide = {}
+        for _, t in ipairs(rawget(bar, "_zBorder") or {}) do hide[#hide + 1] = t end
+        if bar.div then hide[#hide + 1] = bar.div end
+        rawset(bar, "_zLookHide", hide)
+    end
+    -- (on == false: the bar is not drawn at all now - the flight timer as plain text)
+    Look.Piece(bar, part, { hide = hide, fill = false, on = on })
+    if look.barBacking == "same" and bar.bg and bar.sb and bar.sb.GetStatusBarTexture then
+        pcall(function()
+            local ft = bar.sb:GetStatusBarTexture()
+            local file = ft and ft.GetTexture and ft:GetTexture()
+            if file then bar.bg:SetTexture(file) end
+        end)
+    end
+    return true
+end
+
+-- Look.IconRing(host, part, opts) -> the ring texture, or nil
+--   the look's ring round a square icon frame `host` (a HUD icon): the
+--   vanilla Quickslot ring under Classic WoW UI, the client's own action
+--   button ring under Blizzard style / WoW Forever where the client has it
+--   (else the vanilla one). Drawn on opts.on (a frame above the icon's
+--   cooldown; default host), refitted when host is resized.
+--   opts.hide  ZacUI's flat pieces that step back (the black hairline)
+-- (The action bars and the consumable bar each carry an older copy of
+-- this; they move here when the private kits are folded.)
+local RING_ATLAS = "UI-HUD-ActionBar-IconFrame"
+function Look.IconRing(host, part, opts)
+    if not host then return nil end
+    local look = Look.For(part)
+    if look.id == "zacui" then Look.PieceOff(host, opts and opts.hide) return nil end
+    opts = opts or {}
+    for _, t in ipairs(opts.hide or {}) do Back(t) end
+    local ring = rawget(host, "_zLookRing")
+    local ok = pcall(function()
+        local q = look.iconRing or (LOOKS.classic and LOOKS.classic.iconRing)
+        local CT = rawget(_G, "C_Texture")
+        local modern = (not look.iconRing) and CT and CT.GetAtlasInfo and CT.GetAtlasInfo(RING_ATLAS) and true or false
+        if not ring then
+            local on = opts.on or host
+            ring = on:CreateTexture(nil, "OVERLAY", nil, 2)
+            ring._zui_own = true
+            rawset(host, "_zLookRing", ring)
+            if host.HookScript then
+                host:HookScript("OnSizeChanged", function(self)
+                    local fit = rawget(self, "_zLookRingFit")
+                    if fit then fit() end
+                end)
+            end
+        end
+        local function Fit()
+            ring:ClearAllPoints()
+            if modern then
+                ring:SetPoint("TOPLEFT", host, "TOPLEFT", -2, 2)
+                ring:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 2, -2)
+            elseif q then
+                local w = host:GetWidth()
+                if type(w) ~= "number" or w <= 0 then w = 36 end
+                ring:SetSize(w * q.scale, w * q.scale)
+                ring:SetPoint("CENTER", host, "CENTER", 0, w * q.dy)
+            end
+        end
+        if modern then ring:SetAtlas(RING_ATLAS, false)
+        elseif q then ring:SetTexture(q.normal) end
+        rawset(host, "_zLookRingFit", Fit)
+        Fit()
+        ring:Show()
+        rawset(host, "_zLookPiece", look.id)
+    end)
+    return ok and ring or nil
+end
+
+-- ============================================================
 -- PENDING CHOICE (the General card and the setup wizard stage here)
 -- ============================================================
 local pending = { global = nil, parts = nil }
@@ -1139,6 +1346,40 @@ end
 
 -- THE ONE WRITER. Called from the reload confirm (and the wizard's own
 -- reload step) only; the live tables are untouched until the reload.
+-- A GAME LOOK STARTS OUT AS THE REAL THING (2026-11-14, the styling rules,
+-- Zac 2026-11-08: "each game look should start out looking like that
+-- look's real UI by default, nothing ZacUI-only switched on"). A ZacUI
+-- replacement of a game window that ships ON and wears the look's kit when
+-- on (the combined bag) starts OFF where a FRESH install picks a game look
+-- for its part: the game's own bags open, and the Bags page's tick has
+-- ZacUI's, dressed in the look. Only in the session a fresh install (or a
+-- full reset) picks its look; an install from before keeps what it has.
+-- What this turned off is remembered, so picking ZacUI's look in that same
+-- session turns it back on; a switch the player set by hand is not touched.
+--   module -> its look part
+Look.FRESH_OFF = { inventory = "bags" }
+function Look.FreshStart(out)
+    if not (ns.freshInstall == true or ns.openSetupAfterReset == true) then return end
+    local mods = type(ZacUIDB.modules) == "table" and ZacUIDB.modules
+    if not mods then return end
+    for module, part in pairs(Look.FRESH_OFF) do
+        local id = (out.parts and out.parts[part]) or out.global
+        local did = type(ZacUIDB.lookFreshOff) == "table" and ZacUIDB.lookFreshOff[module]
+        if id ~= "zacui" then
+            -- (once: ticked back on by hand under the look, it stays on)
+            if mods[module] == true and not did then
+                mods[module] = false
+                ZacUIDB.lookFreshOff = ZacUIDB.lookFreshOff or {}
+                ZacUIDB.lookFreshOff[module] = true
+            end
+        elseif did then
+            if mods[module] == false then mods[module] = true end
+            ZacUIDB.lookFreshOff[module] = nil
+            if next(ZacUIDB.lookFreshOff) == nil then ZacUIDB.lookFreshOff = nil end
+        end
+    end
+end
+
 function Look.Commit()
     if type(ZacUIDB) ~= "table" then return false end
     local a = Live() or { global = "zacui", parts = {} }
@@ -1156,6 +1397,7 @@ function Look.Commit()
         ZacUIDB.look = out
     end
     pending.global, pending.parts = nil, nil
+    Look.FreshStart(out)
     -- a look was chosen: the first-run look popup never asks after this
     -- (account-wide bookkeeping, outside every profile)
     if type(ZacUIDB.tutorial) == "table" then ZacUIDB.tutorial.lookPicked = true end

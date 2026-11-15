@@ -135,6 +135,27 @@ function ns.SetFlavorOverride(value)
 end
 
 -- ============================================================
+-- IS BLESSING OF SALVATION IN THIS CHARACTER'S RAIDS?
+-- ============================================================
+-- (2026-11-14, Zac, starting a Horde warrior on Classic Era: "horde
+-- warriors on era dont have salv so that can be ticked off for horde
+-- warriors".) On Classic Era only the Alliance has paladins, so a Horde
+-- character never gets Salvation there: what watches for it (the warrior
+-- HUD's "Missing Salv", the buff remover's "drop it while tanking") has
+-- nothing to watch. TBC gives the Horde paladins; the other game versions
+-- are left as they were. Asked when needed, not at load (the faction is
+-- not always known that early: the race stands in for it).
+local HORDE_RACES = { Orc = true, Troll = true, Tauren = true, Scourge = true }
+function ns.SalvationHere()
+    if ns.Flavor() ~= "era" then return true end
+    local faction = UnitFactionGroup and UnitFactionGroup("player")
+    if faction == "Horde" then return false end
+    if faction == "Alliance" then return true end
+    local race = UnitRace and select(2, UnitRace("player")) or nil
+    return not HORDE_RACES[race or ""]
+end
+
+-- ============================================================
 -- THE FEATURE TABLE
 -- ============================================================
 -- One row per part and per notable feature inside a part, in the order

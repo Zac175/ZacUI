@@ -108,6 +108,11 @@ local function Quiet(x)
     if x and x.SetAlpha then x:SetAlpha(0) end
 end
 
+-- a piece of ZacUI's own steps back and STAYS back, whatever colours its
+-- paints give it after (Core_Look's Look.Back: the client keeps one alpha
+-- per region). A piece of the game's is hidden with Quiet() and never hooked.
+local Back = Look.Back
+
 -- a texture's own colours to grey (a modern bronze piece with no 2004
 -- file to stand in for it); marked for the tests
 local function Grey(t)
@@ -707,9 +712,13 @@ P.LIST = {
         -- fight over the close button, so the map is left to it while it runs
         -- (asked by the switch, not by "has run": the map may be up before
         -- the login's module pass reaches the rebuild)
+        -- (2026-11-14: under a game look that rebuild stands down -
+        -- Maps.WindowOn - and the map is dressed here like any other panel)
         skip = function()
             local m = type(ZacUIDB) == "table" and type(ZacUIDB.modules) == "table" and ZacUIDB.modules.maps
-            return m and ns.Modules and ns.Modules.maps and true or false
+            if not (m and ns.Modules and ns.Modules.maps) then return false end
+            if ns.Maps and ns.Maps.WindowOn and not ns.Maps.WindowOn() then return false end
+            return true
         end },
     { "MerchantFrame" }, { "GossipFrame" }, { "QuestFrame" },
     { "ClassTrainerFrame", lod = "Blizzard_TrainerUI" },
@@ -1090,7 +1099,7 @@ local function DialogTitle(f, look, src)
         end
         rawset(f, "_zLookTitle", fs)
     end
-    Quiet(src)
+    Back(src)
     fs:ClearAllPoints()
     fs:SetPoint("TOP", f, "TOP", 0, look.id == "classic" and -16 or -5)
     fs:SetTextColor(GOLD[1], GOLD[2], GOLD[3], 1)
@@ -1101,9 +1110,9 @@ local function DialogClose(f, look, b)
     local modern = look.id ~= "classic" and Look.AtlasOK and Look.AtlasOK(CLOSE_MODERN[1])
     local art = rawget(b, "_zLookClose")
     if not art then
-        Quiet(rawget(b, "_zA"))
-        Quiet(rawget(b, "_zFill"))
-        for _, t in ipairs(rawget(b, "_zBorder") or {}) do Quiet(t) end
+        Back(rawget(b, "_zA"))
+        Back(rawget(b, "_zFill"))
+        for _, t in ipairs(rawget(b, "_zBorder") or {}) do Back(t) end
         local n, p, h = OwnTex(b, "ARTWORK"), OwnTex(b, "ARTWORK", 1), OwnTex(b, "HIGHLIGHT")
         for _, t in ipairs({ n, p, h }) do t:SetAllPoints(b) end
         if modern then
@@ -1126,11 +1135,762 @@ local function DialogClose(f, look, b)
     else b:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5) end
 end
 
+-- ============================================================
+-- THE KIT FOR ZACUI'S OWN POPUPS (2026-11-14)
+-- ============================================================
+-- Zac, on the first ZacUI popup he met under the WoW Forever look (the map
+-- style question): "why does this popup not have the same background as the
+-- bags? and it needs to be behind the text and why did you include my zui
+-- icon thats not forever style" / "and like my popup menus that ask to
+-- reload and stuff" / "if i pick a style everything needs to be styled like
+-- that ... fucking everything ... not just some of it".
+-- What was wrong, all of it in the framework and so in every popup:
+--   * only a popup that named a look part was dressed at all; the reload
+--     question and the rest stayed ZacUI's flat style under a game look
+--   * the dress was a rim with the rock file inside it - not the window the
+--     bags wear, which is the client's own panel
+--   * the popup's "raise my children above my fill" pass (UIF_Dialogs
+--     Relevel) lifted the look's background OVER the popup's own text and
+--     title
+--   * ZacUI's mark, title icon and header hairline stayed on
+--   * its buttons and texts stayed ZacUI's
+-- Now UI.Popup dresses EVERY popup (part "windows" unless it names one),
+-- and under the modern looks the dress is the bag window's (Zacui_Bags
+-- KitChrome, the one he has looked at on Forever): the client's own
+-- PortraitFrameFlatTemplate without its portrait - its rim, its title band
+-- with the title in the game's font and gold, its red X, its panel
+-- background at the bag's 0.72 - with that background a level UNDER the
+-- popup, behind everything the popup draws. Classic WoW UI, and a client
+-- without the template, keep the dialog box (below), now also held under
+-- the text. Buttons are the stock panel button and texts the game's font
+-- (Kit.Button / Kit.Font, the bag kit's rules and numbers).
+--
+-- NOT CALLED SINCE 2026-11-15. Zac, after seeing it: "even in a different
+-- styling keep the zui popus main menu etc the same" / "go back to how it
+-- was before I told you to style zui like the style picked ingame".
+-- ZacUI's own interface is ZacUI's style under every look: Look.Dress
+-- returns for the "dialog" and "box" roles and nothing in the framework
+-- asks for them, so no popup, window or small panel is ever a host and
+-- none of the blocks below dresses anything. The kit stays here, whole,
+-- for the day a game-facing window needs it; it is not to be pointed at
+-- ZacUI's own interface again without his word.
+local Kit = {}
+Look.Kit = Kit
+Kit.BG_ALPHA = 0.72
+Kit.TEMPLATE = "PortraitFrameFlatTemplate"
+Kit.BORDER = "ButtonFrameTemplateNoPortrait"
+
+-- a text in the look's font: the game's face, outlined (Zac keeps the black
+-- edge on text), at `size`
+function Kit.Font(fs, size)
+    if not (fs and fs.SetFont) then return end
+    local face = ns.GAME_FONT or STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+    local ok, set = pcall(fs.SetFont, fs, face, size, "OUTLINE")
+    if not (ok and set) then pcall(fs.SetFont, fs, "Fonts\\FRIZQT__.TTF", size, "OUTLINE") end
+    if fs.SetShadowOffset then fs:SetShadowOffset(0, 0) end
+    rawset(fs, "_zKitFont", size)
+end
+
+-- ZacUI's flat fill and pixel edge on a widget step back
+function Kit.HideFlat(f)
+    if not f then return end
+    Back(rawget(f, "_zFill"))
+    for _, t in ipairs(rawget(f, "_zBorder") or {}) do Back(t) end
+end
+
+-- a label of the kit's own over a ZacUI one (which steps back): the game's
+-- font, never re-dressed by ZacUI's font passes; follows the ZacUI label
+function Kit.Label(host, src, size, justify)
+    local fs = host:CreateFontString(nil, "OVERLAY")
+    fs._zui_own = true
+    Kit.Font(fs, size)
+    if justify and fs.SetJustifyH then fs:SetJustifyH(justify) end
+    if src then
+        fs:SetText(src.GetText and src:GetText() or "")
+        -- (held back: ZacUI's paints colour the label again and again)
+        Back(src)
+        if hooksecurefunc and src.SetText then
+            hooksecurefunc(src, "SetText", function(_, t) fs:SetText(t) end)
+        end
+    end
+    return fs
+end
+
+-- a ZacUI button as the stock panel button: the three-slice up / down art,
+-- the highlight sheet (ADD), the label gold, white under the mouse, grey
+-- while disabled
+local function PanelSlices(b)
+    local p = { OwnTex(b, "BACKGROUND", 1), OwnTex(b, "BACKGROUND", 1), OwnTex(b, "BACKGROUND", 1) }
+    return p
+end
+local function PanelPlace(b, p, cap)
+    p[1]:ClearAllPoints() p[2]:ClearAllPoints() p[3]:ClearAllPoints()
+    p[1]:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+    p[1]:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 0, 0)
+    p[1]:SetWidth(cap)
+    p[3]:SetPoint("TOPRIGHT", b, "TOPRIGHT", 0, 0)
+    p[3]:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, 0)
+    p[3]:SetWidth(cap)
+    p[2]:SetPoint("TOPLEFT", p[1], "TOPRIGHT", 0, 0)
+    p[2]:SetPoint("BOTTOMRIGHT", p[3], "BOTTOMLEFT", 0, 0)
+end
+local function PanelFile(p, file)
+    FileArt(p[1], file, BTN_TC[1], BTN_TC[2], 0, BTN_TC[5])
+    FileArt(p[2], file, BTN_TC[2], BTN_TC[3], 0, BTN_TC[5])
+    FileArt(p[3], file, BTN_TC[3], BTN_TC[4], 0, BTN_TC[5])
+end
+function Kit.Button(b)
+    if not b or rawget(b, "_zKitBtn") then return b end
+    rawset(b, "_zKitBtn", true)
+    Kit.HideFlat(b)
+    -- ZacUI's own hover wash and pushed shade step back
+    for _, r in ipairs({ b:GetRegions() }) do
+        if r ~= rawget(b, "_zFill") and r.IsObjectType and r:IsObjectType("Texture") and rawget(r, "_zui_own") then Back(r) end
+    end
+    local h = b:GetHeight()
+    if type(h) ~= "number" or h <= 0 then h = 22 end
+    local up = PanelSlices(b)
+    PanelPlace(b, up, math.floor(12 * h / 22 + 0.5))
+    PanelFile(up, BTN_UP)
+    local hi = OwnTex(b, "HIGHLIGHT")
+    hi:SetAllPoints(b)
+    FileArt(hi, BTN_HI, 0, BTN_TC[4], 0, BTN_TC[5])
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    local label = Kit.Label(b, rawget(b, "_zText"), h >= 20 and 12 or 10, "CENTER")
+    label:SetPoint("CENTER", b, "CENTER", 0, 0)
+    rawset(b, "_zKitLabel", label)
+    -- (a button that is a switch and is on - UI.Button's SetActive, the
+    -- Edit Mode bar's Grid and Snap - is lit and white, as a picked stock
+    -- button is: the highlight held on it)
+    local function Tint(self, hot)
+        local on = rawget(self, "_zActive") and true or false
+        if rawget(self, "_zDisabled") or (self.IsEnabled and not self:IsEnabled()) then label:SetTextColor(0.5, 0.5, 0.5, 1)
+        elseif hot or on then label:SetTextColor(1, 1, 1, 1)
+        else label:SetTextColor(GOLD[1], GOLD[2], GOLD[3], 1) end
+        if on then
+            if self.LockHighlight then self:LockHighlight() end
+        elseif self.UnlockHighlight then
+            self:UnlockHighlight()
+        end
+    end
+    -- (under the mouse: remembered, so a paint that lands while the mouse
+    -- is on it - ZacUI's hover fade paints every frame - leaves it white)
+    b:HookScript("OnEnter", function(self) rawset(self, "_zKitHot", true) Tint(self, true) end)
+    b:HookScript("OnLeave", function(self) rawset(self, "_zKitHot", nil) Tint(self, false) PanelFile(up, BTN_UP) end)
+    b:HookScript("OnHide", function(self) rawset(self, "_zKitHot", nil) end)
+    b:HookScript("OnMouseDown", function(self) if not self.IsEnabled or self:IsEnabled() then PanelFile(up, BTN_DOWN) end end)
+    b:HookScript("OnMouseUp", function() PanelFile(up, BTN_UP) end)
+    -- ZacUI's own paint (the accent / destructive kinds, the theme) runs
+    -- first and is then put back under the kit. A caller that gives the
+    -- button a paint of its own AFTER it was made (a popup's button does:
+    -- UIF_Dialogs' PopupButton) wraps it with b._zKitWrap, so the kit's
+    -- label still follows the button's state.
+    local function After(self)
+        Kit.HideFlat(self)
+        Tint(self, rawget(self, "_zKitHot") and true or false)
+    end
+    local function Wrap(paint)
+        return function(self, ...)
+            if paint then paint(self, ...) end
+            After(self)
+        end
+    end
+    rawset(b, "_zKitWrap", Wrap)
+    b._zPaint = Wrap(rawget(b, "_zPaint"))
+    -- (and its state setters, whatever paint they end in: lit while it is
+    -- the picked one, grey while it is disabled)
+    if hooksecurefunc then
+        for _, m in ipairs({ "SetActive", "SetDisabled", "Enable", "Disable", "SetEnabled" }) do
+            if type(b[m]) == "function" then pcall(hooksecurefunc, b, m, After) end
+        end
+    end
+    Tint(b, false)
+    return b
+end
+
+-- an atlas the client knows, asked once per name (the bag kit's rule: an
+-- atlas is used only when the client has it, the file cut otherwise)
+local atlasOK = {}
+local function AtlasOK(name)
+    local v = atlasOK[name]
+    if v == nil then
+        v = false
+        local get = C_Texture and C_Texture.GetAtlasInfo
+        if get and type(name) == "string" then
+            local ok, info = pcall(get, name)
+            v = (ok and type(info) == "table") and true or false
+        end
+        atlasOK[name] = v
+    end
+    return v
+end
+local function AtlasArt(t, name)
+    if not (AtlasOK(name) and t.SetAtlas) then return false end
+    if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
+    t:SetAtlas(name)
+    return true
+end
+
+-- A ZACUI CHECKBOX AS THE STOCK ONE (2026-11-14): the box, its pushed
+-- state, the highlight (ADD), the gold tick, grey while disabled; the
+-- label in the game's font. Blizzard's own names (every client's
+-- UICheckButtonTemplate): Interface\Buttons\UI-CheckBox-Up / -Down /
+-- -Highlight / -Check / -Check-Disabled, 32 px sheets whose box is 22
+-- across in the middle - drawn so that box lands on ZacUI's box, whatever
+-- its size (14 in a window, 18 in a popup).
+local CHK_UP   = "Interface\\Buttons\\UI-CheckBox-Up"
+local CHK_DOWN = "Interface\\Buttons\\UI-CheckBox-Down"
+local CHK_HI   = "Interface\\Buttons\\UI-CheckBox-Highlight"
+local CHK_TICK = "Interface\\Buttons\\UI-CheckBox-Check"
+local CHK_TICK_OFF = "Interface\\Buttons\\UI-CheckBox-Check-Disabled"
+function Kit.Check(h)
+    if not h or rawget(h, "_zKitChk") then return h end
+    local tick = rawget(h, "_zCheck")
+    local box = tick and tick.GetParent and tick:GetParent()
+    if not box then return h end
+    rawset(h, "_zKitChk", true)
+    Kit.HideFlat(h)
+    local ck = box:GetHeight()
+    if type(ck) ~= "number" or ck <= 0 then ck = 14 end
+    local sz = math.floor(ck * 32 / 22 + 0.5)
+    local up = OwnTex(box, "BACKGROUND", 1)
+    up:SetSize(sz, sz)
+    up:SetPoint("CENTER", box, "CENTER", 0, 0)
+    FileArt(up, CHK_UP)
+    local hi = OwnTex(h, "HIGHLIGHT")
+    hi:SetSize(sz, sz)
+    hi:SetPoint("CENTER", box, "CENTER", 0, 0)
+    FileArt(hi, CHK_HI)
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    tick:ClearAllPoints()
+    tick:SetPoint("CENTER", box, "CENTER", 0, 0)
+    tick:SetSize(sz, sz)
+    local label = rawget(h, "_zText")
+    if label then
+        Kit.Font(label, ck >= 18 and 12 or 11)
+        -- (the label is another face now: the row is as wide as it reads)
+        if h._zUnfit then pcall(h._zUnfit, h) end
+        if h._zPoolRefit then pcall(h._zPoolRefit, h) end
+    end
+    local function Off(self) return rawget(self, "_zOff") or rawget(self, "_zDisabled") end
+    local function Tint(self)
+        Kit.HideFlat(self)
+        FileArt(tick, Off(self) and CHK_TICK_OFF or CHK_TICK)
+        tick:SetVertexColor(1, 1, 1, 1)
+        if label then
+            if Off(self) then label:SetTextColor(0.5, 0.5, 0.5, 1) else label:SetTextColor(1, 1, 1, 1) end
+        end
+    end
+    h:HookScript("OnMouseDown", function(self) if not Off(self) then FileArt(up, CHK_DOWN) end end)
+    h:HookScript("OnMouseUp", function() FileArt(up, CHK_UP) end)
+    h:HookScript("OnLeave", function() FileArt(up, CHK_UP) end)
+    local own = rawget(h, "_zPaint")
+    h._zPaint = function(self)
+        if own then own(self) end
+        Tint(self)
+    end
+    Tint(h)
+    return h
+end
+
+-- A ZACUI EDIT BOX AS THE STOCK ONE (2026-11-14): the bag kit's search box
+-- (Zacui_Bags KitSearch, the one Zac has looked at on Forever), shared -
+-- the InputBox / SearchBox border cut (common-search-border-left / -middle
+-- / -right, 8 | middle | 8 on 20; without the atlases the old
+-- Interface\Common\Common-Input-Border cut), the text white in the
+-- game's font, the hint grey. A box with a hint is a filter: it gets the
+-- magnifying glass and the small clear cross, as the game's search boxes.
+local FIELD_ATLAS = { "common-search-border-left", "common-search-border-middle", "common-search-border-right" }
+local FIELD_FILE = "Interface\\Common\\Common-Input-Border"
+local FIELD_TC = { 0, 0.0625, 0.9375, 1, 0.625 }
+local FIELD_GLASS = "common-search-magnifyingglass"
+local FIELD_CLEAR = "common-search-clearbutton"
+function Kit.Field(host)
+    if not host or rawget(host, "_zKitBtn") then return host end
+    rawset(host, "_zKitBtn", true)
+    Kit.HideFlat(host)
+    local h = host:GetHeight()
+    if type(h) ~= "number" or h <= 0 then h = 20 end
+    local p = PanelSlices(host)
+    PanelPlace(host, p, math.floor(8 * h / 20 + 0.5))
+    if not (AtlasArt(p[1], FIELD_ATLAS[1]) and AtlasArt(p[2], FIELD_ATLAS[2]) and AtlasArt(p[3], FIELD_ATLAS[3])) then
+        FileArt(p[1], FIELD_FILE, FIELD_TC[1], FIELD_TC[2], 0, FIELD_TC[5])
+        FileArt(p[2], FIELD_FILE, FIELD_TC[2], FIELD_TC[3], 0, FIELD_TC[5])
+        FileArt(p[3], FIELD_FILE, FIELD_TC[3], FIELD_TC[4], 0, FIELD_TC[5])
+    end
+    local eb = rawget(host, "editBox") or host.editBox
+    local x = rawget(host, "clearButton") or host.clearButton
+    local inset
+    if x then
+        local glass = OwnTex(host, "OVERLAY")
+        if AtlasArt(glass, FIELD_GLASS) then
+            glass:SetSize(10, 10)
+            glass:SetPoint("LEFT", host, "LEFT", 6, -1)
+            glass:SetVertexColor(0.6, 0.6, 0.6, 1)
+            inset = 19
+        else
+            glass:Hide()
+        end
+        if AtlasOK(FIELD_CLEAR) then
+            if rawget(x, "_zA") then x._zA:SetAlpha(0) end
+            local t = OwnTex(x, "ARTWORK")
+            t:SetSize(10, 10)
+            t:SetPoint("CENTER", x, "CENTER", 0, 0)
+            AtlasArt(t, FIELD_CLEAR)
+            t:SetAlpha(0.5)
+            x:HookScript("OnEnter", function() t:SetAlpha(1) end)
+            x:HookScript("OnLeave", function() t:SetAlpha(0.5) end)
+        end
+    end
+    if eb then
+        if inset then eb:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -2) end
+        Kit.Font(eb, h >= 26 and 12 or 10)
+        eb:SetTextColor(1, 1, 1, 1)
+    end
+    -- the hint follows the text's start
+    for _, r in ipairs({ host:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("FontString") then
+            if inset then r:SetPoint("LEFT", host, "LEFT", inset + 1, 0) end
+            Kit.Font(r, h >= 26 and 12 or 10)
+            r:SetTextColor(0.5, 0.5, 0.5, 1)
+            r._zPaint = function(self) self:SetTextColor(0.5, 0.5, 0.5, 1) end
+        end
+    end
+    -- ZacUI's own paint (the focus edge) runs first and is put back under
+    -- the kit
+    local own = rawget(host, "_zPaint")
+    host._zPaint = function(self)
+        if own then own(self) end
+        Kit.HideFlat(self)
+        if eb then eb:SetTextColor(1, 1, 1, 1) end
+    end
+    return host
+end
+
+-- A ZACUI CARD (UI.Card, a titled group in a window) AS THE LOOK'S SMALL
+-- BOX (2026-11-14): the bag kit's small box (Zacui_Bags KitBox) - the
+-- tooltip edge and fill of Classic, the client's tooltip slice on the
+-- modern looks (Core_Look's own primitive) - under the card's content;
+-- ZacUI's fill, pixel edge and accent stripe step back, the title is gold.
+function Kit.Card(card, part)
+    if not card or rawget(card, "_zKitBtn") then return card end
+    local lk = Look.For(part or "windows")
+    if not (lk and lk.id ~= "zacui" and Look.AddFill and lk.border) then return card end
+    rawset(card, "_zKitBtn", true)
+    local function Settle(self)
+        Kit.HideFlat(self)
+        Back(rawget(self, "_zAccent"))
+        local t = rawget(self, "_zTitle")
+        if t and t.SetTextColor then t:SetTextColor(GOLD[1], GOLD[2], GOLD[3], 1) end
+    end
+    local ok, edge = pcall(Look.AddFill, card, lk.border, lk.bgSmall or lk.bgTexture, 1)
+    if ok and type(edge) == "table" and edge.SetFrameLevel and card.GetFrameLevel then
+        edge:SetFrameLevel(math.max(0, (card:GetFrameLevel() or 1) - 1))
+    end
+    local own = rawget(card, "_zPaint")
+    card._zPaint = function(self)
+        if own then own(self) end
+        Settle(self)
+    end
+    Settle(card)
+    return card
+end
+
+-- A ZACUI SCROLL BAR AS THE STOCK ONE (2026-11-15): the game's scroll knob
+-- (the look's scrollThumb; Interface\\Buttons\\UI-ScrollBar-Knob, the
+-- 18 x 24 cut every UIPanelScrollBar uses), one size whatever the list's
+-- length, no flat rail and no accent under the mouse. UI.ScrollArea reads
+-- bar._zKitKnob and leaves the knob's size and colour alone.
+local KNOB = "Interface\\Buttons\\UI-ScrollBar-Knob"
+local KNOB_TC = { 0.20, 0.80, 0.125, 0.875 }
+function Kit.Scroll(bar, part)
+    if not bar or rawget(bar, "_zKitKnob") then return bar end
+    local thumb, track = rawget(bar, "_zThumb"), rawget(bar, "_zTrack")
+    if not thumb then return bar end
+    rawset(bar, "_zKitKnob", true)
+    if track then
+        Kit.HideFlat(track)
+        local own = rawget(track, "_zPaint")
+        track._zPaint = function(self)
+            if own then own(self) end
+            Kit.HideFlat(self)
+        end
+    end
+    local lk = Look.For(part or "windows")
+    local file = (lk and type(lk.scrollThumb) == "string" and lk.scrollThumb ~= "") and lk.scrollThumb or KNOB
+    FileArt(thumb, file, KNOB_TC[1], KNOB_TC[2], KNOB_TC[3], KNOB_TC[4])
+    thumb:SetSize(18, 24)
+    thumb:SetVertexColor(1, 1, 1, 1)
+    return bar
+end
+
+-- A ZACUI SLIDER AS THE STOCK ONE (2026-11-15): the game's slider groove
+-- (every client's OptionsSliderTemplate: Interface\\Buttons\\
+-- UI-SliderBar-Background tiled 8 in an 8 px UI-SliderBar-Border edge,
+-- insets 3 / 3 / 6 / 6, 17 high) and its thumb (UI-SliderBar-Button-
+-- Horizontal, 32 x 32); ZacUI's pill track, its accent fill and its disc
+-- step back; the value box of the settings-size slider is the stock input
+-- box. UI.Slider hands its parts over as host._zSl.
+local SL_BG = "Interface\\Buttons\\UI-SliderBar-Background"
+local SL_EDGE = "Interface\\Buttons\\UI-SliderBar-Border"
+local SL_THUMB = "Interface\\Buttons\\UI-SliderBar-Button-Horizontal"
+function Kit.Slider(host)
+    if not host or rawget(host, "_zKitBtn") then return host end
+    local p = rawget(host, "_zSl")
+    if type(p) ~= "table" or not (p.thumb and p.track) then return host end
+    rawset(host, "_zKitBtn", true)
+    local function Settle()
+        if p.trackPill then p.trackPill:Show(false) end
+        if p.fillPill then p.fillPill:Show(false) end
+        if p.block then p.block:Hide() end
+        Kit.HideFlat(p.track)
+        if p.ring then Kit.HideFlat(p.ring) end
+        p.thumb:SetVertexColor(1, 1, 1, 1)
+    end
+    -- the groove: a frame of its own under the slider, 17 high on the track
+    local okG, groove = pcall(CreateFrame, "Frame", nil, p.track, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    if okG and groove and groove.SetBackdrop then
+        groove._zui_own = true
+        groove:SetPoint("LEFT", p.track, "LEFT", -2, 0)
+        groove:SetPoint("RIGHT", p.track, "RIGHT", 2, 0)
+        groove:SetHeight(17)
+        groove:SetFrameLevel(math.max(0, (p.track:GetFrameLevel() or 1)))
+        pcall(groove.SetBackdrop, groove, { bgFile = SL_BG, edgeFile = SL_EDGE, tile = true, tileSize = 8, edgeSize = 8,
+            insets = { left = 3, right = 3, top = 6, bottom = 6 } })
+        rawset(host, "_zKitGroove", groove)
+    end
+    FileArt(p.thumb, SL_THUMB)
+    p.thumb:SetSize(32, 32)
+    if p.box and p.value then
+        p.box.editBox = p.value
+        Kit.Field(p.box)
+    end
+    local own = rawget(host, "_zPaint")
+    host._zPaint = function(self)
+        if own then own(self) end
+        Settle()
+        if p.box then Kit.HideFlat(p.box) end
+    end
+    Settle()
+    return host
+end
+
+-- A ZACUI RESIZE GRIP AS THE STOCK ONE (2026-11-15): the chat window's size
+-- grabber (Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up / -Highlight /
+-- -Down, every client's), in place of ZacUI's three-line grip.
+local GRIP_UP = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up"
+local GRIP_HI = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight"
+local GRIP_DOWN = "Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down"
+function Kit.Grip(grip)
+    if not grip or rawget(grip, "_zKitBtn") then return grip end
+    rawset(grip, "_zKitBtn", true)
+    -- ZacUI's three-line art is put away (its lit / held animation finds
+    -- no art and does nothing); kept on the grip for a return to ZacUI's
+    -- look at the next reload
+    local art = grip.art
+    if art then
+        if art.Hide then art:Hide() end
+        Back(art)
+        rawset(grip, "_zArtKept", art)
+        grip.art = nil
+    end
+    local up = OwnTex(grip, "ARTWORK")
+    up:SetAllPoints(grip)
+    FileArt(up, GRIP_UP)
+    local hi = OwnTex(grip, "HIGHLIGHT")
+    hi:SetAllPoints(grip)
+    FileArt(hi, GRIP_HI)
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    grip:HookScript("OnMouseDown", function() FileArt(up, GRIP_DOWN) end)
+    grip:HookScript("OnMouseUp", function() FileArt(up, GRIP_UP) end)
+    grip:HookScript("OnHide", function() FileArt(up, GRIP_UP) end)
+    return grip
+end
+
+-- EVERYTHING ALREADY BUILT INSIDE A FRAME THAT HAS JUST BEEN DRESSED
+-- (2026-11-15). Each ZacUI building block says what it is (rawget "_zIs":
+-- button, check, field, card, slider, scroll, grip, text): a window that
+-- was put together by hand, or filled before its dress ran, is walked
+-- once and every block in it gets the same kit a block made afterwards
+-- asks for itself (Kit.Host). So dressing a window is one call wherever
+-- it was built.
+-- (a multi-line text box: the look's small box round it, the game's font
+-- in it - the input border art is one line high and does not stretch)
+function Kit.TextBox(host, part)
+    if not host or rawget(host, "_zKitBtn") then return host end
+    Kit.Card(host, part)
+    local eb = rawget(host, "editBox") or host.editBox
+    if eb and not rawget(eb, "_zKitFont") and eb.GetFont then
+        local _, at = eb:GetFont()
+        Kit.Font(eb, type(at) == "number" and at > 0 and at or 12)
+    end
+    return host
+end
+local ADOPT = {
+    textbox = function(o, part) Kit.TextBox(o, part) end,
+    button = function(o) Kit.Button(o) end,
+    check = function(o) Kit.Check(o) end,
+    field = function(o) Kit.Field(o) end,
+    card = function(o, part) Kit.Card(o, part) end,
+    slider = function(o) Kit.Slider(o) end,
+    scroll = function(o, part) Kit.Scroll(o, part) end,
+    grip = function(o) Kit.Grip(o) end,
+}
+function Kit.Adopt(root, part)
+    if not root then return end
+    local function Walk(f, d)
+        if d > 14 or rawget(f, "_zLookOver") then return end
+        local fn = ADOPT[rawget(f, "_zIs") or false]
+        if fn and rawget(f, "_zNoLook") ~= true then pcall(fn, f, part) end
+        if f.GetRegions then
+            for _, r in ipairs({ f:GetRegions() }) do
+                if rawget(r, "_zIs") == "text" and not rawget(r, "_zKitFont") and rawget(r, "_zNoLook") ~= true and r.GetFont then
+                    local _, at = r:GetFont()
+                    Kit.Font(r, type(at) == "number" and at > 0 and at or 12)
+                end
+            end
+        end
+        if f.GetChildren then
+            for _, c in ipairs({ f:GetChildren() }) do Walk(c, d + 1) end
+        end
+    end
+    Walk(root, 0)
+end
+
+-- the window or popup a frame sits in when that one wears a game look
+-- through this kit (nil otherwise): what a building block asks at creation
+function Kit.Host(frame)
+    if not Kit.live then return nil end
+    local n = 0
+    while frame and n < 16 do
+        if rawget(frame, "_zLookAuto") then return frame end
+        frame = frame.GetParent and frame:GetParent() or nil
+        n = n + 1
+    end
+    return nil
+end
+
+-- the client's own panel on a ZacUI popup (the modern looks). nil when the
+-- client cannot build it whole: the caller keeps the dialog box.
+local tplOK
+local function TemplateOK()
+    if tplOK == nil then
+        tplOK = false
+        local X = C_XMLUtil
+        if X and X.GetTemplateInfo then
+            local ok, info = pcall(X.GetTemplateInfo, Kit.TEMPLATE)
+            tplOK = (ok and info ~= nil) and true or false
+        end
+    end
+    return tplOK
+end
+Kit.TemplateOK = TemplateOK
+
+function Kit.Chrome(f, parts)
+    local c = rawget(f, "_zKitChrome")
+    if c then return c end
+    if c == false or not TemplateOK() then return nil end
+    local ok, made = pcall(CreateFrame, "Frame", nil, f, Kit.TEMPLATE)
+    c = ok and made or nil
+    local tc = c and c.TitleContainer
+    if not (c and c.NineSlice and tc and tc.TitleText and c.CloseButton) then
+        if c and c.Hide then c:Hide() end
+        rawset(f, "_zKitChrome", false)
+        return nil
+    end
+    rawset(f, "_zKitChrome", c)
+    rawset(c, "_zLookOver", true)           -- (the popup's relevel pass leaves it where this puts it)
+    c:SetAllPoints(f)
+    c:EnableMouse(false)
+    -- no portrait: the rim without its ring, the title across the band
+    if c.SetBorder then pcall(c.SetBorder, c, Kit.BORDER) end
+    if c.SetPortraitShown then pcall(c.SetPortraitShown, c, false) end
+    local pc = rawget(c, "PortraitContainer") or c.PortraitContainer
+    if pc and pc.Hide then pc:Hide() end
+    if c.SetTitleOffsets then pcall(c.SetTitleOffsets, c, 24, -24) end
+    local title = tc.TitleText
+    Kit.Font(title, 12)
+    title:SetTextColor(GOLD[1], GOLD[2], GOLD[3], 1)
+    local src = parts and parts.title
+    if src then
+        title:SetText(src.GetText and src:GetText() or "")
+        if hooksecurefunc and src.SetText then
+            hooksecurefunc(src, "SetText", function(_, t) title:SetText(t) end)
+        end
+        Back(src)
+    end
+    c.CloseButton:SetScript("OnClick", function()
+        if ns.UI and ns.UI.CloseWindow then ns.UI.CloseWindow(f) else f:Hide() end
+    end)
+    c.CloseButton:Show()
+    local zclose = parts and parts.close
+    if zclose then
+        -- (a popup made without a close keeps none)
+        if zclose.IsShown and not zclose:IsShown() then c.CloseButton:Hide() end
+        Back(zclose)
+        if zclose.EnableMouse then zclose:EnableMouse(false) end
+    end
+    -- ZacUI's own window steps back: the fill, the edge, the title band
+    -- (still the drag handle, drawn by nothing)
+    Kit.HideFlat(f)
+    local bar = rawget(f, "titleBar")
+    if bar then
+        Back(rawget(bar, "_zFill"))
+        Back(rawget(bar, "_zArt"))
+        Back(rawget(bar, "_zFlatRule"))
+    end
+    -- THE BACKGROUND, ON THE POPUP'S OWN BACKGROUND LAYER (2026-11-15).
+    -- The template brings its background as a frame of its own (Bg:
+    -- FlatPanelBackgroundTemplate - two corner pieces, a bottom edge and
+    -- the top section, in the panel's colour). Until today that frame was
+    -- put a frame level UNDER the popup so the popup's text drew over it;
+    -- on WoW Forever it then drew nowhere (Zac: "no background" - the
+    -- world showed through the popup). A frame's own layers are the one
+    -- order the client always keeps: the pieces move onto the popup
+    -- itself, at the very bottom of its BACKGROUND layer, where ZacUI's
+    -- own fill is drawn under ZacUI's look - behind every text and every
+    -- child of the popup, whatever level any frame is at. Each keeps the
+    -- anchors the template gave it (said again by name, so they hold
+    -- after the move) and is the bag window's 0.72 of what it was.
+    local function Ground()
+        if rawget(f, "_zKitGround") ~= nil then return rawget(f, "_zKitGround") end
+        local bg = rawget(c, "Bg") or c.Bg
+        if not (type(bg) == "table" and bg.GetRegions) then rawset(f, "_zKitGround", false) return false end
+        local moved = {}
+        for _, r in ipairs({ bg:GetRegions() }) do
+            if r.SetParent and r.SetDrawLayer and r.GetNumPoints then
+                local pts = {}
+                for i = 1, r:GetNumPoints() do
+                    local point, rel, relPoint, x, y = r:GetPoint(i)
+                    pts[#pts + 1] = { point, rel or bg, relPoint or point, x or 0, y or 0 }
+                end
+                r:SetParent(f)
+                if #pts > 0 then
+                    r:ClearAllPoints()
+                    for _, q in ipairs(pts) do r:SetPoint(q[1], q[2], q[3], q[4], q[5]) end
+                end
+                r:SetDrawLayer("BACKGROUND", -8)
+                local a = r.GetAlpha and r:GetAlpha()
+                r:SetAlpha((type(a) == "number" and a or 1) * Kit.BG_ALPHA)
+                moved[#moved + 1] = r
+            end
+        end
+        if #moved == 0 then moved = false end
+        rawset(f, "_zKitGround", moved)
+        return moved
+    end
+    local okG, ground = pcall(Ground)
+    if not okG then ground = false rawset(f, "_zKitGround", false) end
+    -- THE LEVELS: the rim, the title and the X over the popup (they sit on
+    -- its edges and take the click), where the template itself keeps them
+    -- from a base level: the rim at +500, the title and the X at +510.
+    -- (Until today the X was put at +40: UNDER the rim, whose corner then
+    -- covered it - the popup had no X.) The base stays low enough for the
+    -- template's own sum (it refuses a level of 10000 or more).
+    local function Levels()
+        local lv = f:GetFrameLevel() or 1
+        local base = math.min(lv + 1, 9400)
+        pcall(function()
+            if c.SetFrameLevelsFromBaseLevel then c:SetFrameLevelsFromBaseLevel(base) end
+            c:SetFrameLevel(base)
+        end)
+        -- (the background's frame is empty now; where its pieces could not
+        -- be moved it sits at the popup's own level, as the bag's does)
+        pcall(function()
+            local bg = rawget(c, "Bg") or c.Bg
+            if not bg then return end
+            if bg.SetFixedFrameLevel then bg:SetFixedFrameLevel(false) end
+            bg:SetFrameLevel(lv)
+            if not ground then bg:SetAlpha(Kit.BG_ALPHA) end
+        end)
+    end
+    rawset(f, "_zLookLevels", Levels)
+    Levels()
+    c:HookScript("OnShow", Levels)
+    return c
+end
+
 Look.dressers.dialog = function(f, look, part)
-    local window = Look.dressers.window
-    if window then window(f, look, part) end
     local parts = rawget(f, "_zDialogParts")
-    if type(parts) ~= "table" then return end
-    if parts.title then DialogTitle(f, look, parts.title) end
+    if type(parts) ~= "table" then parts = {} end
+    -- ZacUI's own marks are not the look's: the title mark (hidden as
+    -- well as cleared: it is an animated one) and the header hairline. A
+    -- popup's own picture (its subject) stays.
+    if parts.mark then
+        if parts.mark.Hide then parts.mark:Hide() end
+        Back(parts.mark)
+    end
+    Back(parts.rule)
+    -- the building blocks made inside it from now on ask the look
+    -- themselves (UI.Button: Kit.Host)
+    rawset(f, "_zLookAuto", true)
+    rawset(f, "_zLookPart", part or "windows")
+    Kit.live = true
+    local chrome = (look.id ~= "classic") and Kit.Chrome(f, parts) or nil
+    if not chrome then
+        local window = Look.dressers.window
+        if window then window(f, look, part) end
+        -- (the dialog box sits under the popup's own text: the popup's
+        -- relevel pass must not lift it)
+        local edge = rawget(f, "_zui_edge") or rawget(f, "_zLookEdge")
+        if edge then rawset(edge, "_zLookUnder", true) end
+        if parts.title then DialogTitle(f, look, parts.title) end
+        if parts.close then DialogClose(f, look, parts.close) end
+    end
+    for _, b in ipairs(rawget(f, "buttons") or {}) do Kit.Button(b) end
+    for _, fs in ipairs(rawget(f, "_zKitTexts") or {}) do Kit.Font(fs, rawget(fs, "_zKitSize") or 12) end
+    -- whatever was built inside it before this ran
+    Kit.Adopt(f, part or "windows")
+end
+
+-- A SMALL ZACUI PANEL THAT IS NOT A WINDOW (2026-11-15): a callout, a
+-- strip along the screen's edge, a tool bar - the look's small box (the
+-- tooltip edge and fill of Classic, the client's tooltip slice on the
+-- modern looks: the box round the bag's gold list), under the panel's own
+-- content; ZacUI's fill, pixel edge and accent marks step back, its close
+-- is the look's, an arrow or pointer it carries turns the look's gold,
+-- and everything in it - made before or after - is the look's.
+--   frame._zDialogParts = { close = button, marks = { textures to hide },
+--                           pointers = { textures to turn gold } }
+--   Look.Dress(frame, "box", part)
+Look.dressers.box = function(f, look, part)
+    local parts = rawget(f, "_zDialogParts")
+    if type(parts) ~= "table" then parts = {} end
+    local function Settle(self)
+        Kit.HideFlat(self)
+        for _, t in ipairs(rawget(self, "_zEdges") or {}) do Back(t) end
+        -- (a panel made with the older backdrop helper, ns.SkinBackdrop)
+        local cbg = rawget(self, "_zui_cbg")
+        if cbg and cbg ~= rawget(self, "_zui_edge") then Back(cbg) end
+        local strips = rawget(self, "_zui_borderTex")
+        if strips and not strips._zEdge then for _, t in ipairs(strips) do Back(t) end end
+        for _, t in ipairs(parts.marks or {}) do Back(t) end
+        for _, t in ipairs(parts.texts or {}) do
+            if not rawget(t, "_zKitFont") and t.GetFont then
+                local _, at = t:GetFont()
+                Kit.Font(t, type(at) == "number" and at > 0 and at or 12)
+            end
+        end
+        for _, t in ipairs(parts.pointers or {}) do
+            if t.SetVertexColor then t:SetVertexColor(GOLD[1], GOLD[2], GOLD[3], 1) end
+        end
+    end
+    if Look.AddFill and look.border then
+        local ok, edge = pcall(Look.AddFill, f, look.border, look.bgSmall or look.bgTexture, 1)
+        if ok and type(edge) == "table" and edge.SetFrameLevel and f.GetFrameLevel then
+            edge:SetFrameLevel(math.max(0, (f:GetFrameLevel() or 1) - 1))
+            rawset(edge, "_zLookUnder", true)
+        end
+    end
     if parts.close then DialogClose(f, look, parts.close) end
+    local own = rawget(f, "_zPaint")
+    f._zPaint = function(self, ...)
+        if own then own(self, ...) end
+        Settle(self)
+    end
+    Settle(f)
+    rawset(f, "_zLookAuto", true)
+    rawset(f, "_zLookPart", part or "windows")
+    Kit.live = true
+    Kit.Adopt(f, part or "windows")
 end

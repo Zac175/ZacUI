@@ -1,0 +1,2970 @@
+-- Bags_Frame - ZacUI's combined inventory window.
+-- Part of ZacUI; load order is set by the TOC.
+--
+-- THE ONE STRUCTURAL CONSTRAINT worth understanding before editing this
+-- file: Blizzard's container item button template works out WHICH item it
+-- is looking at from two places -
+--     the slot   = button:GetID()
+--     the bag    = button:GetParent():GetID()
+-- That is baked into the template's own OnClick, OnEnter and drag
+-- handlers, which is exactly why we reuse the template instead of writing
+-- our own - it gives us correct click-to-pick-up, right-click-to-use,
+-- split-stack, tooltips and drag-and-drop for free, including all the
+-- special cases (soulbound prompts, quest items, keyring).
+--
+-- The consequence is that a button cannot simply be moved between bags:
+-- its PARENT encodes its bag. So buttons are allocated per bag against a
+-- per-bag holder frame, and layout only ever moves them with SetPoint.
+-- Nothing is ever reparented, which also means nothing breaks in combat.
+--
+-- The holders are full-size, transparent and stacked on top of each other
+-- over the grid area. They exist only to carry an ID.
+
+local ADDON_NAME = ...
+-- Zacui_Bags is a part of ZacUI: one namespace, published by Core_Boot.
+local ns = _G.ZacUI
+if not ns then return end
+
+-- shared state from earlier ZacUI files
+local AddPixelBorder = ns.AddPixelBorder
+local Bags = ns.Bags
+local Col = ns.Col
+local FLAT = ns.FLAT
+local GetColor = ns.GetColor
+local Modules = ns.Modules
+local Print = ns.Print
+local SharpenIcon = ns.SharpenIcon
+local TintBorder = ns.TintBorder
+local UI = ns.UI
+local ZUI = ns.ZUI
+
+local M, F = UI.M, UI.F
+
+local SLOT = 34          -- item button size (slotSize)
+local GAP = 3            -- gap between slots (spacing)
+local PAD = 10           -- window edge -> grid
+local HEADER = 56        -- search / sort row, then the bag-slot row
+local BAGBTN = 22        -- bag-slot button size in that row
+local FOOTER = 22        -- money + free slots
+
+local views = {}
+local buttonSerial = 0
+-- ZacUI's bank window: off on a game version whose bank is not the
+-- Classic bank bags this window lays out (Core_Flavor's feature table;
+-- Retail's is tabs, character and Warband). Blizzard's bank is left
+-- alone there, and only the inventory window is built.
+local BANK_ON = not (ns.FeatureOn and not ns.FeatureOn("bank"))
+
+-- ============================================================
+-- THE LOOK (ZacUIDB.bags, Bags & maps > Bags)
+-- ============================================================
+-- Every default is what this file drew before the setting existed; a
+-- colour or font left unset is "as before" (the palette, Blizzard's count
+-- font, ZacUI's font). The same functions dress the real slots and the
+-- samples on the Bags page: DressSlot builds a slot's look, StyleSlot
+-- applies the fonts, PaintSlot paints an item into it.
+--   slotSize, spacing, columns           the grid
+--   slotColor, emptyAlpha, filledAlpha   a slot's backing
+--   borderColor, qualityBorders, questColor
+--   fadedAlpha                           a search non-match
+--   countFont, countColor, footerFont    text
+--   bgColor, frameBorderColor            the window
+--   openAnim, closeAnim                  the window opening and closing
+local BAG_LOOK = {
+    columns = 10, slotSize = SLOT, spacing = GAP,
+    emptyAlpha = 0.45, filledAlpha = 0.75, fadedAlpha = 0.25,
+    qualityBorders = true,
+}
+local function BagCfg()
+    if not ZacUIDB then return BAG_LOOK end
+    ZacUIDB.bags = ZacUIDB.bags or {}
+    local t = ZacUIDB.bags
+    if ns.FillDefaults then ns.FillDefaults(t, BAG_LOOK)
+    else for k, v in pairs(BAG_LOOK) do if t[k] == nil then t[k] = v end end end
+    return t
+end
+local function SlotSize()
+    return math.max(20, math.min(64, tonumber(BagCfg().slotSize) or SLOT))
+end
+local function SlotGap()
+    return math.max(0, math.min(20, tonumber(BagCfg().spacing) or GAP))
+end
+local function Empty(spec) return type(spec) ~= "table" or next(spec) == nil end
+
+-- THE GROUPED LAYOUT (ZacUIDB.bags.layout = "groups"): which group a slot
+-- is drawn in, by the item's class. Free slots are the last group, so
+-- there is always somewhere to drop something.
+local GROUP_HEAD = 15
+local GROUP_NAMES = { "Consumables", "Gear", "Trade goods", "Quest items", "Everything else", "Free" }
+local GROUP_BY_CLASS = { [0] = 1, [2] = 2, [4] = 2, [7] = 3, [5] = 3, [9] = 3, [12] = 4 }
+local groupOfLink = {}
+local function GroupOf(item)
+    if not item then return #GROUP_NAMES end
+    local link = item.link or item.id
+    if not link then return 5 end
+    local g = groupOfLink[link]
+    if g then return g end
+    local classID
+    if GetItemInfoInstant then
+        local ok, _, _, _, _, _, cid = pcall(GetItemInfoInstant, link)
+        if ok then classID = cid end
+    end
+    g = GROUP_BY_CLASS[classID or -1] or 5
+    if classID ~= nil then groupOfLink[link] = g end
+    return g
+end
+-- bumped on every settings change: a slot restyles its fonts when behind
+local lookVer = 1
+local DressSlot   -- (below, with the item buttons)
+
+-- Money is ns.Money (Core_Services). The account total uses its "gold"
+-- form - whole gold with separators and one coin icon. A coin string
+-- would give three icons and a silver/copper tail - at five figures,
+-- three numbers to read where the question only asked for one.
+local Money = ns.Money
+
+-- ============================================================
+-- COMBAT GATE
+-- ============================================================
+-- DEAD WEIGHT IN THE DEFAULT CONFIGURATION, and deliberately kept.
+--
+-- Plain item buttons are not protected, so none of this runs: the bag
+-- lays out, resizes, opens and closes in combat exactly like it does out
+-- of it. Everything below exists only for the opt-in secure mode
+-- (ZacUIDB.bags.secureUse = true), where the buttons DO carry
+-- SecureActionButtonTemplate and ClearAllPoints/SetPoint/Show/Hide/
+-- SetAttribute on them - plus SetSize and Show on the window that
+-- anchors them - are refused under a lockdown.
+--
+-- Even then, only view:Layout defers, NEVER view:Paint. Deferring both
+-- is the obvious fix and it is wrong: it empties the bag on the pull,
+-- because icons, counts and cooldowns are not protected and have no
+-- reason to stop.
+-- Set by the module once the key hooks exist; drains a bag open/close
+-- that the player asked for while the window was frozen.
+local DrainBagToggle
+
+local combatWatch
+local function StartCombatWatch()
+    if combatWatch then return end
+    combatWatch = CreateFrame("Frame")
+    combatWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
+    combatWatch:SetScript("OnEvent", function()
+        for _, view in pairs(views) do
+            if view._layoutPending then
+                pcall(view.Refresh, view)
+            end
+        end
+        if DrainBagToggle then pcall(DrainBagToggle) end
+    end)
+end
+
+-- ============================================================
+-- ITEM BUTTONS
+-- ============================================================
+-- KILL THE SLOT ART, BY SWEEP RATHER THAN BY NAME.
+--
+-- The first version of this named the pieces it wanted gone - IconBorder,
+-- IconOverlay, NormalTexture. That was wrong twice over. Blizzard's item
+-- button carries more texture regions than those on 1.15 (the slot frame,
+-- the shadow, the quality glow, the "searching" wash), and the visible
+-- result was a blue-grey frame around every occupied slot that looked
+-- like a quality colour but was just leftover artwork.
+--
+-- And naming them would not have been enough anyway: SetItemButtonTexture
+-- and its siblings RE-SHOW several of these every time a slot's contents
+-- change, so anything done once at creation is undone by the first item
+-- you move. Hence a sweep, re-run on every paint.
+--
+-- Everything except the icon goes. Count is a FontString and Cooldown is
+-- a Frame, so neither is touched by a texture sweep; the highlight and
+-- pushed states are ours, applied after the sweep.
+-- The keyed pieces of a slot button that are not plain regions.
+local SLOT_PIECES = { "IconBorder", "IconOverlay", "IconOverlay2",
+    "SlotArt", "SlotBackground", "IconQuestTexture",
+    "BattlepayItemTexture", "NewItemTexture",
+    "ExtendedOverlay", "searchOverlay", "SearchOverlay" }
+-- WoW Forever's item buttons (the modern template) mask the icon into a
+-- rounded square; ZacUI's slots are square, so the masks come off the icon.
+-- Classic's buttons carry no mask: nothing to do there.
+local function UnmaskIcon(icon)
+    if not (icon.GetNumMaskTextures and icon.GetMaskTexture and icon.RemoveMaskTexture) then return end
+    local n = icon:GetNumMaskTextures()
+    if type(n) ~= "number" then return end
+    for i = n, 1, -1 do
+        local m = icon:GetMaskTexture(i)
+        if m then icon:RemoveMaskTexture(m) end
+    end
+end
+
+local function KillSlotArt(btn)
+    if not btn.GetRegions then return end
+    -- a button's texture regions are fixed at creation, so the list is
+    -- read once per button and kept; this runs for ~100 slots per paint
+    local regions = btn._zRegions
+    if not regions then
+        regions = {}
+        for _, region in ipairs({ btn:GetRegions() }) do
+            -- (not a mask: WoW Forever's item buttons round the icon with
+            -- a MaskTexture, and a mask wiped to nothing hides the whole
+            -- icon; the masks come off the icon in UnmaskIcon instead)
+            if region.IsObjectType and region:IsObjectType("Texture") and not region._zui_own
+                and not region:IsObjectType("MaskTexture") then
+                regions[#regions + 1] = region
+            end
+        end
+        btn._zRegions = regions
+    end
+    for i = 1, #regions do
+        local region = regions[i]
+        if region ~= btn._zIcon then
+            region:SetTexture(nil)
+            region:SetAlpha(0)
+        end
+    end
+    -- THE ICON IS RESTORED, NOT MERELY SPARED. Sparing it by identity
+    -- assumes we resolved the right region, and if that lookup ever misses
+    -- - a template change, a different field name - the sweep silently
+    -- eats every icon in the bag and leaves a grid of empty squares with
+    -- correct borders and counts. Asking for its alpha back costs nothing
+    -- and makes the failure mode "some slot art survives" instead of
+    -- "the bag is useless".
+    if btn._zIcon then
+        btn._zIcon:SetAlpha(1)
+        btn._zIcon:SetDrawLayer("ARTWORK")
+        UnmaskIcon(btn._zIcon)
+    end
+    -- Keyed pieces that are not plain regions of the button.
+    for _, key in ipairs(SLOT_PIECES) do
+        local piece = btn[key]
+        if piece and piece.SetAlpha then piece:SetAlpha(0) end
+    end
+    local normal = btn.GetNormalTexture and btn:GetNormalTexture()
+    if normal then
+        normal:SetTexture(nil)
+        normal:SetAlpha(0)
+    end
+end
+
+-- ============================================================
+-- THE SPLIT DIALOG HAS TO BE IN FRONT OF THE BAG
+-- ============================================================
+-- Blizzard's StackSplitFrame sits at DIALOG strata, and so does every
+-- ZacUI window - so the dialog opened behind the bag that asked for it
+-- and the split looked like it had done nothing again. Strata beats
+-- frame level unconditionally, so raising the level would not have been
+-- enough; the dialog has to move up a whole strata.
+--
+-- Measured against the frame that opened it rather than hardcoded,
+-- because the bag and the bank are not guaranteed to stay at the same
+-- strata forever, and a constant here would rot silently.
+local STRATA_UP = {
+    BACKGROUND = "LOW", LOW = "MEDIUM", MEDIUM = "HIGH", HIGH = "DIALOG",
+    DIALOG = "FULLSCREEN", FULLSCREEN = "FULLSCREEN_DIALOG",
+    FULLSCREEN_DIALOG = "TOOLTIP", TOOLTIP = "TOOLTIP",
+}
+
+local function LiftSplitDialog(owner)
+    local dialog = _G.StackSplitFrame
+    if not dialog or not dialog.SetFrameStrata then return end
+    local host = owner
+    -- Walk up to the window, not the holder frame the button sits in.
+    while host and host.GetParent and host:GetParent()
+        and host:GetParent() ~= UIParent do
+        host = host:GetParent()
+    end
+    local base = (host and host.GetFrameStrata and host:GetFrameStrata())
+        or "DIALOG"
+    dialog:SetFrameStrata(STRATA_UP[base] or "FULLSCREEN_DIALOG")
+    if dialog.SetToplevel then dialog:SetToplevel(true) end
+    if dialog.Raise then dialog:Raise() end
+end
+
+-- INSTALLED ONCE, ON THE GLOBAL, NOT ON ANY BUTTON.
+--
+-- hooksecurefunc is the one hook that is safe here: the client runs the
+-- original first in its own execution context and calls ours afterwards
+-- without letting our taint flow back into it. That is exactly the
+-- property HookScript does not have, and the difference between the two
+-- is the difference between a visible split dialog and a bag where you
+-- cannot right-click anything.
+local splitHooked = false
+local function InstallSplitLift()
+    if splitHooked then return end
+    if type(_G.OpenStackSplitFrame) ~= "function" then return end
+    if type(hooksecurefunc) ~= "function" then return end
+    splitHooked = true
+    hooksecurefunc("OpenStackSplitFrame", function(_, owner)
+        -- Only for our own slots. Blizzard's bags, the guild bank and
+        -- everything else keep the layering they were built with.
+        if owner and owner._zBagSlot then LiftSplitDialog(owner) end
+    end)
+end
+
+-- Reads the click path without standing in it. Answers the two questions
+-- that have actually come up: is anything of ours sitting on a bag slot's
+-- OnClick (which would break using items), and is the split dialog going
+-- to be visible when it opens.
+function Bags.ClickReport()
+    Print("--- bag clicks ---")
+    Print("split-dialog lift installed: "
+        .. (splitHooked and "|cff66ff66yes|r" or "|cffff9900no|r"))
+    local dialog = _G.StackSplitFrame
+    Print("split dialog strata: "
+        .. (dialog and dialog:GetFrameStrata() or "no dialog"))
+    local view = ns.BagViews and ns.BagViews.inventory
+    local win = view and view.frame
+    Print("bag window strata: "
+        .. (win and win:GetFrameStrata() or "bag not built yet"))
+    Print("splitter: " .. (Bags.Split and "present" or "|cffff9900missing|r"))
+    Print("if using items is refused, something is hooking a slot's OnClick;")
+    Print("ZacUI deliberately hooks nothing there - see Bags_Frame.lua.")
+end
+
+-- ============================================================
+-- SECURE RIGHT-CLICK USE
+-- ============================================================
+-- These buttons are addon-created clones of Blizzard's template, so a
+-- click on them runs Blizzard's handler in a TAINTED execution. Most of
+-- the time the client tolerates that - but in combat and right after a
+-- zone-in it demands a secure path for UseContainerItem, and refuses:
+--
+--     AddOn 'Zacui' tried to call the protected function 'UNKNOWN()'
+--       [C]: in function 'UseContainerItem'
+--
+-- Rare (four hits across three accounts in weeks of play), but the
+-- moment it hits is exactly the worst one: spamming a potion in combat.
+--
+-- The fix is to stop asking Blizzard's handler to use items at all.
+-- Each button ALSO inherits SecureActionButtonTemplate with
+-- type2="item" and a fixed bag/slot attribute pair - a plain
+-- right-click then uses whatever is in that physical slot through the
+-- SECURE action system, which cannot be tainted by construction and
+-- works in combat. Everything else (left-click pickup, modified
+-- clicks, selling at a vendor, banking) still runs Blizzard's own
+-- handler via PostClick, in the same contexts it always ran - none of
+-- those are protected, so taint there costs nothing.
+--
+-- When a merchant/bank/mail/auction window is open, right-click must
+-- mean sell/deposit/attach again, so a context watcher blanks type2
+-- while those are up (they can never be open in combat, so the
+-- attribute writes are always legal).
+local secureButtons = {}
+
+-- Only the opt-in secure mode makes anything here protected. In the
+-- default plain mode this is false forever, and every combat gate in
+-- this file collapses to a no-op - which is the whole point: the bag
+-- opens, closes, relayouts and paints in combat like any other addon's.
+local function SecureActive()
+    return #secureButtons > 0
+end
+
+local SECURE_ONCLICK
+do
+    local ref = CreateFrame("Button", nil, nil, "SecureActionButtonTemplate")
+    SECURE_ONCLICK = ref:GetScript("OnClick")
+    ref:Hide()
+end
+
+-- PostClick fires on BOTH phases now (secure buttons on this client only
+-- act when the down phase is registered, so both are). Legacy behavior
+-- runs once, on the up phase, matching how Blizzard's own handler was
+-- always driven.
+local function SlotPostClick(self, button, down)
+    if down then return end
+    if button == "RightButton"
+        and self:GetAttribute("type2") == "item"
+        and not IsModifierKeyDown() then
+        return -- the secure path owned this click
+    end
+    -- everything else is the classic handler, exactly as before
+    local handler = _G.ContainerFrameItemButton_OnClick
+    if handler then handler(self, button) end
+end
+
+local contextWatch
+local function InstallContextWatch()
+    if contextWatch then return end
+    contextWatch = CreateFrame("Frame")
+    contextWatch:RegisterEvent("MERCHANT_SHOW")
+    contextWatch:RegisterEvent("MERCHANT_CLOSED")
+    contextWatch:RegisterEvent("BANKFRAME_OPENED")
+    contextWatch:RegisterEvent("BANKFRAME_CLOSED")
+    contextWatch:RegisterEvent("MAIL_SHOW")
+    contextWatch:RegisterEvent("MAIL_CLOSED")
+    contextWatch:RegisterEvent("TRADE_SHOW")
+    contextWatch:RegisterEvent("TRADE_CLOSED")
+    pcall(contextWatch.RegisterEvent, contextWatch, "AUCTION_HOUSE_SHOW")
+    pcall(contextWatch.RegisterEvent, contextWatch, "AUCTION_HOUSE_CLOSED")
+    -- PLAYER_REGEN_ENABLED is in the same list so the attribute pass that
+    -- combat refused is replayed rather than silently lost - a merchant
+    -- opened mid-fight used to leave right-click still wired to "use".
+    contextWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
+    local open = 0
+    contextWatch:SetScript("OnEvent", function(_, event)
+        if event ~= "PLAYER_REGEN_ENABLED" then
+            if event:find("SHOW") or event:find("OPENED") then
+                open = open + 1
+            else
+                open = math.max(0, open - 1)
+            end
+        end
+        if InCombatLockdown and InCombatLockdown() then return end
+        local wantItem = (open == 0) and "item" or nil
+        for _, b in ipairs(secureButtons) do
+            b:SetAttribute("type2", wantItem)
+        end
+    end)
+end
+
+-- ============================================================
+-- WHY THESE ARE PLAIN BUTTONS AGAIN
+-- ============================================================
+-- SecureActionButtonTemplate was added to fix a rare refusal of
+-- UseContainerItem (see the block further down). It worked, and it cost
+-- far more than it bought: a frame is protected if ANY DESCENDANT is
+-- protected, so one secure slot made the whole ZacUIBagFrame protected
+-- by ancestry. Show, Hide, SetPoint and SetSize on the window were then
+-- all refused in combat - the bag could not be opened mid-fight at all,
+-- and every BAG_UPDATE during a pull filled BugSack with blocked-action
+-- reports.
+--
+-- Every other bag addon - Baganator, Bagnon, ArkInventory - uses plain
+-- ContainerFrameItemButtonTemplate buttons and works in combat, because
+-- UseContainerItem needs a HARDWARE EVENT, not secure execution. A
+-- template OnClick fired by a real mouse click satisfies that whether or
+-- not the button was created by an addon.
+--
+-- Which means the rare refusal was never inherent: it was ZacUI's own
+-- taint leaking into the click. Fix the taint, not the bag.
+--
+-- The secure path is kept, opt-in, behind ZacUIDB.bags.secureUse = true
+-- for anyone who would rather have the old trade. Default is off.
+local function SecureWanted()
+    return ZacUIDB and ZacUIDB.bags and ZacUIDB.bags.secureUse == true
+end
+
+-- ============================================================
+-- THE GAME LOOKS' KIT (2026-11-08, Zac: "zui bags need to follow the
+-- styling from the style i pick even if its a combined bag")
+-- ============================================================
+-- Under Classic WoW UI, Blizzard style and WoW Forever (Core_Look, part
+-- "bags": its own override, else the global look) ZacUI's bag and bank
+-- windows wear the game's own art, the way the unit frame and action bar
+-- kits do: the window is the look's (Look.Dress: the dialog border, the
+-- client's metal / bronze rim), the slots are the stock item button's
+-- pieces, the header and footer widgets the stock ones. Every name below
+-- is Blizzard's own, read in wow-ui-source (live and classic_era):
+--   item button (Blizzard_ItemButton ItemButton, 37 x 37, every client):
+--     ring UI-Quickslot2 64 x 64 at CENTER (0, -1); pushed
+--     UI-Quickslot-Depress; hover ButtonHilight-Square (ADD); quality
+--     border Interface\Common\WhiteIconFrame 37 x 37 tinted; quest
+--     Interface\ContainerFrame\UI-Icon-QuestBorder 37 x 38 at TOP
+--   the empty slot: Classic, Interface\Buttons\UI-EmptySlot 64 on 37 (the
+--     merchant's empty slot, a well in its own frame, so the ring steps
+--     aside); the modern clients' combined bag, a slot well
+--     (ItemSlotBackgroundCombinedBagsTemplate: UI-Bag-Components cut
+--     0.6445-0.7891 x 0.4258-0.4980, all points) under every slot and the
+--     button's emptyBackgroundAtlas bags-item-slot64 on an empty one
+--   close: Classic UI-Panel-MinimizeButton-Up / -Down / -Highlight 32;
+--     the modern looks RedButton-Exit / -exit-pressed / -Highlight 24
+--   buttons: UI-Panel-Button-Up / -Down / -Highlight, 12 | middle | 12 on
+--     22 (every client's UIPanelButtonTemplate); text GameFontNormal gold,
+--     white under the mouse
+--   search: common-search-border-left / -middle / -right 8 | 10 | 8 on
+--     20 and common-search-magnifyingglass 10 (the InputBox and SearchBox
+--     templates of Era, TBC and the modern clients alike); without them
+--     the old Interface\Common\Common-Input-Border cut
+--   sort (modern looks): bags-button-autosort-up / -down
+--   view list: UIDropDownMenuTemplate's CharacterCreate-LabelFrame cut
+--     (25 | 115 | 25 on a 32 frame) and UI-ChatIcon-ScrollDown-Up
+-- An atlas is used only when C_Texture.GetAtlasInfo knows it; a missing
+-- one falls back to the file art (or leaves ZacUI's piece). Geometry and
+-- every saved setting stay as they are: the slot size, spacing, columns,
+-- the window's place, the count's font and spot, quality borders on / off
+-- and the search fade all still apply; the ZacUI-only colours (slot,
+-- border, window) wait for ZacUI's look. Latched with the look: a change
+-- of look is a reload. Under ZacUI's look none of this runs.
+local KIT_IDS = { classic = true, blizzard = true, forever = true }
+local KIT = {
+    unit = 37,
+    ring = "Interface\\Buttons\\UI-Quickslot2", ringSize = 64, ringDy = -1,
+    pushed = "Interface\\Buttons\\UI-Quickslot-Depress",
+    hilight = "Interface\\Buttons\\ButtonHilight-Square",
+    quality = "Interface\\Common\\WhiteIconFrame",
+    quest = "Interface\\ContainerFrame\\UI-Icon-QuestBorder", questH = 38,
+    emptySlot = "Interface\\Buttons\\UI-EmptySlot", emptySize = 64, emptyDx = 0.5, emptyDy = -0.5,
+    well = "Interface\\ContainerFrame\\UI-Bag-Components",
+    wellTC = { 0.64453125, 0.7890625, 0.42578125, 0.498046875 },
+    emptyAtlas = "bags-item-slot64",
+    closeClassic = { "Interface\\Buttons\\UI-Panel-MinimizeButton-Up", "Interface\\Buttons\\UI-Panel-MinimizeButton-Down",
+                     "Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", size = 32 },
+    closeModern = { "RedButton-Exit", "RedButton-exit-pressed", "RedButton-Highlight", size = 24 },
+    btnUp = "Interface\\Buttons\\UI-Panel-Button-Up",
+    btnDown = "Interface\\Buttons\\UI-Panel-Button-Down",
+    btnHi = "Interface\\Buttons\\UI-Panel-Button-Highlight",
+    btnCap = 12, btnH = 22,
+    -- the three cuts of the panel button sheet: left, middle, right, then
+    -- its bottom (the art's top is 0)
+    btnTC = { 0, 0.09375, 0.53125, 0.625, 0.6875 },
+    search = { "common-search-border-left", "common-search-border-middle", "common-search-border-right" },
+    searchFile = "Interface\\Common\\Common-Input-Border",
+    searchTC = { 0, 0.0625, 0.9375, 1, 0.625 },
+    glass = "common-search-magnifyingglass",
+    clearX = "common-search-clearbutton",
+    sortUp = "bags-button-autosort-up", sortDown = "bags-button-autosort-down",
+    dropFile = "Interface\\Glues\\CharacterCreate\\CharacterCreate-LabelFrame",
+    dropTC = { 0, 0.1953125, 0.8046875, 1 },
+    dropArrow = "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up",
+    gold = { 1, 0.82, 0 },
+    -- the stock bags space their buttons 5 apart (ContainerFrame's
+    -- ITEM_SPACING_X; the ring reaches past the slot): the bag-slot row's
+    -- gap (the item grid keeps the saved spacing)
+    bagGap = 5,
+}
+
+-- the kit the bags wear this session (nil: ZacUI's own look). A preview
+-- drawn inside Look.With answers the look it draws.
+local function KitNow()
+    local L = ns.Look
+    local lk = L and L.For and L.For("bags")
+    local id = lk and lk.id
+    return KIT_IDS[id] and id or nil
+end
+local function LookNow()
+    local L = ns.Look
+    return L and L.For and L.For("bags") or nil
+end
+
+-- atlas presence, asked once per name
+local atlasOK = {}
+local function AtlasOK(name)
+    local v = atlasOK[name]
+    if v == nil then
+        v = false
+        local get = C_Texture and C_Texture.GetAtlasInfo
+        if get and type(name) == "string" then
+            local ok, info = pcall(get, name)
+            v = (ok and type(info) == "table") and true or false
+        end
+        atlasOK[name] = v
+    end
+    return v
+end
+
+local function OwnTex(host, layer, sub)
+    local t = host:CreateTexture(nil, layer, nil, sub)
+    t._zui_own = true
+    return t
+end
+local function FileArt(t, file, l, r, top, b)
+    t:SetTexture(file)
+    if t.SetTexCoord then t:SetTexCoord(l or 0, r or 1, top or 0, b or 1) end
+end
+-- the atlas when the client has it (true), else nothing (false)
+local function AtlasArt(t, name)
+    if not (AtlasOK(name) and t.SetAtlas) then return false end
+    if t.SetTexCoord then t:SetTexCoord(0, 1, 0, 1) end
+    t:SetAtlas(name)
+    return true
+end
+
+-- a text in the look's font: the game's face, outlined (Zac keeps the
+-- black edge on text), at `size`
+local function KitFont(fs, size)
+    if not (fs and fs.SetFont) then return end
+    local face = ns.GAME_FONT or STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+    local ok, set = pcall(fs.SetFont, fs, face, size, "OUTLINE")
+    if not (ok and set) then pcall(fs.SetFont, fs, "Fonts\\FRIZQT__.TTF", size, "OUTLINE") end
+    if fs.SetShadowOffset then fs:SetShadowOffset(0, 0) end
+end
+
+-- ZacUI's flat fill and pixel edge on a widget step back (alpha 0: the
+-- paint passes that recolour them leave the alpha alone)
+local function HideFlat(f)
+    if not f then return end
+    local fill = rawget(f, "_zFill")
+    if fill and fill.SetAlpha then fill:SetAlpha(0) end
+    for _, t in ipairs(rawget(f, "_zBorder") or {}) do if t.SetAlpha then t:SetAlpha(0) end end
+end
+
+-- a stock three-slice on `host` (left cap, stretched middle, right cap), the
+-- caps `cap` wide; pieces = { left, middle, right } textures
+local function ThreeSlice(host, layer, sub, cap, dx)
+    local p = { OwnTex(host, layer, sub), OwnTex(host, layer, sub), OwnTex(host, layer, sub) }
+    p[1]:SetPoint("TOPLEFT", host, "TOPLEFT", dx or 0, 0)
+    p[1]:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", dx or 0, 0)
+    p[1]:SetWidth(cap)
+    p[3]:SetPoint("TOPRIGHT", host, "TOPRIGHT", 0, 0)
+    p[3]:SetPoint("BOTTOMRIGHT", host, "BOTTOMRIGHT", 0, 0)
+    p[3]:SetWidth(cap)
+    p[2]:SetPoint("TOPLEFT", p[1], "TOPRIGHT", 0, 0)
+    p[2]:SetPoint("BOTTOMRIGHT", p[3], "BOTTOMLEFT", 0, 0)
+    return p
+end
+local function PanelArt(p, file)
+    local tc = KIT.btnTC
+    FileArt(p[1], file, tc[1], tc[2], 0, tc[5])
+    FileArt(p[2], file, tc[2], tc[3], 0, tc[5])
+    FileArt(p[3], file, tc[3], tc[4], 0, tc[5])
+end
+
+-- A label of the kit's own over a ZacUI one (which steps back): the game's
+-- font, never re-dressed by ZacUI's font passes; follows the ZacUI label's
+-- text.
+local function KitLabel(host, src, size, justify)
+    local fs = host:CreateFontString(nil, "OVERLAY")
+    fs._zui_own = true
+    KitFont(fs, size)
+    if justify and fs.SetJustifyH then fs:SetJustifyH(justify) end
+    if src then
+        fs:SetText(src.GetText and src:GetText() or "")
+        src:SetAlpha(0)
+        if hooksecurefunc and src.SetText then
+            hooksecurefunc(src, "SetText", function(_, t) fs:SetText(t) end)
+        end
+    end
+    return fs
+end
+
+-- A ZacUI button (UI.Button) as the stock red panel button: the three-slice
+-- up / down art, the highlight sheet (ADD), the label gold, white under the
+-- mouse, grey while disabled.
+local function KitButton(b)
+    if not b or rawget(b, "_zKitBtn") then return b end
+    rawset(b, "_zKitBtn", true)
+    HideFlat(b)
+    -- ZacUI's own hover wash and pushed shade step back
+    for _, r in ipairs({ b:GetRegions() }) do
+        if r ~= b._zFill and r.IsObjectType and r:IsObjectType("Texture") and r._zui_own then r:SetAlpha(0) end
+    end
+    local h = b:GetHeight() or KIT.btnH
+    if type(h) ~= "number" or h <= 0 then h = KIT.btnH end
+    local cap = math.floor(KIT.btnCap * h / KIT.btnH + 0.5)
+    local up = ThreeSlice(b, "BACKGROUND", 1, cap)
+    PanelArt(up, KIT.btnUp)
+    local hi = OwnTex(b, "HIGHLIGHT")
+    hi:SetAllPoints(b)
+    FileArt(hi, KIT.btnHi, 0, KIT.btnTC[4], 0, KIT.btnTC[5])
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    local label = KitLabel(b, b._zText, h >= 20 and 12 or 10, "CENTER")
+    label:SetPoint("CENTER", b, "CENTER", 0, 0)
+    rawset(b, "_zKitLabel", label)
+    local function Tint(self, hot)
+        local G = KIT.gold
+        if rawget(self, "_zDisabled") then label:SetTextColor(0.5, 0.5, 0.5, 1)
+        elseif hot then label:SetTextColor(1, 1, 1, 1)
+        else label:SetTextColor(G[1], G[2], G[3], 1) end
+    end
+    b:HookScript("OnEnter", function(self) Tint(self, true) end)
+    b:HookScript("OnLeave", function(self) Tint(self, false) PanelArt(up, KIT.btnUp) end)
+    b:HookScript("OnMouseDown", function(self) if self:IsEnabled() then PanelArt(up, KIT.btnDown) end end)
+    b:HookScript("OnMouseUp", function() PanelArt(up, KIT.btnUp) end)
+    local own = b._zPaint
+    b._zPaint = function(self)
+        if own then own(self) end
+        Tint(self, false)
+    end
+    Tint(b, false)
+    return b
+end
+
+-- the sort button on a modern look: the bag's own autosort button art
+-- (the panel button where the client lacks it). tpl: the combined bag's
+-- own button (BagItemAutoSortButton: 28 x 26, its hover 24 x 23 centred)
+local function KitSortButton(b, kit, tpl)
+    if kit == "classic" or not AtlasOK(KIT.sortUp) then return KitButton(b) end
+    HideFlat(b)
+    for _, r in ipairs({ b:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= b._zFill then r:SetAlpha(0) end
+    end
+    if b._zText then b._zText:SetAlpha(0) end
+    b:SetSize(24, 24)
+    local n = OwnTex(b, "ARTWORK")
+    n:SetAllPoints(b)
+    AtlasArt(n, KIT.sortUp)
+    local p = OwnTex(b, "ARTWORK", 1)
+    p:SetAllPoints(b)
+    if not AtlasArt(p, KIT.sortDown) then FileArt(p, KIT.pushed) end
+    p:Hide()
+    b:HookScript("OnMouseDown", function() n:Hide() p:Show() end)
+    b:HookScript("OnMouseUp", function() p:Hide() n:Show() end)
+    b:HookScript("OnLeave", function() p:Hide() n:Show() end)
+    local hi = OwnTex(b, "HIGHLIGHT")
+    if tpl then
+        b:SetSize(tpl.w, tpl.h)
+        hi:SetPoint("CENTER", b, "CENTER", 0, 0)
+        hi:SetSize(tpl.hiW, tpl.hiH)
+    else
+        hi:SetAllPoints(b)
+    end
+    FileArt(hi, KIT.hilight)
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    rawset(b, "_zKitBtn", true)
+    return b
+end
+
+-- ------------------------------------------------------------ the client's own bag chrome
+-- (2026-11-08, Zac: the bag under the modern looks has to look exactly
+-- like the client's own "Combined Backpack".) Where the client has the
+-- template the combined bag is built from, ZacUI's bag and bank windows
+-- wear a frame of that very template laid under them (same box, the
+-- window's level, no mouse): its portrait ring with the backpack's icon,
+-- its metal rim, its title band, its red close button, its flat panel.
+-- ZacUI's content sits where the client's bag puts its own. Every number
+-- is Blizzard's (wow-ui-source live, Blizzard_UIPanels_Game/Mainline/
+-- ContainerFrame.xml + .lua, Blizzard_SharedXML/Mainline/NineSliceLayouts,
+-- Blizzard_MoneyFrame/Mainline/MoneyFrame.xml):
+--   ContainerFrameCombinedBags inherits PortraitFrameFlatTemplate, wears
+--     the NineSlice layout HeldBagLayout (its layoutType)
+--   ContainerFrame_OnLoad: SetPortraitTextureSizeAndOffset(36, -4, 1),
+--     SetTitleOffsets(35); UpdateMiscellaneousFrames: SetPortraitToAsset
+--     ("Interface/Icons/Inv_misc_bag_08")
+--   SetSearchBoxPoint: TOPLEFT 62, -37, width 330 on the 430 bag (its right
+--     edge 38 in), BagItemSearchBox 18 high
+--   BagItemAutoSortButton: 28 x 26 at TOPRIGHT -9, -34, hover 24 x 23
+--   GetPaddingWidth 15 (the slots end 8 in from the right, so 7 at the
+--     left); the slots start 75 below the top (GetPaddingHeight 75 +
+--     CalculateExtraHeight money 16 + 12, the first slot 4 over the money)
+--   MoneyFrame: BOTTOMLEFT 8, 8 to BOTTOMRIGHT -8, 8, 16 high, its Border
+--     common-coinbox-left / _common-coinbox-center / common-coinbox-right
+--     (8 | middle | 8 on 17); SmallMoneyFrame's copper 13 in from its right
+-- ZacUI's own bag-slot row has no twin in the client's bag: it sits in a
+-- row of its own between the search box and the slots (BAGBTN + 7 more).
+-- Classic WoW UI keeps the dialog border (the Era / TBC clients have no
+-- such template, and the classic container art is per-bag, not sizeable).
+local TPL = {
+    name = "PortraitFrameFlatTemplate", layout = "HeldBagLayout",
+    portrait = "Interface/Icons/Inv_misc_bag_08", pSize = 36, pX = -4, pY = 1, titleLeft = 35,
+    searchX = 62, searchY = -37, searchR = -38, searchH = 18,
+    sort = { w = 28, h = 26, x = -9, y = -34, hiW = 24, hiH = 23 },
+    left = 7, right = 8, slotsTop = 75, rowGap = 7, firstOverMoney = 4,
+    moneyX = 8, moneyY = 8, moneyH = 16, copperIn = 13,
+    coin = { "common-coinbox-left", "_common-coinbox-center", "common-coinbox-right" }, coinCap = 8, coinH = 17,
+}
+
+-- does this client have the template (asked once)
+local tplOK
+local function ChromeOK()
+    if tplOK == nil then
+        tplOK = false
+        local X = C_XMLUtil
+        if X and X.GetTemplateInfo then
+            local ok, info = pcall(X.GetTemplateInfo, TPL.name)
+            tplOK = (ok and info ~= nil) and true or false
+        end
+    end
+    return tplOK
+end
+
+-- the template's frame under view's window (nil when the client could not
+-- build it whole: the window then keeps the look's own dress)
+-- Classic WoW UI keeps the dialog dress: its 32 px round close reaches 37
+-- down, so the search row starts 4 lower than ZacUI's (39, not 35) and the
+-- rows under it follow
+local CLASSIC_DROP = 4
+
+local function KitChrome(view)
+    local f = view.frame
+    local ok, c = pcall(CreateFrame, "Frame", nil, f, TPL.name)
+    if not (ok and c) then return nil end
+    local tc = c.TitleContainer
+    if not (c.NineSlice and c.PortraitContainer and tc and tc.TitleText and c.CloseButton) then
+        c:Hide()
+        return nil
+    end
+    c:SetAllPoints(f)
+    c:EnableMouse(false)
+    if c.SetFrameLevelsFromBaseLevel then pcall(c.SetFrameLevelsFromBaseLevel, c, f:GetFrameLevel()) end
+    c:SetFrameLevel(f:GetFrameLevel())
+    if c.SetBorder then pcall(c.SetBorder, c, TPL.layout) end
+    -- (2026-11-08, Zac: "the grey is infront of the bag icons") the
+    -- template's background panel comes at a fixed high level (10000 on
+    -- Forever) and drew over the slots: it goes to the window's own level,
+    -- under every slot, the search box and the coins; the rim (NineSlice)
+    -- stays over the edges as the game's bag draws it
+    local function Down(fr)
+        pcall(function()
+            if fr.SetFixedFrameLevel then fr:SetFixedFrameLevel(false) end
+            fr:SetFrameLevel(math.max(0, f:GetFrameLevel()))
+        end)
+    end
+    pcall(function()
+        local bg = rawget(c, "Bg")
+        if not bg then return end
+        Down(bg)
+        -- (Zac: "the grey needs to be transparent") the world shows
+        -- through the panel, as through the game's own bag
+        bg:SetAlpha(0.72)
+        local ts = rawget(bg, "TopSection")
+        if ts then Down(ts) end
+        c:HookScript("OnShow", function() Down(bg) end)
+    end)
+    local portrait = c.GetPortrait and c:GetPortrait() or c.PortraitContainer.portrait
+    if c.SetPortraitTextureSizeAndOffset then
+        pcall(c.SetPortraitTextureSizeAndOffset, c, TPL.pSize, TPL.pX, TPL.pY)
+    elseif portrait then
+        portrait:SetSize(TPL.pSize, TPL.pSize)
+        portrait:SetPoint("TOPLEFT", c, "TOPLEFT", TPL.pX, TPL.pY)
+    end
+    if portrait then portrait:SetTexture(TPL.portrait) end
+    if c.SetTitleOffsets then pcall(c.SetTitleOffsets, c, TPL.titleLeft) end
+    local title = tc.TitleText
+    title:SetText(view.title or "")
+    -- the game's font at the stock 12, outlined (Zac keeps the black edge)
+    KitFont(title, 12)
+    title:SetTextColor(KIT.gold[1], KIT.gold[2], KIT.gold[3], 1)
+    local close = c.CloseButton
+    close:SetScript("OnClick", function()
+        if UI.CloseWindow then UI.CloseWindow(f) else f:Hide() end
+    end)
+    close:Show()
+    -- the banker's face on the bank, as the client's bank wears it
+    if view.key == "bank" and c.SetPortraitToUnit then
+        f:HookScript("OnShow", function()
+            if UnitExists and UnitExists("npc") then pcall(c.SetPortraitToUnit, c, "npc") end
+        end)
+    end
+    -- ZacUI's own window steps back: the fill, the edge, the title bar
+    -- (still the drag handle, drawn by nothing), its words and its X
+    HideFlat(f)
+    local bar = f.titleBar
+    if bar then bar:SetAlpha(0) end
+    if f.titleText then
+        f.titleText:SetAlpha(0)
+        if hooksecurefunc and f.titleText.SetText then
+            hooksecurefunc(f.titleText, "SetText", function(_, t) title:SetText(t) end)
+        end
+    end
+    if f.closeButton then
+        f.closeButton:Hide()
+        f.closeButton:EnableMouse(false)
+    end
+    rawset(f, "_zKitChrome", c)
+    return c
+end
+
+-- the client's money box along the bottom (the coin-box three-slice)
+-- (a bare frame holds the place; the art is the window's own, under its
+-- texts, so the money and the free count draw over it)
+local function KitCoinBand(f)
+    local band = CreateFrame("Frame", nil, f)
+    band:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", TPL.moneyX, TPL.moneyY)
+    band:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -TPL.moneyX, TPL.moneyY)
+    band:SetHeight(TPL.moneyH)
+    if AtlasOK(TPL.coin[1]) then
+        local l, m, r = OwnTex(f, "BORDER"), OwnTex(f, "BORDER"), OwnTex(f, "BORDER")
+        l:SetPoint("LEFT", band, "LEFT", 0, 0)
+        l:SetSize(TPL.coinCap, TPL.coinH)
+        r:SetPoint("RIGHT", band, "RIGHT", 0, 0)
+        r:SetSize(TPL.coinCap, TPL.coinH)
+        m:SetPoint("TOPLEFT", l, "TOPRIGHT", 0, 0)
+        m:SetPoint("BOTTOMRIGHT", r, "BOTTOMLEFT", 0, 0)
+        AtlasArt(l, TPL.coin[1])
+        AtlasArt(m, TPL.coin[2])
+        AtlasArt(r, TPL.coin[3])
+        band.pieces = { l, m, r }
+    end
+    return band
+end
+
+-- A ZacUI close button (UI.CloseX) as the look's: Classic's round red
+-- button, the modern clients' red square (Classic's where the client lacks
+-- the atlas). `size`: the button's edge (the look's own when left out).
+local function KitClose(b, kit, size)
+    if not b or rawget(b, "_zKitBtn") then return b end
+    rawset(b, "_zKitBtn", true)
+    if rawget(b, "_zA") then b._zA:SetAlpha(0) end
+    local modern = kit ~= "classic" and AtlasOK(KIT.closeModern[1])
+    local art = modern and KIT.closeModern or KIT.closeClassic
+    b:SetSize(size or art.size, size or art.size)
+    local n, p, h = OwnTex(b, "ARTWORK"), OwnTex(b, "ARTWORK", 1), OwnTex(b, "HIGHLIGHT")
+    for _, t in ipairs({ n, p, h }) do t:SetAllPoints(b) end
+    if modern then
+        AtlasArt(n, art[1])
+        if not AtlasArt(p, art[2]) then AtlasArt(p, art[1]) end
+        AtlasArt(h, art[3])
+    else
+        FileArt(n, art[1]) FileArt(p, art[2]) FileArt(h, art[3])
+    end
+    if h.SetBlendMode then h:SetBlendMode("ADD") end
+    p:Hide()
+    b:HookScript("OnMouseDown", function() n:Hide() p:Show() end)
+    b:HookScript("OnMouseUp", function() p:Hide() n:Show() end)
+    b:HookScript("OnLeave", function() p:Hide() n:Show() end)
+    return b
+end
+
+-- A ZacUI edit box (UI.EditBox) as the stock search box: the border cut,
+-- the magnifying glass, the small clear cross; the text and the hint start
+-- after the glass.
+local function KitSearch(host)
+    if not host or rawget(host, "_zKitBtn") then return host end
+    rawset(host, "_zKitBtn", true)
+    HideFlat(host)
+    local h = host:GetHeight() or 20
+    if type(h) ~= "number" or h <= 0 then h = 20 end
+    local p = ThreeSlice(host, "BACKGROUND", 1, 8)
+    local S = KIT.search
+    if not (AtlasArt(p[1], S[1]) and AtlasArt(p[2], S[2]) and AtlasArt(p[3], S[3])) then
+        local tc = KIT.searchTC
+        FileArt(p[1], KIT.searchFile, tc[1], tc[2], 0, tc[5])
+        FileArt(p[2], KIT.searchFile, tc[2], tc[3], 0, tc[5])
+        FileArt(p[3], KIT.searchFile, tc[3], tc[4], 0, tc[5])
+    end
+    local inset = 6
+    local glass = OwnTex(host, "OVERLAY")
+    if AtlasArt(glass, KIT.glass) then
+        glass:SetSize(10, 10)
+        glass:SetPoint("LEFT", host, "LEFT", 6, -1)
+        glass:SetVertexColor(0.6, 0.6, 0.6, 1)
+        inset = 19
+    else
+        glass:Hide()
+    end
+    local eb = host.editBox
+    if eb then
+        eb:SetPoint("TOPLEFT", host, "TOPLEFT", inset, -2)
+        eb:SetTextColor(1, 1, 1, 1)
+    end
+    -- the hint ("Search") follows the text's new start
+    for _, r in ipairs({ host:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("FontString") then
+            r:SetPoint("LEFT", host, "LEFT", inset + 1, 0)
+            KitFont(r, 10)
+            r:SetTextColor(0.5, 0.5, 0.5, 1)
+        end
+    end
+    local x = host.clearButton
+    if x and AtlasOK(KIT.clearX) then
+        if rawget(x, "_zA") then x._zA:SetAlpha(0) end
+        local t = OwnTex(x, "ARTWORK")
+        t:SetSize(10, 10)
+        t:SetPoint("CENTER", x, "CENTER", 0, 0)
+        AtlasArt(t, KIT.clearX)
+        t:SetAlpha(0.5)
+        x:HookScript("OnEnter", function() t:SetAlpha(1) end)
+        x:HookScript("OnLeave", function() t:SetAlpha(0.5) end)
+    end
+    return host
+end
+
+-- A ZacUI dropdown (UI.Dropdown) as the stock one: the label frame cut and
+-- the round arrow button; its value in the game's font.
+local function KitDropdown(dd)
+    if not dd or rawget(dd, "_zKitBtn") then return dd end
+    rawset(dd, "_zKitBtn", true)
+    HideFlat(dd)
+    for _, r in ipairs({ dd:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= dd._zFill then r:SetAlpha(0) end
+    end
+    local h = dd:GetHeight() or 22
+    if type(h) ~= "number" or h <= 0 then h = 22 end
+    -- the frame's 32 rows sit 17 down a 64-high sheet: the sheet drawn at
+    -- the box's scale, its band on the box
+    local k = h / 32
+    local tc = KIT.dropTC
+    local p = ThreeSlice(dd, "BACKGROUND", 1, math.floor(25 * k + 0.5))
+    for i, t in ipairs(p) do
+        t:ClearAllPoints()
+        FileArt(t, KIT.dropFile, tc[i], tc[i + 1], 0, 1)
+    end
+    local capW = math.floor(25 * k + 0.5)
+    p[1]:SetPoint("TOPLEFT", dd, "TOPLEFT", -math.floor(8 * k + 0.5), 17 * k)
+    p[1]:SetSize(capW, 64 * k)
+    p[3]:SetPoint("TOPRIGHT", dd, "TOPRIGHT", math.floor(8 * k + 0.5), 17 * k)
+    p[3]:SetSize(capW, 64 * k)
+    p[2]:SetPoint("TOPLEFT", p[1], "TOPRIGHT", 0, 0)
+    p[2]:SetPoint("BOTTOMRIGHT", p[3], "BOTTOMLEFT", 0, 0)
+    local arrow = OwnTex(dd, "ARTWORK", 2)
+    arrow:SetSize(h, h)
+    arrow:SetPoint("RIGHT", dd, "RIGHT", 2, 0)
+    FileArt(arrow, KIT.dropArrow)
+    local hi = OwnTex(dd, "HIGHLIGHT")
+    hi:SetAllPoints(arrow)
+    FileArt(hi, KIT.hilight)
+    if hi.SetBlendMode then hi:SetBlendMode("ADD") end
+    if dd._zText then
+        local label = KitLabel(dd, dd._zText, 10, "LEFT")
+        label:SetPoint("LEFT", dd, "LEFT", 8, 0)
+        label:SetPoint("RIGHT", dd, "RIGHT", -(h + 2), 0)
+        if label.SetWordWrap then label:SetWordWrap(false) end
+        label:SetTextColor(1, 1, 1, 1)
+        if dd.SetText and hooksecurefunc then
+            hooksecurefunc(dd, "SetText", function() label:SetText(dd._zText:GetText()) end)
+        end
+    end
+    return dd
+end
+
+-- A small ZacUI box (UI.Box: the gold list) as the look's small box: the
+-- tooltip edge and fill of Classic, the client's tooltip slice on the
+-- modern looks (Core_Look's own primitive).
+local function KitBox(box)
+    if not box or rawget(box, "_zKitBtn") then return box end
+    local lk = LookNow()
+    if not (lk and ns.Look.AddFill and lk.border) then return box end
+    rawset(box, "_zKitBtn", true)
+    HideFlat(box)
+    pcall(ns.Look.AddFill, box, lk.border, lk.bgSmall or lk.bgTexture, 1)
+    return box
+end
+
+-- The pieces of the kit on one item slot (real or sample), made once. A
+-- slot's look follows its contents in PaintKit.
+local function FitKit(btn, s)
+    local P = rawget(btn, "_zKitParts")
+    if not (P and type(s) == "number" and s > 0) then return end
+    rawset(btn, "_zKitSize", s)
+    local k = s / KIT.unit
+    P.ring:ClearAllPoints()
+    P.ring:SetPoint("CENTER", btn, "CENTER", 0, KIT.ringDy * k)
+    P.ring:SetSize(KIT.ringSize * k, KIT.ringSize * k)
+    if P.emptySlot then
+        P.emptySlot:ClearAllPoints()
+        P.emptySlot:SetPoint("CENTER", btn, "CENTER", KIT.emptyDx * k, KIT.emptyDy * k)
+        P.emptySlot:SetSize(KIT.emptySize * k, KIT.emptySize * k)
+    end
+    P.qual:SetSize(s, s)
+    P.quest:SetSize(s, KIT.questH * k)
+end
+
+local function DressKitSlot(btn, kit)
+    rawset(btn, "_zKit", kit)
+    local icon = btn._zIcon
+    if icon then
+        ZacUI.Look.CropIcon(icon, nil, nil, { part = "bags" })
+        icon:SetDrawLayer("ARTWORK")
+        SharpenIcon(icon)
+    end
+    KillSlotArt(btn)
+    local P = {}
+    if kit == "classic" then
+        -- the empty slot: a well in its own frame
+        P.emptySlot = OwnTex(btn, "BACKGROUND", -6)
+        FileArt(P.emptySlot, KIT.emptySlot)
+    else
+        -- the combined bag's slot well, and the empty slot's own art
+        P.well = OwnTex(btn, "BACKGROUND", -6)
+        P.well:SetAllPoints(btn)
+        local tc = KIT.wellTC
+        FileArt(P.well, KIT.well, tc[1], tc[2], tc[3], tc[4])
+        P.empty = OwnTex(btn, "BACKGROUND", -5)
+        P.empty:SetAllPoints(btn)
+        if not AtlasArt(P.empty, KIT.emptyAtlas) then P.empty:Hide() P.empty = nil end
+    end
+    P.ring = OwnTex(btn, "ARTWORK", 1)
+    FileArt(P.ring, KIT.ring)
+    P.qual = OwnTex(btn, "OVERLAY", 0)
+    P.qual:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    FileArt(P.qual, KIT.quality)
+    P.qual:Hide()
+    P.quest = OwnTex(btn, "OVERLAY", 1)
+    P.quest:SetPoint("TOP", btn, "TOP", 0, 0)
+    FileArt(P.quest, KIT.quest)
+    P.quest:Hide()
+    rawset(btn, "_zKitParts", P)
+    -- hover and press: the button's own state textures wear the stock art
+    -- and leave the art sweep's list, so a repaint never wipes them
+    local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if not hl then
+        hl = OwnTex(btn, "HIGHLIGHT")
+        hl:SetAllPoints(btn)
+    end
+    FileArt(hl, KIT.hilight)
+    if hl.SetBlendMode then hl:SetBlendMode("ADD") end
+    hl:SetAlpha(1)
+    hl._zui_own = true
+    local pushed = btn.GetPushedTexture and btn:GetPushedTexture()
+    if not pushed and btn.SetPushedTexture then
+        pushed = OwnTex(btn, "OVERLAY", 2)
+        btn:SetPushedTexture(pushed)
+    end
+    if pushed then
+        FileArt(pushed, KIT.pushed)
+        pushed:SetAlpha(1)
+        if pushed.SetDrawLayer then pushed:SetDrawLayer("OVERLAY", 2) end
+        pushed._zui_own = true
+    end
+    local list = rawget(btn, "_zRegions")
+    if list then
+        for i = #list, 1, -1 do
+            if list[i] == hl or list[i] == pushed then table.remove(list, i) end
+        end
+    end
+    local s = btn.GetWidth and btn:GetWidth() or 0
+    FitKit(btn, (type(s) == "number" and s > 0) and s or SlotSize())
+end
+
+-- One slot's paint under the kit: the empty art or the ring, the quality
+-- or quest border (the stock way: green and up, the quest border first),
+-- the search fade.
+local function PaintKit(btn, item, isQuest, faded, cfg)
+    local P = rawget(btn, "_zKitParts")
+    if not P then return end
+    local s = btn.GetWidth and btn:GetWidth() or 0
+    if type(s) == "number" and s > 0 and s ~= rawget(btn, "_zKitSize") then FitKit(btn, s) end
+    local empty = not item
+    local kit = rawget(btn, "_zKit")
+    if kit == "classic" then
+        P.emptySlot:SetShown(empty)
+        P.ring:SetShown(not empty)
+    else
+        if P.empty then P.empty:SetShown(empty) end
+        P.ring:Show()
+    end
+    local q = item and item.quality
+    if isQuest then
+        P.quest:Show()
+        P.qual:Hide()
+    elseif cfg.qualityBorders ~= false and q and q > 1 and _G.ITEM_QUALITY_COLORS and _G.ITEM_QUALITY_COLORS[q] then
+        P.qual:SetVertexColor(ns.QualityRGB(q))
+        P.qual:Show()
+        P.quest:Hide()
+    else
+        P.qual:Hide()
+        P.quest:Hide()
+    end
+    -- the fade, on every piece (as ZacUI's look does: nothing rests on
+    -- alpha inheritance through Blizzard's template)
+    local dim = faded and (tonumber(cfg.fadedAlpha) or 0.25) or 1
+    btn:SetAlpha(dim)
+    if btn._zIcon then
+        btn._zIcon:SetAlpha(item and dim or 0)
+        if btn._zIcon.SetDesaturated then
+            btn._zIcon:SetDesaturated((faded or (item and item.locked)) and true or false)
+        end
+    end
+    for _, key in ipairs({ "ring", "qual", "quest", "emptySlot", "well", "empty" }) do
+        local t = P[key]
+        if t then t:SetAlpha(dim) end
+    end
+    if btn._zCount then btn._zCount:SetAlpha(dim) end
+end
+
+-- the bag-slot row's pieces under the kit: the ring, the stock hover, no
+-- ZacUI edge
+local function KitBagSlot(btn)
+    if not btn or rawget(btn, "_zKitParts") then return end
+    HideFlat(btn)
+    local k = BAGBTN / KIT.unit
+    local ring = OwnTex(btn, "ARTWORK", 1)
+    ring:SetPoint("CENTER", btn, "CENTER", 0, KIT.ringDy * k)
+    ring:SetSize(KIT.ringSize * k, KIT.ringSize * k)
+    FileArt(ring, KIT.ring)
+    for _, r in ipairs({ btn:GetRegions() }) do
+        if r.IsObjectType and r:IsObjectType("Texture") and r.GetDrawLayer and r:GetDrawLayer() == "HIGHLIGHT" then
+            FileArt(r, KIT.hilight)
+            if r.SetBlendMode then r:SetBlendMode("ADD") end
+            r:SetAlpha(1)
+            r:SetVertexColor(1, 1, 1, 1)
+        end
+    end
+    rawset(btn, "_zKitParts", { ring = ring })
+end
+
+-- A slot's own look, on a real item button or a sample: the icon
+-- cropped, a flat backing, a pixel border, our highlight and pushed
+-- states. btn._zIcon / btn._zCount are set by the caller.
+-- (Under a game look the kit's pieces instead: DressKitSlot.)
+function DressSlot(btn)
+    local kit = KitNow()
+    if kit then return DressKitSlot(btn, kit) end
+    local icon = btn._zIcon
+    if icon then
+        ZacUI.Look.CropIcon(icon, nil, nil, { part = "bags" })
+        icon:SetDrawLayer("ARTWORK")
+        SharpenIcon(icon)
+    end
+
+    local bg = btn:CreateTexture(nil, "BACKGROUND", nil, -7)
+    bg._zui_own = true
+    bg:SetAllPoints()
+    bg:SetTexture(FLAT)
+    btn._zBg = bg
+
+    KillSlotArt(btn)
+    AddPixelBorder(btn)
+
+    -- After the sweep, or these get wiped with everything else.
+    local hl = btn.GetHighlightTexture and btn:GetHighlightTexture()
+    if hl then
+        hl:SetColorTexture(1, 1, 1, 0.15)
+        hl:SetBlendMode("ADD")
+        hl._zui_own = true
+    end
+    local pushed = btn.GetPushedTexture and btn:GetPushedTexture()
+    if pushed then
+        pushed:SetColorTexture(0, 0, 0, 0.3)
+        pushed._zui_own = true
+    end
+end
+
+-- WHERE THE TEXTS SIT (ZacUI's anchor shape, bags.anchors.<count|free|
+-- money>). The stack count's default is wherever its button put it (the
+-- game's template on a real slot, read once the first time a spec moves
+-- it and put back exactly when the spec goes); the footer texts' are
+-- their SetPoints. Nothing saved = never touched.
+local function BagAnchor(cfg, key)
+    local a = cfg and cfg.anchors
+    return type(a) == "table" and a[key] or nil
+end
+local function PlaceCount(btn, cfg)
+    local count = btn._zCount
+    if not (count and ns.ApplyAnchor) then return end
+    local spec = BagAnchor(cfg, "count")
+    if not spec then
+        local o = count._zOrigPts
+        if o and count._zMoved then
+            count:ClearAllPoints()
+            for _, p in ipairs(o) do count:SetPoint(p[1], p[2], p[3], p[4], p[5]) end
+            if o.justify then count:SetJustifyH(o.justify) end
+            count._zMoved = nil
+        end
+        return
+    end
+    if not count._zOrigPts then
+        local o = {}
+        for i = 1, (count.GetNumPoints and count:GetNumPoints() or 0) do
+            local p, rel, rp, x, y = count:GetPoint(i)
+            if p then o[#o + 1] = { p, rel or btn, rp or p, x or 0, y or 0 } end
+        end
+        if #o == 0 then o[1] = { "BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 2 } end
+        o.justify = count.GetJustifyH and count:GetJustifyH() or nil
+        count._zOrigPts = o
+    end
+    local o = count._zOrigPts
+    local D = count._zDef or {}
+    count._zDef = D
+    D.point, D.to, D.relPoint, D.x, D.y, D.justify = o[1][1], o[1][2], o[1][3], o[1][4], o[1][5], o.justify
+    if not btn._zAnchorTo then
+        btn._zAnchorTo = function(k) if k == "slot" then return btn elseif k == "icon" then return btn._zIcon end end
+    end
+    ns.ApplyAnchor(count, spec, D, btn._zAnchorTo)
+    count._zMoved = true
+end
+
+-- a footer text at its spot (def: the SetPoint it always had), or the
+-- saved anchor on top
+local function PlaceFooterText(fs, key, cfg, def, resolveTo)
+    if not (fs and def) then return end
+    local spec = BagAnchor(cfg, key)
+    if spec and ns.ApplyAnchor then
+        ns.ApplyAnchor(fs, spec, def, resolveTo)
+    else
+        fs:ClearAllPoints()
+        fs:SetPoint(def.point, def.to, def.relPoint, def.x, def.y)
+        if def.justify then fs:SetJustifyH(def.justify) end
+    end
+end
+
+-- your money as text: the game's coins, or the saved format (bags.formats.
+-- money, ZacUI's text format: a template over [coins] [g] [s] [c], big
+-- numbers for the gold)
+local MONEY_VALUES, MONEY_KINDS = {}, { g = "number", s = "text", c = "text", coins = "text" }
+local function MoneyText(copper, cfg)
+    local spec = cfg and type(cfg.formats) == "table" and cfg.formats.money
+    if not (spec and ns.FormatText) then return Money(copper) end
+    copper = math.floor(copper or 0)
+    local v = MONEY_VALUES
+    v.coins = Money(copper)
+    v.g = math.floor(copper / 10000)
+    v.s = math.floor((copper % 10000) / 100)
+    v.c = copper % 100
+    return ns.FormatText(spec, nil, v, MONEY_KINDS, "coins")
+end
+
+-- The stack count's font and colour (Blizzard's until one is chosen).
+local function StyleSlot(btn, cfg)
+    cfg = cfg or BagCfg()
+    btn._zLookVer = lookVer
+    local count = btn._zCount
+    if not (count and count.GetFont) then return end
+    PlaceCount(btn, cfg)
+    if not count._zStock then count._zStock = { count:GetFont() } end
+    local stock = count._zStock
+    if Empty(cfg.countFont) then
+        if count._zCustom and stock[1] then
+            count._zCustom = nil
+            -- (back in ZacUI's font, which its template wore)
+            if ns.FollowFont then ns.FollowFont(count, stock[2], stock[3])
+            else pcall(count.SetFont, count, stock[1], stock[2], stock[3]) end
+        end
+    elseif ns.ApplyFontSpec and stock[1] then
+        count._zCustom = true
+        ns.ApplyFontSpec(count, cfg.countFont, { fallbackFace = stock[1], size = stock[2] or 14,
+            outline = (stock[3] and stock[3] ~= "") and stock[3] or "outline", shadow = false })
+    end
+    if type(cfg.countColor) == "table" then
+        count:SetTextColor(ns.ColorOf(cfg.countColor))
+        count._zColored = true
+    elseif count._zColored then
+        count._zColored = nil
+        count:SetTextColor(1, 1, 1, 1)
+    end
+end
+
+local function NewItemButton(parent)
+    buttonSerial = buttonSerial + 1
+    local name = "ZacUIBagItem" .. buttonSerial
+    -- Frame TYPE differs across builds ("ItemButton" is the modern one),
+    -- and getting it wrong is a hard error rather than a nil - so both
+    -- are tried.
+    local ok, btn
+    if SecureWanted() then
+        ok, btn = pcall(CreateFrame, "ItemButton", name, parent,
+            "ContainerFrameItemButtonTemplate,SecureActionButtonTemplate")
+        if not ok or not btn then
+            ok, btn = pcall(CreateFrame, "Button", name, parent,
+                "ContainerFrameItemButtonTemplate,SecureActionButtonTemplate")
+        end
+    end
+    if not ok or not btn then
+        ok, btn = pcall(CreateFrame, "ItemButton", name, parent,
+            "ContainerFrameItemButtonTemplate")
+    end
+    if not ok or not btn then
+        ok, btn = pcall(CreateFrame, "Button", name, parent,
+            "ContainerFrameItemButtonTemplate")
+    end
+    if not ok or not btn then return nil end
+    btn:SetSize(SlotSize(), SlotSize())
+    -- Marks this as one of ours, so the split-dialog lift below can tell
+    -- our slots from Blizzard's without hooking anything per button.
+    btn._zBagSlot = true
+    InstallSplitLift()
+
+    -- ============================================================
+    -- BANK CONTAINER TOOLTIPS
+    -- ============================================================
+    -- Bag -1 is not a container as far as the tooltip API is concerned.
+    -- The bank's 28 built-in squares are INVENTORY slots, so the right
+    -- call is SetInventoryItem on BankButtonIDToInvSlotID(slot), not
+    -- SetBagItem(-1, slot) - which is why items in the purchased bank
+    -- BAGS tooltipped correctly while the bank's own squares came up
+    -- blank or showed whatever was hovered previously.
+    --
+    -- OnEnter, not OnClick. The load-bearing absence documented below is
+    -- specifically about the click path, where a wrapper puts Blizzard's
+    -- item-use handler inside our tainted execution. OnEnter reaches no
+    -- protected call at all, so hooking it costs nothing - and the
+    -- template's own OnEnter still runs first for the highlight, the
+    -- cursor update and the repair/upgrade decorations.
+    if parent:GetID() == Bags.BANK_CONTAINER then
+        -- REPLACED, not hooked. A hook only runs when something calls the
+        -- button's OnEnter SCRIPT; Blizzard refreshes container tooltips
+        -- by calling ContainerFrameItemButton_OnEnter(self) directly as a
+        -- global, which bypasses hooks entirely. Patching the one
+        -- refresher I knew about fixed the symptom I could see and left
+        -- any others intact.
+        --
+        -- The template's tooltip logic cannot work here under any
+        -- circumstances - SetBagItem(-1, slot) does not resolve a bank
+        -- slot - so there is nothing to preserve by letting it run first.
+        -- Owning the handler outright means no code path anywhere can
+        -- reach the broken one.
+        --
+        -- What is given up: the template's OnEnter also arms updateTooltip
+        -- and sets the merchant sell-cursor. The refresh only exists to
+        -- re-time cooldown text, which a bank slot has none of, and a
+        -- vendor window cannot be open while the bank is.
+        -- THE REFRESHER IS A METHOD, NOT A SCRIPT, and that is why every
+        -- script-level fix failed. GameTooltip's OWN OnUpdate calls
+        -- owner:UpdateTooltip() every 0.2s, and the container template
+        -- stores ContainerFrameItemButton_OnEnter in that FIELD on the
+        -- button. Replacing the OnEnter script leaves the field intact,
+        -- so the tooltip itself kept re-running Blizzard's handler -
+        -- SetBagItem(-1, slot), zero lines, black box - a beat after our
+        -- correct tooltip appeared. Only bag -1 breaks because only
+        -- there does SetBagItem fail; the purchased bank bags resolve
+        -- fine, which is exactly the "top slots only" symptom.
+        -- The field must point at OUR handler so the refresh repaints
+        -- the right tooltip instead of erasing it.
+        local function BankSlotOnEnter(self)
+            local toInv = _G.BankButtonIDToInvSlotID
+            if not toInv then return end
+            local ok, inv = pcall(toInv, self:GetID())
+            if not ok or not inv then return end
+            -- ASK BEFORE OWNING. SetOwner clears every line, so calling it
+            -- first and only then discovering the slot is empty leaves
+            -- GameTooltip owned by this button with nothing in it - and
+            -- anything that re-shows it afterwards paints an empty frame
+            -- at the previous tooltip's size. That is the black box, and
+            -- /dump GameTooltip:GetOwner():GetName() named ZacUIBagItem100
+            -- - bank container slot 8, which is empty.
+            --
+            -- An empty slot now never touches the tooltip at all.
+            local itemId = GetInventoryItemID and GetInventoryItemID("player", inv)
+            if not itemId then
+                if GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+                self.updateTooltip = nil
+                return
+            end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetInventoryItem("player", inv)
+            -- NumLines rather than the return value: "it said yes" and
+            -- "it actually wrote something" are different questions, and
+            -- only the second one keeps a blank frame off the screen.
+            if GameTooltip:NumLines() > 0 then
+                GameTooltip:Show()
+            else
+                GameTooltip:Hide()
+            end
+
+            -- AND STOP THE REFRESH LOOP, which is the whole bug.
+            -- ContainerFrameItemButton_OnUpdate re-runs the tooltip while
+            -- the cursor sits still, and it does so by calling
+            -- ContainerFrameItemButton_OnEnter(self) as a PLAIN FUNCTION.
+            -- A HookScript hook is attached to the script handler, not to
+            -- the global, so that path never reaches this code: the
+            -- refresh ran Blizzard's SetBagItem(-1, slot), which cannot
+            -- resolve a bank slot, and left an owned tooltip with nothing
+            -- in it. That is the "text for a moment, then a black box".
+            --
+            -- updateTooltip is what arms that loop, so clearing it makes
+            -- OnUpdate return immediately and the tooltip we just built
+            -- stays put. Belt and braces alongside owning the handler:
+            -- if the template's OnEnter ever runs from somewhere else and
+            -- arms it, the loop still finds nothing to do.
+            self.updateTooltip = nil
+        end
+
+        btn:SetScript("OnEnter", BankSlotOnEnter)
+        -- THE FIX THAT FINALLY LANDS: the tooltip's refresh calls
+        -- owner:UpdateTooltip(), so the field has to point at the same
+        -- handler. Refresh now repaints the correct tooltip instead of
+        -- running the template's broken one.
+        btn.UpdateTooltip = BankSlotOnEnter
+
+        -- The template's OnLeave is gone with its OnEnter, so the tooltip
+        -- has to be dismissed explicitly or it follows the cursor around.
+        btn:SetScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+    end
+
+    -- Secure wiring - ONLY if the merge actually gave this button the
+    -- secure OnClick (template merge order is not contractual, so it is
+    -- verified rather than assumed). If it didn't, the button behaves
+    -- exactly as the old all-container one did.
+    -- Opt-in: /run ZacUIDB.bags.secureUse = true (then /reload).
+    -- Off by default; see the note above NewItemButton for what it costs.
+    if SecureWanted() and btn.SetAttribute and SECURE_ONCLICK
+        and btn:GetScript("OnClick") == SECURE_ONCLICK then
+        btn._zSecureUse = true
+        -- BOTH phases: era's secure gate processes mouse clicks on the
+        -- phase the ActionButtonUseKeyDown cvar picks, and with only Up
+        -- registered the secure action simply never fired - which read
+        -- as "right-click does nothing, ever".
+        btn:RegisterForClicks("AnyUp", "AnyDown")
+        btn:SetAttribute("type2", "item")
+        btn:SetAttribute("bag", parent:GetID())
+        -- modified right-clicks fall through to the classic handler
+        btn:SetAttribute("shift-type2", "")
+        btn:SetAttribute("ctrl-type2", "")
+        btn:SetAttribute("alt-type2", "")
+        btn:SetScript("PostClick", SlotPostClick)
+        secureButtons[#secureButtons + 1] = btn
+        InstallContextWatch()
+    end
+
+    -- ============================================================
+    -- NOTHING IS HOOKED ON THIS BUTTON'S OnClick. EVER.
+    -- ============================================================
+    -- THIS IS A LOAD-BEARING ABSENCE, so it is written down where the
+    -- code that caused the damage used to be.
+    --
+    -- There was a HookScript("OnClick") here, added to make shift-click
+    -- splitting work. HookScript does not append to a script - it
+    -- REPLACES it with a wrapper owned by whoever installed the hook, and
+    -- the original then runs inside that wrapper. So every click on a bag
+    -- slot began executing inside ZacUI code, Blizzard's own
+    -- ContainerFrameItemButton_OnClick inherited that taint, and the
+    -- UseContainerItem call at the end of it was refused by the client:
+    --
+    --     AddOn 'Zacui' tried to call the protected function 'UNKNOWN()'
+    --       [C]: in function 'UseContainerItem'
+    --       ContainerFrame_Shared.lua:1341: in ContainerFrameItemButton_OnClick
+    --
+    -- Right-clicking to use an item is the single most common thing
+    -- anybody does in a bag, and the hook broke it to fix a rarer thing.
+    -- ElvUI creates its bag buttons from this exact template and never
+    -- hooks their OnClick; that is not a coincidence.
+    --
+    -- The splitting the hook was added for was never actually broken. The
+    -- dialog was opening BEHIND the bag window, which looks identical to
+    -- nothing happening. Blizzard's template opens it and Blizzard's own
+    -- splitter handles the amount; all ZacUI has to do is make sure the
+    -- dialog is visible, and that is done once, globally, in Bags_Core -
+    -- not per button, and not on the click path.
+
+    -- Resolve the icon FIRST - the sweep spares it by identity, and the
+    -- paint restores it by reference. Three name spellings across builds,
+    -- then a structural fallback: whichever ARTWORK texture the template
+    -- created is the icon, because at this point we have created none.
+    local icon = _G[name .. "IconTexture"] or btn.icon or btn.Icon
+        or (btn.Icon and btn.Icon.icon)
+    if not icon and btn.GetRegions then
+        for _, region in ipairs({ btn:GetRegions() }) do
+            if region.IsObjectType and region:IsObjectType("Texture")
+                and region.GetDrawLayer and region:GetDrawLayer() == "ARTWORK"
+                and not region._zui_own then
+                icon = region
+                break
+            end
+        end
+    end
+    btn._zIcon = icon
+    btn._zCooldown = _G[name .. "Cooldown"] or btn.Cooldown
+    btn._zCount = _G[name .. "Count"] or btn.Count
+    DressSlot(btn)
+    -- a new item's gold edge goes once the mouse has been over it: the
+    -- game is told it is no longer new, and the slot is painted again
+    if btn.HookScript then
+        btn:HookScript("OnEnter", function(self)
+            local n = self._zNew
+            if not n then return end
+            self._zNew = nil
+            if C_NewItems and C_NewItems.RemoveNewItem then pcall(C_NewItems.RemoveNewItem, n[1], n[2]) end
+            for _, v in pairs(views) do
+                if v.frame and v.frame:IsShown() then pcall(v.Paint, v, { [n[1]] = true }) end
+            end
+        end)
+    end
+    return btn
+end
+
+local NO_EDGES = {}
+
+local function PaintSlot(btn, item, isQuest, faded)
+    local empty = not item
+
+    -- Re-swept whenever the slot's CONTENTS change, not just at creation.
+    -- Blizzard's item button helpers put the slot art back when a slot's
+    -- contents change, so a one-time hide survives only until you move
+    -- an item - which is why the blue slot frame kept coming back and
+    -- reading as a quality colour it never was. A repaint of the same
+    -- item (a lock, a count, a search) has nothing to undo, and the sweep
+    -- is ~25 calls a slot.
+    local link = item and item.link or false
+    if btn._zArtLink ~= link then
+        btn._zArtLink = link
+        KillSlotArt(btn)
+    end
+
+    -- Icon last, after everything that could have wiped it.
+    if btn._zIcon then
+        btn._zIcon:SetTexture(item and item.icon or nil)
+        ZacUI.Look.CropIcon(btn._zIcon, nil, nil, { part = "bags" })
+        SharpenIcon(btn._zIcon)
+        btn._zIcon:SetAlpha(item and 1 or 0)
+        btn._zIcon:SetDesaturated(item and item.locked and true or false)
+    end
+
+    -- a plain read: this runs for every slot on every paint, and every
+    -- value below has its default beside it
+    local cfg = (ZacUIDB and ZacUIDB.bags) or BAG_LOOK
+    if btn._zLookVer ~= lookVer then StyleSlot(btn, cfg) end
+    -- a game look: the kit's own paint (THE GAME LOOKS' KIT)
+    if rawget(btn, "_zKit") then return PaintKit(btn, item, isQuest, faded, cfg) end
+    local er, eg, eb
+    if type(cfg.slotColor) == "table" then
+        er, eg, eb = ns.ColorOf(cfg.slotColor)
+    else
+        local e = Col("elementBg")
+        er, eg, eb = e.r, e.g, e.b
+    end
+    btn._zBg:SetVertexColor(er, eg, eb,
+        empty and (tonumber(cfg.emptyAlpha) or 0.45) or (tonumber(cfg.filledAlpha) or 0.75))
+
+    -- Quality on the border rather than a ring texture. Quest items win
+    -- over quality, because a quest item you cannot see is a corpse run.
+    if isQuest then
+        if type(cfg.questColor) == "table" then TintBorder(btn, ns.ColorOf(cfg.questColor))
+        else TintBorder(btn, 1, 0.82, 0, 1) end
+    elseif cfg.qualityBorders ~= false and item and item.quality and item.quality > 1
+        and _G.ITEM_QUALITY_COLORS and _G.ITEM_QUALITY_COLORS[item.quality] then
+        TintBorder(btn, ns.QualityRGB(item.quality))
+    elseif type(cfg.borderColor) == "table" then
+        TintBorder(btn, ns.ColorOf(cfg.borderColor))
+    elseif empty and cfg.rail == true then
+        -- (the rail window, Bags_Rail: an empty slot is barely drawn - a
+        -- faint light edge where a full one has its dark one)
+        TintBorder(btn, 1, 1, 1, 0.06)
+    else
+        TintBorder(btn)
+    end
+    -- (2026-11-10, the bags mock: "a gold ring on new items") an item the
+    -- game still calls new wears the accent on its edge until the mouse
+    -- has been over it (the hover below puts its own edge back)
+    btn._zNew = nil
+    if item and cfg.newItemRing ~= false and C_NewItems and C_NewItems.IsNewItem and not faded then
+        local parent = btn.GetParent and btn:GetParent()
+        local bag, slot = parent and parent.GetID and parent:GetID(), btn.GetID and btn:GetID()
+        if type(bag) == "number" and type(slot) == "number" then
+            local okN, isNew = pcall(C_NewItems.IsNewItem, bag, slot)
+            if okN and isNew == true then
+                local a = Col("accent")
+                TintBorder(btn, a.r, a.g, a.b, 1)
+                btn._zNew = { bag, slot }
+            end
+        end
+    end
+
+    -- ============================================================
+    -- FADING A NON-MATCH
+    -- ============================================================
+    -- This used to be one line - btn:SetAlpha(0.25) - on the theory that
+    -- a frame's alpha carries to everything inside it. It does, right up
+    -- until something in the button sets SetIgnoreParentAlpha, which
+    -- Blizzard's container item template does for parts of its own art;
+    -- and the icon here is Blizzard's own texture, adopted rather than
+    -- created, so whatever flags it carries are its own.
+    --
+    -- The test did not catch it because it asserted btn:GetAlpha(), which
+    -- is the value that had just been set - a tautology. What the eye
+    -- actually reads is the ICON, so the icon is dimmed and desaturated
+    -- directly, and the background and border with it. Nothing here
+    -- depends on alpha inheritance.
+    local dim = faded and (tonumber(cfg.fadedAlpha) or 0.25) or 1
+    btn:SetAlpha(dim)
+    if btn._zIcon then
+        btn._zIcon:SetAlpha(item and dim or 0)
+        -- Greyed as well as dimmed: colour is most of what makes an icon
+        -- recognisable at a glance, so removing it is what turns "there
+        -- but quiet" into "not what you asked for".
+        if btn._zIcon.SetDesaturated then
+            btn._zIcon:SetDesaturated(
+                (faded or (item and item.locked)) and true or false)
+        end
+    end
+    if btn._zBg then
+        btn._zBg:SetAlpha(dim)
+    end
+    for _, edge in ipairs(btn._zui_borderTex or NO_EDGES) do
+        edge:SetAlpha(dim)
+    end
+    if btn._zCount then btn._zCount:SetAlpha(dim) end
+end
+
+-- ============================================================
+-- VIEW
+-- ============================================================
+-- One factory, two instances: the inventory and the bank. They differ
+-- only in which bag list they walk and which sort call they make.
+-- ============================================================
+-- THE BAG SLOTS THEMSELVES
+-- ============================================================
+-- The window showed the contents of your bags and gave you nowhere to
+-- put a new bag. Blizzard's own container frame keeps the four bag
+-- slots on the action bar; a combined window replaces that bar, so it
+-- has to carry them itself - and the bank's seven purchasable slots too,
+-- which stock only exposes on the bank window it hides.
+--
+-- These are ordinary buttons, not secure ones. Equipping a bag is
+-- PutItemInBag(inventorySlot) with a bag on the cursor, and picking one
+-- up is PickupBagFromSlot(inventorySlot); neither is protected, both
+-- are what BagSlotTemplate runs on click, and the game itself refuses a
+-- bag swap in combat before either is reached. The buttons also take a
+-- drag-and-drop the same way, because that is how people actually move
+-- bags.
+local EMPTY_SLOT = "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag"
+
+-- Which inventory slot a bag-bar entry stands for. Inventory bags map
+-- straight through the container id; bank bags are numbered from the
+-- bank's own table, 1 to NUM_BANKBAGSLOTS.
+-- ContainerIDToInventoryID moved into C_Container on this client, with
+-- the rest of the container API; the bare global is nil on 1.15. The
+-- first build of this row read only the global, so every slot came back
+-- with no inventory id, drew as empty and ignored the click. Both are
+-- tried, and failing both the classic offset is used - bag N lives in
+-- inventory slot 19 + N, which has not changed since 2004.
+local function BagInvSlot(view, index)
+    if view.key == "bank" then
+        if C_Container and C_Container.BankButtonIDToInvSlotID then
+            return C_Container.BankButtonIDToInvSlotID(index, 1)
+        end
+        return BankButtonIDToInvSlotID and BankButtonIDToInvSlotID(index, 1) or nil
+    end
+    if C_Container and C_Container.ContainerIDToInventoryID then
+        return C_Container.ContainerIDToInventoryID(index)
+    end
+    if ContainerIDToInventoryID then return ContainerIDToInventoryID(index) end
+    return (CONTAINER_BAG_OFFSET or 19) + index
+end
+
+local function BagSlotClick(btn)
+    local view = btn._zView
+    if view.key == "bank" then
+        -- Unpurchased bank slot: the click IS the purchase, through the
+        -- same confirmation stock uses so the price is shown first.
+        local owned = GetNumBankSlots and GetNumBankSlots() or 0
+        if btn._zIndex > owned then
+            if btn._zIndex == owned + 1 and StaticPopup_Show then
+                local cost = GetBankSlotCost and GetBankSlotCost(owned) or 0
+                if BankFrame then BankFrame.nextSlotCost = cost end
+                StaticPopup_Show("CONFIRM_BUY_BANK_SLOT")
+            end
+            return
+        end
+    end
+    local inv = btn._zInv
+    if not inv then return end
+    if CursorHasItem and CursorHasItem() then
+        PutItemInBag(inv)
+    else
+        PickupBagFromSlot(inv)
+    end
+end
+
+local function BagSlotTooltip(btn)
+    local view = btn._zView
+    GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    if view.key == "bank" then
+        local owned = GetNumBankSlots and GetNumBankSlots() or 0
+        if btn._zIndex > owned then
+            if btn._zIndex == owned + 1 then
+                local cost = GetBankSlotCost and GetBankSlotCost(owned) or 0
+                GameTooltip:AddLine("Bank bag slot")
+                GameTooltip:AddLine("Click to buy for "
+                    .. Money(cost),
+                    1, 1, 1)
+            else
+                GameTooltip:AddLine("Bank bag slot")
+                GameTooltip:AddLine("Buy the previous slot first.", 0.6, 0.6, 0.6)
+            end
+            GameTooltip:Show()
+            return
+        end
+    end
+    local inv = btn._zInv
+    if inv and GameTooltip:SetInventoryItem("player", inv) then
+        GameTooltip:AddLine("Drop a bag here to swap it. Click to pick it up.",
+            0.6, 0.6, 0.6)
+    else
+        GameTooltip:AddLine("Empty bag slot")
+        GameTooltip:AddLine("Drop a bag here to equip it.", 0.6, 0.6, 0.6)
+    end
+    GameTooltip:Show()
+end
+
+local function CreateBagSlot(view, index)
+    local btn = CreateFrame("Button", nil, view.frame)
+    btn:SetSize(BAGBTN, BAGBTN)
+    btn._zView, btn._zIndex = view, index
+    btn._zBagSlot = true
+    btn:RegisterForClicks("LeftButtonUp")
+    btn:RegisterForDrag("LeftButton")
+
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon._zui_own = true
+    icon:SetAllPoints()
+    ZacUI.Look.CropIcon(icon, nil, nil, { part = "bags" })
+    btn._zIcon = icon
+    pcall(UI.Border, btn, "ui", "border")
+
+    local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+    hl._zui_own = true
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 1, 1, 0.15)
+    -- a game look: the stock bag slot (the ring, the square hover)
+    if KitNow() then KitBagSlot(btn) end
+
+    btn:SetScript("OnClick", BagSlotClick)
+    btn:SetScript("OnReceiveDrag", function(self)
+        if self._zInv and CursorHasItem and CursorHasItem() then PutItemInBag(self._zInv) end
+    end)
+    btn:SetScript("OnDragStart", function(self)
+        if self._zInv and self._zHasBag then PickupBagFromSlot(self._zInv) end
+    end)
+    btn:SetScript("OnEnter", BagSlotTooltip)
+    btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    return btn
+end
+
+local function BuildBagBar(view)
+    local count = view.key == "bank" and (Bags.NUM_BANKBAGSLOTS or 7) or 4
+    view.bagSlots = {}
+    local geo = view.geo
+    local x, y = geo.l, -geo.rowY
+    -- (a game look's rings reach past the slot: the stock row's wider step)
+    local step = BAGBTN + (KitNow() and KIT.bagGap or 3)
+    if view.key ~= "bank" then
+        -- The backpack is not a slot - nothing goes in or out of it - but
+        -- the row reads wrong without it at the front.
+        local pack = CreateFrame("Frame", nil, view.frame)
+        pack:SetSize(BAGBTN, BAGBTN)
+        pack:SetPoint("TOPLEFT", x, y)
+        local ico = pack:CreateTexture(nil, "ARTWORK")
+        ico._zui_own = true
+        ico:SetAllPoints()
+        ico:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
+        ZacUI.Look.CropIcon(ico, nil, nil, { part = "bags" })
+        pcall(UI.Border, pack, "ui", "border")
+        if KitNow() then KitBagSlot(pack) end
+        view.packSlot = pack
+        x = x + step
+    end
+    for i = 1, count do
+        local btn = CreateBagSlot(view, i)
+        btn:SetPoint("TOPLEFT", x, y)
+        view.bagSlots[i] = btn
+        x = x + step
+    end
+end
+
+local function PaintBagBar(view)
+    if not view.bagSlots then return end
+    local owned = view.key == "bank" and (GetNumBankSlots and GetNumBankSlots() or 0) or nil
+    for i, btn in ipairs(view.bagSlots) do
+        btn._zInv = BagInvSlot(view, i)
+        local tex = btn._zInv and GetInventoryItemTexture
+            and GetInventoryItemTexture("player", btn._zInv) or nil
+        btn._zHasBag = tex ~= nil
+        btn._zIcon:SetTexture(tex or EMPTY_SLOT)
+        if owned and i > owned then
+            btn._zIcon:SetVertexColor(0.45, 0.45, 0.45)
+            btn._zIcon:SetDesaturated(true)
+        else
+            btn._zIcon:SetVertexColor(1, 1, 1)
+            btn._zIcon:SetDesaturated(false)
+        end
+    end
+end
+
+-- The window's background and edge: UI.Window's own paint, then the
+-- chosen colours over it (so a palette change keeps them).
+local function PaintWindow(frame)
+    local cfg = BagCfg()
+    if frame._zFill and type(cfg.bgColor) == "table" then
+        frame._zFill:SetVertexColor(ns.ColorOf(cfg.bgColor))
+    end
+    if frame._zBorder and type(cfg.frameBorderColor) == "table" then
+        local r, g, b, a = ns.ColorOf(cfg.frameBorderColor)
+        for _, t in ipairs(frame._zBorder) do t:SetVertexColor(r, g, b, a) end
+    end
+    -- a game look: the look's window over the flat one (the dialog border
+    -- and background, the client's rim); returns at once under ZacUI's
+    if KitNow() and not rawget(frame, "_zKitChrome") and ns.Look and ns.Look.Dress then ns.Look.Dress(frame, "window", "bags") end
+end
+
+-- The footer's text (free slots, money): ZacUI's font until one is chosen.
+local function StyleFooter(list)
+    local spec = BagCfg().footerFont
+    local kit = KitNow()
+    for _, fs in ipairs(list) do
+        if fs and fs.SetFont then
+            if Empty(spec) then
+                if fs._zCustom then
+                    fs._zCustom = nil
+                    if ns.HouseFont then ns.HouseFont(fs, F.SMALL) end
+                    if fs.SetShadowOffset and fs._zShadow then fs:SetShadowOffset(fs._zShadow[1], fs._zShadow[2]) end
+                end
+                -- a game look: the game's own font (outlined)
+                if kit then
+                    local f = ZacUIDB and ZacUIDB.font
+                    KitFont(fs, F.SMALL + 1 + ((f and f.delta) or 0))
+                end
+            elseif ns.ApplyFontSpec then
+                if not fs._zShadow and fs.GetShadowOffset then fs._zShadow = { fs:GetShadowOffset() } end
+                fs._zCustom = true
+                local f = ZacUIDB and ZacUIDB.font
+                ns.ApplyFontSpec(fs, spec, { size = F.SMALL + ((f and f.delta) or 0),
+                    outline = (f and f.outline == "NONE") and "none" or "outline", shadow = true })
+            end
+        end
+    end
+end
+
+-- A sample slot for the Bags page: a plain button (no template, no bag,
+-- no clicks that reach an item) dressed by DressSlot and painted by
+-- PaintSlot, like the real ones.
+local function NewSampleSlot(parent)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(SlotSize(), SlotSize())
+    btn:EnableMouse(false)
+    local icon = btn:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
+    btn._zIcon = icon
+    local count = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+    if count.GetFont and not count:GetFont() then
+        pcall(count.SetFont, count, STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 14, "OUTLINE")
+    end
+    count:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -3, 2)
+    count:SetJustifyH("RIGHT")
+    btn._zCount = count
+    DressSlot(btn)
+    return btn
+end
+
+-- The window's own furniture under a game look: the title in the game's
+-- font and gold, centred in the bar (ZacUI's mark steps aside), the look's
+-- close button, the stock search box and sort button. Once, when the
+-- window is built (the look is latched).
+local function DressViewKit(view, kit)
+    local f = view.frame
+    view.kit = kit
+    local chrome = view.chrome
+    local bar, label = f.titleBar, f.titleText
+    if chrome then
+        -- the client's own chrome carries the title and the close button
+        view.kitTitle = chrome.TitleContainer.TitleText
+        bar, label = nil, nil
+    end
+    if bar and label then
+        -- ZacUI's mark: the texture the title is anchored to
+        local _, mark = label:GetPoint(1)
+        if mark and mark ~= bar and mark.IsObjectType and mark:IsObjectType("Texture") then
+            mark:Hide()
+            mark:SetAlpha(0)
+        end
+        local t = KitLabel(bar, label, 12, "CENTER")
+        if kit == "classic" then
+            -- a Blizzard dialog's title: centred just inside the border's
+            -- top edge, the way the stock frames and EllesmereUI's one bag
+            -- sit it (the bar's middle put it on the border's inner rim)
+            t:SetPoint("TOP", f, "TOP", 0, -16)
+        else
+            -- the modern rims carry a title band (about 20 px) along the
+            -- top: the title is centred in it, as the client's own panels
+            -- set theirs - the bar's middle put it on the band's lower line
+            t:SetPoint("TOP", f, "TOP", 0, -5)
+        end
+        t:SetTextColor(KIT.gold[1], KIT.gold[2], KIT.gold[3], 1)
+        view.kitTitle = t
+    end
+    local close = f.closeButton
+    if close and bar and not chrome then
+        KitClose(close, kit)
+        close:ClearAllPoints()
+        if kit == "classic" then
+            -- in the border's top-right corner, as on the stock panels
+            close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -5, -5)
+        elseif AtlasOK(KIT.closeModern[1]) then
+            -- the client's red X in the rim's top-right corner, on the
+            -- title band (the stock panels: TOPRIGHT, 1 out)
+            close:SetPoint("TOPRIGHT", f, "TOPRIGHT", 1, 1)
+        else
+            -- the round button's art sits in the middle of its 32: its
+            -- edge lands 5 in from the bar's
+            close:SetPoint("RIGHT", bar, "RIGHT", 2, 0)
+        end
+    end
+    if chrome and view.search then
+        -- the combined bag's search box: under the title, 62 in, 38 short
+        -- of the right edge, 18 high
+        local s = view.search
+        s:ClearAllPoints()
+        s:SetPoint("TOPLEFT", f, "TOPLEFT", TPL.searchX, TPL.searchY)
+        s:SetPoint("TOPRIGHT", f, "TOPRIGHT", TPL.searchR, TPL.searchY)
+        s:SetHeight(TPL.searchH)
+    end
+    if kit == "classic" and view.search then
+        view.search:ClearAllPoints()
+        view.search:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -(M.TITLEBAR + 5 + CLASSIC_DROP))
+        if view.sortButton then
+            view.sortButton:ClearAllPoints()
+            view.sortButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, -(M.TITLEBAR + 5 + CLASSIC_DROP))
+        end
+    end
+    KitSearch(view.search)
+    local sort = view.sortButton
+    if sort and chrome and AtlasOK(KIT.sortUp) then
+        -- the combined bag's autosort button, at its own spot
+        KitSortButton(sort, kit, TPL.sort)
+        sort:ClearAllPoints()
+        sort:SetPoint("TOPRIGHT", f, "TOPRIGHT", TPL.sort.x, TPL.sort.y)
+    elseif sort then
+        KitSortButton(sort, kit)
+        if kit ~= "classic" and AtlasOK(KIT.sortUp) then
+            -- the autosort button, centred on the search row
+            sort:ClearAllPoints()
+            sort:SetPoint("TOPRIGHT", f, "TOPRIGHT", -PAD, -(M.TITLEBAR + 3))
+        end
+    end
+    -- (2026-11-10) the Groups button wears the look's own panel button, as
+    -- Sort does under the 2004 look, and keeps its place left of Sort
+    if view.groupsButton then
+        KitButton(view.groupsButton)
+        if sort then
+            view.groupsButton:ClearAllPoints()
+            view.groupsButton:SetPoint("RIGHT", sort, "LEFT", -6, 0)
+        end
+    end
+    if chrome then
+        -- the money along the bottom in the client's coin box: the free
+        -- count at its left, the money its copper 13 in from the right
+        local band = KitCoinBand(f)
+        view.coinBand = band
+        view.footerDef.free = { point = "LEFT", to = band, relPoint = "LEFT", x = TPL.coinCap, y = 0 }
+        view.footerDef.money = { point = "RIGHT", to = band, relPoint = "RIGHT", x = -TPL.copperIn, y = 0, justify = "RIGHT" }
+        local cfg = BagCfg()
+        PlaceFooterText(view.freeText, "free", cfg, view.footerDef.free, view.footerTo)
+        PlaceFooterText(view.moneyText, "money", cfg, view.footerDef.money, view.footerTo)
+        local hit = view.moneyHit
+        if hit then
+            hit:ClearAllPoints()
+            hit:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -TPL.moneyX, TPL.moneyY)
+            hit:SetHeight(TPL.moneyH)
+        end
+    end
+end
+
+local function CreateView(key, globalName, title, bagList)
+    local view = { key = key, title = title, bagList = bagList,
+                   buttons = {}, holders = {} }
+
+    -- (2026-11-10) a bag on the title bar, as the mail and vendor windows
+    -- carry their own icon
+    local frame = UI.Window(globalName, 400, 400, title,
+        { icon = "Interface\\Icons\\" .. (key == "bank" and "INV_Misc_Bag_10" or "INV_Misc_Bag_08"),
+          look = false })     -- (the bag dresses itself: THE GAME LOOKS' KIT below)
+    view.frame = frame
+    -- a modern look on a client with the combined bag's template: that
+    -- template's chrome under the window (THE GAME LOOKS' KIT)
+    local kit0 = KitNow()
+    if kit0 and kit0 ~= "classic" and ChromeOK() then view.chrome = KitChrome(view) end
+    -- where the content sits: ZacUI's own spots, or the client's bag's
+    if view.chrome then
+        view.geo = { l = TPL.left, r = TPL.right,
+            rowY = -TPL.searchY + TPL.searchH + TPL.rowGap,
+            top = TPL.slotsTop + BAGBTN + TPL.rowGap,
+            gridBottom = TPL.moneyY + TPL.moneyH + TPL.firstOverMoney,
+            bottom = TPL.moneyY + TPL.moneyH + TPL.firstOverMoney }
+    else
+        -- (Classic: the search row, the bag row and the slots CLASSIC_DROP
+        -- lower, under the title and clear of the 32 px round close)
+        local drop = (kit0 == "classic") and CLASSIC_DROP or 0
+        view.geo = { l = PAD, r = PAD, rowY = M.TITLEBAR + HEADER - BAGBTN - 4 + drop,
+            top = M.TITLEBAR + HEADER + drop, gridBottom = FOOTER, bottom = FOOTER + 6 }
+    end
+    -- THE RAIL WINDOW (2026-11-13, Bags_Rail; bags.rail, ZacUI's own look
+    -- only, read once as the window is built): the bags and the views on
+    -- a rail down the left, search and Sort on the title bar, the slots
+    -- in sections under quiet headings. Its geometry is the rail's.
+    local Rail = Bags.Rail
+    if Rail and not view.chrome and not kit0 and frame.titleBar and Rail.Wanted(view) then
+        view.rail = true
+        view.geo = Rail.Geo(view)
+    end
+    local ownPaint = frame._zPaint
+    frame._zPaint = function(self)
+        if ownPaint then ownPaint(self) end
+        PaintWindow(self)
+    end
+    frame:_zPaint()
+
+    -- Search + sort row
+    local search = UI.EditBox(frame, { width = 180, height = 20,
+        hint = "Search" })
+    search:SetPoint("TOPLEFT", PAD, -(M.TITLEBAR + 5))
+    view.search = search
+
+    -- Classic Era has NO sort API, so this runs ZacUI's own engine: it
+    -- combines partial stacks, then orders by category, quality and name,
+    -- one move per tick. See Bags_Sort for why it cannot be a loop.
+    local sort = UI.Button(frame, "Sort", { width = 58, height = 20,
+        tooltip = "Combine partial stacks, then sort by type, quality and "
+            .. "name. Moves happen one at a time - this client has no "
+            .. "server-side sort, so ZacUI does it by hand." })
+    sort:SetPoint("TOPRIGHT", -PAD, -(M.TITLEBAR + 5))
+    sort:SetScript("OnClick", function()
+        local Sorter = ns.BagSort
+        if not Sorter then return end
+        if Sorter.IsRunning() then
+            Sorter.Cancel()
+            return
+        end
+        Sorter.Sort(bagList, view.title or "Bags")
+    end)
+    view.sortButton = sort
+
+    -- (2026-11-09, Zac: both bag mocks, "give users the option to choose")
+    -- GROUPS: one grid as always, or the slots split by kind under the
+    -- settings window's tick-and-line headers. The button is lit while on.
+    local groupsBtn = UI.Button(frame, "Groups", { width = 62, height = 20,
+        tooltip = "Split the bag by kind (consumables, gear, trade goods, quest items, the rest, free slots), "
+            .. "or show it as one grid. Nothing is moved in your bags: only where each slot is drawn." })
+    groupsBtn:SetPoint("RIGHT", sort, "LEFT", -6, 0)
+    groupsBtn:SetScript("OnClick", function()
+        local c = BagCfg()
+        if c.layout == "groups" then c.layout = nil else c.layout = "groups" end
+        for _, v in pairs(views) do
+            if v.groupsButton then v.groupsButton:SetActive(c.layout == "groups") end
+            v._layoutSig = nil
+            pcall(v.Refresh, v)
+        end
+    end)
+    groupsBtn:SetActive(BagCfg().layout == "groups")
+    view.groupsButton = groupsBtn
+
+    -- (2026-11-10, the bags mock: "search and Sort in the title bar")
+    -- ZacUI's own window only, and only when asked for: the three sit on
+    -- the title bar beside the X, and the row they had goes - the bag row
+    -- and the slots move up by it. Read once, as the window is built.
+    if (BagCfg().titleTools or view.rail) and not view.chrome and kit0 ~= "classic" and frame.titleBar then
+        local TOOL_H, ROW = 18, 25
+        local lvl = frame.titleBar:GetFrameLevel() + 2
+        local right = frame.closeButton
+        sort:SetHeight(TOOL_H) groupsBtn:SetHeight(TOOL_H) search:SetHeight(TOOL_H)
+        sort:ClearAllPoints()
+        if right then sort:SetPoint("RIGHT", right, "LEFT", -6, 0)
+        else sort:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -(M.TITLEBAR + 4), -(M.TITLEBAR - TOOL_H) / 2) end
+        search:ClearAllPoints()
+        -- (the rail window has the views on its rail: no Groups button)
+        if view.rail then
+            groupsBtn:Hide()
+            search:SetPoint("RIGHT", sort, "LEFT", -6, 0)
+        else
+            search:SetPoint("RIGHT", groupsBtn, "LEFT", -6, 0)
+        end
+        -- as wide as the bar leaves it (a narrow bag: shorter, then gone)
+        local function FitSearch()
+            local room = (frame:GetWidth() or 0) - 272   -- (the title bar's icon: 22 more)
+            search:SetShown(room >= 50)
+            search:SetWidth(math.max(50, math.min(140, room)))
+        end
+        FitSearch()
+        frame:HookScript("OnSizeChanged", FitSearch)
+        for _, w in ipairs({ sort, groupsBtn, search }) do w:SetFrameLevel(lvl) end
+        view.titleTools = true
+        if not view.rail then
+            view.geo.rowY = view.geo.rowY - ROW
+            view.geo.top = view.geo.top - ROW
+        end
+    end
+
+    -- The bag slots, on their own row under the search box (the rail
+    -- window: down its rail, with the keyring and the views).
+    if view.rail then Rail.Build(view) else BuildBagBar(view) end
+
+    -- Footer: free slots on the left, money on the right
+    local free = UI.Font(frame, F.SMALL, { cat = "text", key = "gray" })
+    free:SetPoint("BOTTOMLEFT", PAD, 7)
+    view.freeText = free
+
+    local money = UI.Font(frame, F.SMALL, { justify = "RIGHT" })
+    money:SetPoint("BOTTOMRIGHT", -PAD, 7)
+    view.moneyText = money
+
+    -- how full the bags are (painted by PaintFooter), right of the count
+    local fb = CreateFrame("Frame", nil, frame)
+    fb:SetSize(70, 6)
+    fb:SetPoint("LEFT", free, "RIGHT", 8, 0)
+    UI.Fill(fb, "ui", "elementBg")
+    UI.Border(fb, "ui", "border")
+    fb._zPaint = UI.PaintBox
+    fb:_zPaint()
+    fb.fill = fb:CreateTexture(nil, "ARTWORK")
+    fb.fill._zui_own = true
+    fb.fill:SetTexture(FLAT)
+    fb.fill:SetPoint("TOPLEFT", 1, -1)
+    fb.fill:SetPoint("BOTTOMLEFT", 1, 1)
+    fb:Hide()
+    view.fillBar = fb
+    -- their spots, for a saved anchor to go on top of
+    view.footerDef = {
+        free = { point = "BOTTOMLEFT", to = frame, relPoint = "BOTTOMLEFT", x = PAD, y = 7 },
+        money = { point = "BOTTOMRIGHT", to = frame, relPoint = "BOTTOMRIGHT", x = -PAD, y = 7, justify = "RIGHT" },
+    }
+    view.footerTo = function(k)
+        if k == "window" then return frame elseif k == "free" then return view.freeText
+        elseif k == "money" then return view.moneyText elseif k == "total" then return view.totalText end
+    end
+    function view:PlaceFooter()
+        local cfg = BagCfg()
+        if not (BagAnchor(cfg, "free") or BagAnchor(cfg, "money") or self._zFooterMoved) then return end
+        self._zFooterMoved = (BagAnchor(cfg, "free") or BagAnchor(cfg, "money")) and true or nil
+        PlaceFooterText(self.freeText, "free", cfg, self.footerDef.free, self.footerTo)
+        PlaceFooterText(self.moneyText, "money", cfg, self.footerDef.money, self.footerTo)
+    end
+
+    -- BOTH NUMBERS, ALWAYS VISIBLE. The two answer different questions -
+    -- "can I afford this right now" is this character's purse, "how am I
+    -- doing overall" is every character - and putting the second one
+    -- behind a hover meant the common question needed a mouse.
+    --
+    -- The account total sits to the LEFT, dimmed and rounded to whole
+    -- gold. Rounded because it is a summary: a running silver-and-copper
+    -- tail on a five-figure number is noise, and two full coin strings
+    -- side by side would crowd the free-slot count out of a narrow bag.
+    local total = UI.Font(frame, F.SMALL, { cat = "text", key = "gray",
+        justify = "RIGHT" })
+    total:SetPoint("RIGHT", money, "LEFT", -8, 0)
+    view.totalText = total
+    view.footerTexts = { free, money, total }
+    StyleFooter(view.footerTexts)
+
+    local moneyHit = CreateFrame("Frame", nil, frame)
+    moneyHit:SetPoint("BOTTOMRIGHT", -PAD + 2, 4)
+    -- Wide enough to cover BOTH numbers, so the breakdown is still one
+    -- hover away from either of them.
+    moneyHit:SetSize(260, 16)
+    moneyHit:EnableMouse(true)
+    moneyHit:SetScript("OnEnter", function(self)
+        local rows, total = Bags.GoldRows()
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:AddLine("Gold across all characters")
+        GameTooltip:AddLine(" ")
+        for _, r in ipairs(rows) do
+            local cr, cg, cb = 1, 1, 1
+            if r.class then cr, cg, cb = ns.ClassColor(r.class) end
+            local label = r.name or "?"
+            if r.isMe then label = label .. " |cff888888(here)|r" end
+            if r.mail and r.mail > 0 then label = label .. " |cff888888(+mail)|r" end
+            GameTooltip:AddDoubleLine(label, Money(r.copper or 0),
+                cr, cg, cb, 1, 1, 1)
+        end
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddDoubleLine("Total", Money(total),
+            1, 0.82, 0, 1, 1, 1)
+        -- Said out loud, because a total that silently omits half your
+        -- characters is worse than one that admits its edges.
+        if Bags.FromReadycheck and Bags.FromReadycheck() then
+            GameTooltip:AddLine("Your other accounts come from Readycheck's gold "
+                .. "sync (Stats Bar > Gold shows how fresh each one is).", 0.6, 0.6, 0.6, true)
+        else
+            GameTooltip:AddLine("Characters on other WoW accounts are not "
+                .. "visible to addons.", 0.6, 0.6, 0.6, true)
+        end
+        GameTooltip:Show()
+    end)
+    moneyHit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    view.moneyHit = moneyHit
+
+    -- a game look: the furniture in the look's art
+    local kit = KitNow()
+    if kit then DressViewKit(view, kit) end
+
+    -- The grid area, and one ID-carrying holder per bag on top of it.
+    local grid = CreateFrame("Frame", nil, frame)
+    local geo = view.geo
+    grid:SetPoint("TOPLEFT", geo.l, -geo.top)
+    grid:SetPoint("BOTTOMRIGHT", -geo.r, geo.gridBottom)
+    view.grid = grid
+
+    for _, bag in ipairs(bagList) do
+        local holder = CreateFrame("Frame", nil, grid)
+        holder:SetAllPoints()
+        holder:SetID(bag)          -- THE reason these exist
+        view.holders[bag] = holder
+    end
+    if view.rail then Rail.Attach(view) end
+
+    -- (2026-11-10, Zac: "typing in the search box omega lags my game")
+    -- Typing only changes which slots are faded. This ran a full layout
+    -- and repaint of the bag on every key; now it is one repaint a beat
+    -- after the last key, and only while the bag is showing.
+    local searchSerial = 0
+    search.editBox:HookScript("OnTextChanged", function()
+        searchSerial = searchSerial + 1
+        local mine = searchSerial
+        C_Timer.After(0.1, function()
+            if mine ~= searchSerial then return end
+            if view.frame:IsShown() then view:Paint() end
+        end)
+    end)
+
+    function view:Button(bag, index)
+        self.buttons[bag] = self.buttons[bag] or {}
+        local list = self.buttons[bag]
+        if not list[index] then
+            local btn = NewItemButton(self.holders[bag])
+            if not btn then return nil end
+            btn:SetID(index)
+            -- the secure use path addresses the PHYSICAL slot, so the
+            -- attribute pair is fixed for the button's whole life -
+            -- whatever sits in the slot later is what gets used.
+            -- ATTRIBUTE CONTRACT, learned the hard way: "bag"+"slot" is
+            -- the container form. A bare NUMBER in the "item" attribute
+            -- means an INVENTORY slot - bag indexes 13/14 landed on the
+            -- trinket slots and right-clicking a bag item fired a
+            -- trinket. Never put a number in "item".
+            if btn._zSecureUse then
+                btn:SetAttribute("slot", index)
+                btn:SetAttribute("item", nil)
+            end
+            list[index] = btn
+        end
+        return list[index]
+    end
+
+    -- ============================================================
+    -- REFRESH IS TWO HALVES, AND THE SPLIT IS THE WHOLE POINT
+    -- ============================================================
+    -- The buttons carry SecureActionButtonTemplate, so they are PROTECTED
+    -- frames. Blocked in combat: creating them, SetAttribute, SetPoint /
+    -- ClearAllPoints / Show / Hide on them, and SetSize on the window
+    -- that anchors them.
+    --
+    -- NOT blocked, and this is the part a blanket combat bail got wrong:
+    -- textures, font strings, SetAlpha and Cooldown:SetCooldown. Freezing
+    -- those too meant every icon vanished the moment a fight started -
+    -- a bag you cannot read in combat is worse than the taint it avoided.
+    --
+    -- So: Layout() is the protected half and defers, Paint() is the safe
+    -- half and always runs.
+
+    -- Positions only ever need redoing when the column count or a bag's
+    -- size changed. Signature-gated so the common case - a stack moved,
+    -- an item looted - never touches a protected call at all.
+    local function LayoutSig(self)
+        local cols = math.max(4, (ZacUIDB.bags and ZacUIDB.bags.columns) or 10)
+        local sig = cols .. ":" .. SlotSize() .. ":" .. SlotGap()
+        for _, bag in ipairs(self.bagList) do
+            sig = sig .. ":" .. tostring(Bags.Slots(bag))
+        end
+        -- grouped: which group each slot is in is part of the layout
+        if BagCfg().layout == "groups" then
+            local parts = { sig, "g" }
+            for _, bag in ipairs(self.bagList) do
+                for slot = 1, Bags.Slots(bag) do
+                    parts[#parts + 1] = GroupOf(Bags.Item(bag, slot))
+                end
+            end
+            sig = table.concat(parts, "")
+        end
+        return sig, cols
+    end
+
+    -- a group's header: the accent tick, its name, how many, a hairline
+    local function GroupHead(self, i)
+        self.groupHeads = self.groupHeads or {}
+        local h = self.groupHeads[i]
+        if h then return h end
+        h = CreateFrame("Frame", nil, self.grid)
+        h:SetHeight(GROUP_HEAD)
+        h.tick = h:CreateTexture(nil, "ARTWORK")
+        h.tick._zui_own = true
+        h.tick:SetTexture(FLAT)
+        h.tick:SetSize(3, 11)
+        h.tick:SetPoint("LEFT", 0, 0)
+        h.name = UI.Font(h, F.SMALL, { cat = "text", key = "normal" })
+        h.name:SetPoint("LEFT", h.tick, "RIGHT", 6, 0)
+        h.count = UI.Font(h, F.SMALL, { cat = "text", key = "gray" })
+        h.count:SetPoint("LEFT", h.name, "RIGHT", 6, 0)
+        h.line = h:CreateTexture(nil, "ARTWORK")
+        h.line._zui_own = true
+        h.line:SetTexture(FLAT)
+        h.line:SetHeight(1)
+        h.line:SetPoint("LEFT", h.count, "RIGHT", 8, 0)
+        h.line:SetPoint("RIGHT", h, "RIGHT", 0, 0)
+        self.groupHeads[i] = h
+        return h
+    end
+
+    -- In the default plain mode a closed window is laid out when it next
+    -- opens (OnShow refreshes), so a bag event with the bag shut costs
+    -- nothing here. Only the opt-in secure mode lays out while closed:
+    -- its buttons cannot be created or moved once a fight starts, so the
+    -- grid has to be ready before one does.
+    function view:Layout(force)
+        if not force and not self.frame:IsShown() and not SecureActive() then
+            return true
+        end
+        if SecureActive() and InCombatLockdown and InCombatLockdown() then
+            self._layoutPending = true
+            return false
+        end
+        -- the rail window lays its sections out itself (Bags_Rail)
+        if self.rail then return Bags.Rail.Layout(self, force) end
+        local sig, cols = LayoutSig(self)
+        if not force and sig == self._layoutSig then
+            self._layoutPending = nil
+            return true
+        end
+
+        local n = 0
+        local size, gap = SlotSize(), SlotGap()
+        if BagCfg().layout == "groups" then
+            -- GROUPED: the same buttons, drawn group by group
+            local lists = {}
+            for _, bag in ipairs(self.bagList) do
+                local slots = Bags.Slots(bag)
+                for slot = 1, slots do
+                    local btn = self:Button(bag, slot)
+                    if btn then
+                        local g = GroupOf(Bags.Item(bag, slot))
+                        lists[g] = lists[g] or {}
+                        lists[g][#lists[g] + 1] = btn
+                    end
+                end
+                local list = self.buttons[bag]
+                if list then
+                    for i = slots + 1, #list do list[i]:Hide() end
+                end
+            end
+            local y, used = 0, 0
+            local a, rule = Col("accent"), GetColor("text", "gray")
+            local gridW = cols * size + (cols - 1) * gap
+            for g = 1, #GROUP_NAMES do
+                local list = lists[g]
+                if list and #list > 0 then
+                    used = used + 1
+                    local head = GroupHead(self, used)
+                    head:ClearAllPoints()
+                    head:SetPoint("TOPLEFT", self.grid, "TOPLEFT", 0, -y)
+                    head:SetWidth(gridW)
+                    head.tick:SetVertexColor(a.r, a.g, a.b, 1)
+                    head.name:SetText(GROUP_NAMES[g])
+                    head.count:SetText(#list)
+                    head.line:SetVertexColor(rule.r, rule.g, rule.b, 0.25)
+                    head:Show()
+                    y = y + GROUP_HEAD + 3
+                    for i, btn in ipairs(list) do
+                        local col = (i - 1) % cols
+                        local row = math.floor((i - 1) / cols)
+                        btn:ClearAllPoints()
+                        btn:SetSize(size, size)
+                        btn:SetPoint("TOPLEFT", self.grid, "TOPLEFT", col * (size + gap), -(y + row * (size + gap)))
+                        btn:Show()
+                        if btn._zCooldown and btn._zCooldown.Show then btn._zCooldown:Show() end
+                    end
+                    local rows = math.ceil(#list / cols)
+                    y = y + rows * size + (rows - 1) * gap + 7
+                end
+            end
+            for i = used + 1, #(self.groupHeads or {}) do self.groupHeads[i]:Hide() end
+            local geo = self.geo
+            local w = geo.l + geo.r + gridW
+            self.frame:SetSize(math.max(300, w), geo.top + math.max(size, y - 7) + geo.bottom)
+            self._layoutSig = sig
+            self._layoutPending = nil
+            return true
+        end
+        for i = 1, #(self.groupHeads or {}) do self.groupHeads[i]:Hide() end
+        for _, bag in ipairs(self.bagList) do
+            local slots = Bags.Slots(bag)
+            for slot = 1, slots do
+                local btn = self:Button(bag, slot)
+                if btn then
+                    local col = n % cols
+                    local row = math.floor(n / cols)
+                    btn:ClearAllPoints()
+                    btn:SetSize(size, size)
+                    btn:SetPoint("TOPLEFT", self.grid, "TOPLEFT",
+                        col * (size + gap), -row * (size + gap))
+                    btn:Show()
+                    -- Shown ONCE, here, and never toggled again: the
+                    -- cooldown is a child of a protected button, so
+                    -- Show/Hide on it is refused in combat as well.
+                    -- Paint drives it with SetCooldown alone, which is
+                    -- not protected - that is why CooldownFrame_Set,
+                    -- which shows and hides internally, is not used.
+                    if btn._zCooldown and btn._zCooldown.Show then
+                        btn._zCooldown:Show()
+                    end
+                    n = n + 1
+                end
+            end
+            -- Slots that vanished when a smaller bag was equipped.
+            local list = self.buttons[bag]
+            if list then
+                for i = slots + 1, #list do list[i]:Hide() end
+            end
+        end
+
+        -- Size the window to the grid it actually drew.
+        local rows = math.max(1, math.ceil(n / cols))
+        local geo = self.geo
+        local w = geo.l + geo.r + cols * size + (cols - 1) * gap
+        local h = geo.top + rows * size + (rows - 1) * gap + geo.bottom
+        self.frame:SetSize(math.max(300, w), h)
+
+        self._layoutSig = sig
+        self._layoutPending = nil
+        return true
+    end
+
+    local function PaintCooldown(btn, bag, slot)
+        if btn._zCooldown and btn._zCooldown.SetCooldown then
+            local start, duration, enable = Bags.Cooldown(bag, slot)
+            if enable and enable ~= 0 and duration and duration > 0 then
+                btn._zCooldown:SetCooldown(start or 0, duration)
+            else
+                btn._zCooldown:SetCooldown(0, 0)
+            end
+        end
+    end
+
+    -- The footer: free slots (counted off the API, not off the buttons -
+    -- a bag equipped in combat has no buttons yet and the count should
+    -- still tell the truth), this character's money and everyone's.
+    -- Item reads come from the shared cache, so this is cheap after a
+    -- partial paint has already refreshed the bags that changed.
+    function view:PaintFooter()
+        local freeCount, totalCount = 0, 0
+        for _, bag in ipairs(self.bagList) do
+            local slots = Bags.Slots(bag)
+            totalCount = totalCount + slots
+            for slot = 1, slots do
+                if not Bags.Item(bag, slot) then freeCount = freeCount + 1 end
+            end
+        end
+        self.freeText:SetText(freeCount .. " / " .. totalCount .. " free")
+        -- (the rail window: how full the bags are sits beside the title,
+        -- and the footer is the money's)
+        if self.rail then
+            self.freeText:SetText("")
+            Bags.Rail.Count(self, freeCount, totalCount)
+        end
+        -- (2026-11-10, the bags mock) how full the bags are, as a small
+        -- bar beside the count; not under a game look's coin band
+        local fb = self.fillBar
+        if fb then
+            local on = BagCfg().fillBar ~= false and not self.chrome and not self.rail and totalCount > 0
+            fb:SetShown(on)
+            if on then
+                local frac = math.max(0, math.min(1, (totalCount - freeCount) / totalCount))
+                local a = Col("accent")
+                local full = frac >= 0.999 and GetColor("text", "red") or a
+                fb.fill:SetVertexColor(full.r, full.g, full.b, 1)
+                fb.fill:SetWidth(math.max(0.01, (fb:GetWidth() - 2) * frac))
+                fb.fill:SetShown(frac > 0)
+            end
+        end
+        self:PlaceFooter()
+        self:PaintMoney()
+    end
+
+    function view:PaintMoney()
+        if GetMoney then
+            -- This character, exact, to the copper.
+            self.moneyText:SetText(MoneyText(GetMoney(), BagCfg()))
+            -- Everyone, to the gold. "all" rather than a sigma so it
+            -- reads without needing to be explained.
+            self.totalText:SetText("all " .. Money(Bags.GoldTotal(), "gold"))
+        end
+    end
+
+    -- Contents. Nothing in here is a protected call, so it runs in combat
+    -- exactly as it does out of it. bags = a set of bag ids to repaint,
+    -- or nil for every bag.
+    function view:Paint(bags)
+        local query = self.search:GetText()
+        local searching = query and query ~= ""
+
+        for _, bag in ipairs(self.bagList) do
+            local list = self.buttons[bag]
+            if list and (not bags or bags[bag]) then
+                for slot = 1, Bags.Slots(bag) do
+                    local btn = list[slot]
+                    if btn then
+                        local item = Bags.Item(bag, slot)
+                        local isQuest = item and item.isQuest or false
+                        if SetItemButtonCount then
+                            SetItemButtonCount(btn, item and item.count or 0)
+                        end
+                        if SetItemButtonDesaturated then
+                            SetItemButtonDesaturated(btn, item and item.locked or false)
+                        end
+                        PaintCooldown(btn, bag, slot)
+
+                        -- PaintSlot sets the icon, because PaintSlot is what
+                        -- sweeps the slot art - doing it the other way round
+                        -- meant every icon was assigned and then immediately
+                        -- wiped on the same pass.
+                        local faded = searching
+                            and not Bags.Matches(item, query, bag, slot, isQuest)
+                        -- (the rail window: a bag picked on the rail
+                        -- keeps its slots lit and dims the rest)
+                        if self.railLit ~= nil and self.railLit ~= bag then faded = true end
+                        PaintSlot(btn, item, isQuest, faded)
+                        if Bags.SlotExtra then Bags.SlotExtra(btn, item, bag, slot) end   -- Bags_Extras (item level / BoE)
+                    end
+                end
+            end
+        end
+
+        -- the rail window's own slots (the keyring) and its rail
+        if self.rail then Bags.Rail.Paint(self, bags, searching and query or nil) end
+        self:PaintFooter()
+    end
+
+    -- Only the cooldown swipes: no item reads, no slot art. This is what
+    -- a BAG_UPDATE_COOLDOWN-only batch gets, which in a fight with the
+    -- bags open is every global cooldown.
+    function view:PaintCooldowns()
+        for _, bag in ipairs(self.bagList) do
+            local list = self.buttons[bag]
+            if list then
+                for slot = 1, Bags.Slots(bag) do
+                    local btn = list[slot]
+                    if btn then PaintCooldown(btn, bag, slot) end
+                end
+            end
+        end
+    end
+
+    -- batch: what changed (see Bags_Core's notification), or nil for
+    -- everything. A closed window does nothing but the secure-mode
+    -- layout; it is repainted in full when it opens.
+    function view:Refresh(batch)
+        if batch and not batch.full and not next(batch.bags) then
+            if self.frame:IsShown() then
+                if batch.cooldown then self:PaintCooldowns() end
+                if batch.money then self:PaintMoney() end
+            end
+            return
+        end
+        self:Layout()
+        if self.frame:IsShown() then
+            local bags = batch and not batch.full and batch.bags or nil
+            self:Paint(bags)
+            if batch and batch.cooldown and bags then self:PaintCooldowns() end
+            PaintBagBar(self)
+        end
+    end
+
+    frame:HookScript("OnShow", function() view:Refresh() end)
+    -- A button hidden or re-anchored under the cursor never gets its
+    -- OnLeave, so a tooltip it owns is stranded on screen with nothing to
+    -- dismiss it. Closing the window takes ours with it.
+    frame:HookScript("OnHide", function()
+        local owner = GameTooltip:GetOwner()
+        if owner and owner._zBagSlot then GameTooltip:Hide() end
+    end)
+    views[key] = view
+    return view
+end
+
+-- ============================================================
+-- MODULE
+-- ============================================================
+Modules.inventory = function()
+    -- A dedicated bag addon and a combined bag are the same job. Whichever
+    -- the user has loaded wins; ZacUI does not draw a second one.
+    local isLoaded = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+    if isLoaded then
+        for _, other in ipairs({ "Baganator", "Bagnon", "AdiBags",
+                                 "ArkInventory", "Baggins", "OneBag3" }) do
+            local ok, res = pcall(isLoaded, other)
+            if ok and res then
+                Print("inventory: " .. other .. " is loaded - ZacUI's own bag "
+                    .. "stays out of the way. Disable " .. other
+                    .. " (or turn this module off) to pick one.")
+                return
+            end
+        end
+    end
+
+    -- (2026-11-13) A FRESH INSTALL (nothing saved on this account, or
+    -- "Reset ZacUI") opens on the rail window, with its roomier grid. An
+    -- install from before keeps the window and the sizes it has: the rail
+    -- is a tick on the Bags page there.
+    -- Once (railFresh): what is unticked later in that first session stays
+    -- unticked.
+    ZacUIDB.bags = ZacUIDB.bags or { columns = 10 }
+    if ns.freshInstall == true or ns.openSetupAfterReset == true then
+        local b = ZacUIDB.bags
+        if not b.railFresh then
+            b.railFresh = true
+            b.rail, b.slotSize, b.spacing, b.emptyAlpha = true, 36, 5, 0.25
+        end
+    end
+
+    -- IDEMPOTENT BY CONSTRUCTION. ApplyAll pcalls every module and the
+    -- live-enable path can call this again, so a second run must not
+    -- build a second pair of windows - the bag keybinding closes over
+    -- the FIRST window, and a rebuild would leave it driving an orphan
+    -- while the visible one never opens.
+    if views.inventory then
+        views.inventory:Refresh()
+        if views.bank then views.bank:Refresh() end
+        return
+    end
+
+    Bags.StartEvents()
+    StartCombatWatch()
+
+    local inv = CreateView("inventory", "ZacUIBagFrame", "Inventory",
+        Bags.BACKPACK_BAGS)
+    local bank = BANK_ON and CreateView("bank", "ZacUIBankFrame", "Bank",
+        Bags.BANK_BAGS) or nil
+    inv.frame:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -20, 60)
+    if bank then bank.frame:SetPoint("LEFT", UIParent, "LEFT", 40, 60) end
+
+    Bags.Subscribe(function(batch)
+        inv:Refresh(batch)
+        if bank then bank:Refresh(batch) end
+    end)
+
+    -- Other accounts' gold arrives with no bag event to repaint on; the
+    -- total alone is refreshed every two seconds while a window is up.
+    -- One ticker for both windows.
+    if C_Timer and C_Timer.NewTicker then
+        local ticker = C_Timer.NewTicker(2, function()
+            for _, view in pairs(views) do
+                if view.frame:IsShown() then
+                    view.totalText:SetText("all " .. Money(Bags.GoldTotal(), "gold"))
+                end
+            end
+        end)
+        if ns.Profiler then ns.Profiler.TrackTicker(ticker, "Bags gold total") end
+    end
+
+    -- Build the grid NOW, while the window is still closed and we are
+    -- certainly out of combat. Without this, a character who logs in and
+    -- pulls before ever pressing B opens an empty box mid-fight (secure
+    -- mode cannot create buttons under a lockdown; plain mode would pay
+    -- for creating a hundred buttons on the first open).
+    inv:Layout(true)
+    if bank then bank:Layout(true) end
+
+    -- TAKING OVER THE BAG KEYS. These are ordinary Lua globals in
+    -- FrameXML, not protected functions, and replacing them is how every
+    -- bag addon hooks the B key, the bag buttons and the merchant/bank
+    -- auto-open. The originals are kept so turning the module off and
+    -- reloading restores stock behaviour exactly.
+    if not ZUI._bagHooked then
+        ZUI._bagHooked = {
+            ToggleAllBags = ToggleAllBags, OpenAllBags = OpenAllBags,
+            CloseAllBags = CloseAllBags, ToggleBackpack = ToggleBackpack,
+            OpenBackpack = OpenBackpack, CloseBackpack = CloseBackpack,
+            ToggleBag = ToggleBag, OpenBag = OpenBag, CloseBag = CloseBag,
+        }
+        -- ============================================================
+        -- THE WINDOW ITSELF CANNOT OPEN IN COMBAT
+        -- ============================================================
+        -- A frame counts as protected if any DESCENDANT is protected -
+        -- Blizzard closes the obvious hole where you would hide the
+        -- parent of a secure button instead of the button. Every slot in
+        -- here inherits SecureActionButtonTemplate, so ZacUIBagFrame is
+        -- protected by ancestry and Show/Hide on it is refused under a
+        -- lockdown. There is no wrapper around that; it is the standing
+        -- price of the secure right-click use path, the same reason
+        -- action bars cannot be shown or hidden mid-fight either.
+        --
+        -- SetAlpha is not protected and would fake it visually - but
+        -- EnableMouse IS protected, so an alpha-0 window would still be
+        -- sitting there eating clicks over live item slots. Not worth it.
+        --
+        -- So the keys QUEUE. The window does what you asked the instant
+        -- the lockdown lifts, and you are told once instead of watching
+        -- BugSack fill up with blocked-action reports.
+        local pendingBag, warned = nil, false
+        local function Locked()
+            -- Plain mode: never locked. Nothing in the window is
+            -- protected, so Show and Hide are ordinary calls.
+            return SecureActive() and InCombatLockdown and InCombatLockdown()
+        end
+        local function WarnOnce()
+            if warned then return end
+            warned = true
+            Print("bags: the window can't open or close in combat - its "
+                .. "slots are secure buttons, so the frame is protected. "
+                .. "Queued; it will follow the moment you drop combat. "
+                .. "/run ZacUIDB.bags.secureUse = false (then /reload) "
+                .. "trades combat right-click-use for a window that opens.")
+        end
+        -- The open and close animations (none unless chosen on the Bags
+        -- page). A window still playing its close counts as closed, so a
+        -- toggle mid-close opens it again rather than closing it twice.
+        local function Anim(key)
+            local spec = BagCfg()[key]
+            if type(spec) == "table" and spec.style and spec.style ~= "none" and ns.Motion then
+                return spec
+            end
+        end
+        local function Closing()
+            local m = inv.frame._zMotion
+            return m and m.how == "out"
+        end
+        local function Open()
+            if Locked() then pendingBag = true WarnOnce() return end
+            pendingBag = nil
+            local spec = Anim("openAnim")
+            if spec and (not inv.frame:IsShown() or Closing()) then
+                ns.Motion.Play(inv.frame, spec, "in")
+            else
+                inv.frame:Show()
+            end
+        end
+        local function Close()
+            local was = inv.frame:IsShown() and not Closing()
+            if Locked() then pendingBag = false WarnOnce() return was end
+            pendingBag = nil
+            local spec = Anim("closeAnim")
+            if spec and was then
+                ns.Motion.Play(inv.frame, spec, "out")
+            elseif not Closing() then
+                inv.frame:Hide()
+            end
+            return was
+        end
+        local function Toggle()
+            if Locked() then
+                local want = pendingBag
+                if want == nil then want = inv.frame:IsShown() end
+                pendingBag = not want
+                WarnOnce()
+                return
+            end
+            if inv.frame:IsShown() and not Closing() then Close() else Open() end
+        end
+        DrainBagToggle = function()
+            if pendingBag == nil then return end
+            local want = pendingBag
+            pendingBag = nil
+            if want then inv.frame:Show() else inv.frame:Hide() end
+        end
+        ToggleAllBags, OpenAllBags, CloseAllBags = Toggle, Open, Close
+        ToggleBackpack, OpenBackpack, CloseBackpack = Toggle, Open, Close
+        ToggleBag, OpenBag, CloseBag = Toggle, Open, Close
+    end
+
+    -- Blizzard still shows its own frames from paths we have not replaced
+    -- (looting a full bag, a vendor opening bags). Hiding on show is the
+    -- catch-all; it is safe because these frames are not protected.
+    for i = 1, (NUM_CONTAINER_FRAMES or 13) do
+        local cf = _G["ContainerFrame" .. i]
+        if cf then
+            cf:HookScript("OnShow", function(self) self:Hide() end)
+            cf:Hide()
+        end
+    end
+
+    -- ============================================================
+    -- BLIZZARD'S BANK: NEVER SHOWN, SO NEVER HIDDEN
+    -- ============================================================
+    -- The ContainerFrame trick above does not transfer. BankFrame's
+    -- OnHide runs CloseBankFrame(), so hiding it does not just remove a
+    -- window - it ENDS THE BANKING SESSION. You would get a clean screen
+    -- and no bank.
+    --
+    -- Parking it off-screen lost: the UI panel manager re-anchors the
+    -- frame after OnShow, so the panel kept walking back on screen. The
+    -- next fix hid it with CloseBankFrame swapped for a stub for the
+    -- length of the call - but writing a Blizzard global from addon code
+    -- taints it for the session, and every secure path that reads it
+    -- after that (Esc closing the panels, among others) runs tainted.
+    --
+    -- So BankFrame is never shown at all. The only thing that shows it is
+    -- its own BANKFRAME_OPENED handler (ShowUIPanel, and CloseBankFrame
+    -- if that failed); with that one event unregistered the panel stays
+    -- hidden, its OnHide never runs, and the session stays open until
+    -- the player walks away (BANKFRAME_CLOSED), as before. Nothing is
+    -- written - no global, no method, no script. Deposit, withdraw, bag
+    -- slots and buying a slot are container / bank API calls that only
+    -- need the session, not Blizzard's window. Its other events
+    -- (BANKFRAME_CLOSED, slot changes) stay: they only touch a hidden
+    -- frame.
+    --
+    -- The panel manager never sees it either, so the other open panels
+    -- no longer shuffle for one frame while it showed and hid.
+    --
+    -- Turned on live while Blizzard's bank is already open, the safety net
+    -- below hides its window for that visit; the next one never shows it.
+    -- (Without ZacUI's bank window, Blizzard's bank is left exactly as it is.)
+    if not bank then
+        ns.BagViews = views
+        return
+    end
+    local bankHost = _G.BankFrame
+    if bankHost and bankHost.UnregisterEvent then
+        bankHost:UnregisterEvent("BANKFRAME_OPENED")
+    end
+
+    -- Safety net. If this client shows BankFrame some other way than its
+    -- own BANKFRAME_OPENED handler, the old hide is used for that visit:
+    -- alpha 0 at once, then HideUIPanel with CloseBankFrame stubbed for
+    -- the length of the call (its OnHide would otherwise end the
+    -- session). That path writes a Blizzard global, so it only ever runs
+    -- if the panel shows despite the event being gone.
+    local function HideBlizzardBank()
+        local bf = _G.BankFrame
+        if not bf or not bf:IsShown() then return end
+        local realClose = _G.CloseBankFrame
+        _G.CloseBankFrame = function() end
+        if _G.HideUIPanel then
+            pcall(_G.HideUIPanel, bf)
+        else
+            pcall(bf.Hide, bf)
+        end
+        _G.CloseBankFrame = realClose
+    end
+    if _G.BankFrame then
+        _G.BankFrame:HookScript("OnShow", function()
+            -- Alpha first so not even one frame of it is drawn, then
+            -- hidden outright on the next tick - hiding inside OnShow
+            -- itself re-enters the panel manager mid-show.
+            _G.BankFrame:SetAlpha(0)
+            if C_Timer and C_Timer.After then
+                C_Timer.After(0, HideBlizzardBank)
+            else
+                HideBlizzardBank()
+            end
+        end)
+        if _G.BankFrame:IsShown() then
+            _G.BankFrame:SetAlpha(0)
+            HideBlizzardBank()
+        end
+    end
+
+    -- The bank window follows the bank itself.
+    local bankEvents = CreateFrame("Frame")
+    bankEvents:RegisterEvent("BANKFRAME_OPENED")
+    bankEvents:RegisterEvent("BANKFRAME_CLOSED")
+    bankEvents:SetScript("OnEvent", function(_, event)
+        if event == "BANKFRAME_OPENED" then
+            bank.frame:Show()
+            inv.frame:Show()
+        else
+            bank.frame:Hide()
+        end
+    end)
+
+    ns.BagViews = views
+end
+
+-- shared with later ZacUI files
+ns.BagViews = views
+
+-- The Bags page: its samples are built and painted by these, and a
+-- change there restyles and re-lays out the open windows at once.
+ns.BagLook = {
+    DEFAULTS = BAG_LOOK,
+    -- the game looks' kit (nil under ZacUI's look) and its widget dressers,
+    -- for the parts Bags_Alts adds to the window
+    Kit = KitNow,
+    KIT = KIT,
+    KitButton = KitButton,
+    KitClose = KitClose,
+    KitDropdown = KitDropdown,
+    KitBox = KitBox,
+    KitFont = KitFont,
+    Cfg = BagCfg,
+    SlotSize = SlotSize,
+    SlotGap = SlotGap,
+    -- (Bags_Rail: the rail window's sections and its rail of bag slots)
+    GroupOf = GroupOf,
+    GROUP_NAMES = GROUP_NAMES,
+    CreateBagSlot = CreateBagSlot,
+    BagInvSlot = BagInvSlot,
+    FOOTER = FOOTER,
+    NewSample = NewSampleSlot,
+    Paint = PaintSlot,
+    Style = StyleSlot,
+    PaintWindow = PaintWindow,
+    StyleFooter = StyleFooter,
+    PlaceFooterText = PlaceFooterText,
+    MoneyText = MoneyText,
+    COUNT_TARGETS = { { value = "slot", text = "The slot" }, { value = "icon", text = "The icon" } },
+    FOOTER_TARGETS = { { value = "window", text = "The window" }, { value = "free", text = "Free slots" },
+        { value = "money", text = "Your money" } },
+    Changed = function()
+        lookVer = lookVer + 1
+        for _, view in pairs(views) do
+            if view.frame then view.frame:_zPaint() end
+            if view.footerTexts then StyleFooter(view.footerTexts) end
+            if view.PlaceFooter then view:PlaceFooter() end
+            view:Refresh()
+        end
+    end,
+}
+if ns.OnSettingsChanged and ns.Coalesce then
+    ns.OnSettingsChanged(ns.Coalesce(function()
+        local s = ns.ConfigState and ns.ConfigState()
+        if s and s.selected == "bags" then ns.BagLook.Changed() end
+    end))
+end

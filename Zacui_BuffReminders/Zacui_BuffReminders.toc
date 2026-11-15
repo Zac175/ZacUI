@@ -3,7 +3,7 @@
 ## Title: ZacUI |cff33ff99Buff Reminders|r
 ## Notes: ZacUI buff reminders: your class's group buffs (Battle Shout, Arcane Intellect, Fortitude, Mark of the Wild...) - a reminder when you or the group miss one, and a tracker of who needs it, with a click to cast.
 ## Author: Zac
-## Version: 3.0.11
+## Version: 3.0.12
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -16,11 +16,13 @@
 # part reads their settings once when asked (the import) and can switch
 # Readycheck's off, never anything else.
 
-BR_Data.lua
-BR_Core.lua
-BR_Icon.lua
-BR_Tracker.lua
-BR_Import.lua
-BR_Config.lua
-# Drag to customise in the reminders preview (ZacUI's UIF_PreviewDrag).
-BR_PreviewDrag.lua
+Data\BR_Data.lua
+Core\BR_Core.lua
+Display\BR_Icon.lua
+Display\BR_Tracker.lua
+Import\BR_Import.lua
+
+# This part's settings pages load on demand with ZacUI's settings window:
+# the Zacui_Options addon, BuffReminders folder (2026-11-13). Their rows in the
+# settings menu are put there at login, by this file.
+Settings\BR_Menu.lua

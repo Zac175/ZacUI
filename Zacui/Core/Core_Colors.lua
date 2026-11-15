@@ -88,7 +88,12 @@ local PALETTE = {
     },
     scrollbar = {
         track       = { r = 0.08, g = 0.08, b = 0.08, a = 0.80 },
-        thumb       = { r = 0.60, g = 0.46, b = 0.18, a = 0.90 },
+        -- (2026-11-14, Zac: "some sliders ... were still brown by default
+        -- they should all match the like greyish slider") the settings
+        -- window's thumb, white at 0.27, on every scroll bar; it was a
+        -- brown, 0.60 / 0.46 / 0.18 (LEGACY below lets a saved copy go).
+        -- Painted through UI.ScrollThumbColor (UIF_Controls).
+        thumb       = { r = 1.00, g = 1.00, b = 1.00, a = 0.27 },
     },
     text = {
         normal      = { r = 0.90, g = 0.90, b = 0.90, a = 1.00 },
@@ -234,6 +239,8 @@ local LEGACY = {
     checkbox = { bg = { 0.10 } },
     dropdown = { bg = { 0.12 }, itemHover = { { 0.20, 0.18, 0.12 } } },
     tooltip = { bg = { 0.08, 0.10 } },
+    -- (the brown every scroll thumb had until 2026-11-14)
+    scrollbar = { thumb = { { 0.60, 0.46, 0.18 } } },
 }
 local function IsLegacy(c, list)
     if type(c) ~= "table" or type(c.r) ~= "number" then return false end
@@ -334,6 +341,24 @@ local function ColSafe(key, fr, fg, fb)
     return c
 end
 
+-- Readycheck's windows wear ZacUI's font and the colours picked here
+-- (Readycheck, Systems/FontSystem: BESIDE ZACUI). It looks for a change
+-- when one of its windows opens; told from here, a window of its that is
+-- open follows as the change is made. One call, a third of a second after
+-- the last change (a colour dragged in the picker is many).
+local telling = false
+local function StyleChanged()
+    if telling or not (C_Timer and C_Timer.After) then return end
+    if type(_G.Readycheck) ~= "table" then return end
+    telling = true
+    C_Timer.After(0.3, function()
+        telling = false
+        local RC = _G.Readycheck
+        if type(RC) == "table" and type(RC.FollowZacUI) == "function" then pcall(RC.FollowZacUI, RC) end
+    end)
+end
+ns.StyleChanged = StyleChanged
+
 local function SetColor(cat, key, r, g, b, a)
     if not Default(cat, key) then return end
     ZacUIDB.palette = ZacUIDB.palette or {}
@@ -351,6 +376,7 @@ local function SetColor(cat, key, r, g, b, a)
             end
         end
     end
+    StyleChanged()
 end
 
 local function ResetColor(cat, key)
@@ -364,11 +390,13 @@ local function ResetColor(cat, key)
             end
         end
     end
+    StyleChanged()
 end
 
 local function ResetAllColors()
     ZacUIDB.palette = {}
     ZacUIDB.colors = {}
+    StyleChanged()
 end
 
 local function Hex(c)
@@ -390,6 +418,7 @@ ns.Col = Col
 ns.ColSafe = ColSafe
 ns.ColorLabel = ColorLabel
 ns.GetColor = GetColor
+ns.DefaultColor = Default
 ns.Hex = Hex
 ns.PALETTE = PALETTE
 ns.PALETTE_KEYS = PALETTE_KEYS

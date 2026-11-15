@@ -536,7 +536,7 @@ CP.RAIL_ITEMS = {
       click = function()
           local RM = Chat.RaidMode
           if RM and RM.active and RM.SetPeek then RM.SetPeek(not RM.peek or RM.temp, false) end
-          rail.t = 99
+          CP.RailSoon()
       end },
     { id = "msgs", keep = 5, glyph = "eye", label = "Raid messages on / off", default = false,
       live = function() local RM = Chat.RaidMode return RM and RM.active and true or false end,
@@ -550,7 +550,7 @@ CP.RAIL_ITEMS = {
       click = function()
           local RM = Chat.RaidMode
           if RM and RM.ToggleMsgs then RM.ToggleMsgs() end
-          rail.t = 99
+          CP.RailSoon()
       end },
     { id = "raidbox", keep = 10, glyph = "raidbox", label = "Raid frames in the chat box (on / off)", default = false,
       dim = function() local RM = Chat.RaidMode return not (RM and RM.Enabled and RM.Enabled()) end,
@@ -579,7 +579,7 @@ CP.RAIL_ITEMS = {
       click = function()
           local cf = Chat.SelectedFrame and Chat.SelectedFrame()
           if cf and cf.ScrollToBottom then cf:ScrollToBottom() end
-          rail.t = 99
+          CP.RailSoon()
       end },
 }
 local RAIL_BY = {}
@@ -593,7 +593,7 @@ local function SetRaidBox(on)
     d.raidMode = on and true or false
     if ZacUICharDB then ZacUICharDB.chatRaidMode = nil end
     if RM and RM.Update then pcall(RM.Update) end
-    rail.t = 99
+    CP.RailSoon()
 end
 function CP.ToggleRaidBox()
     local RM = Chat.RaidMode
@@ -626,7 +626,11 @@ end
 function CP.RailOn() return CP.RailAvailable() and DB().rail ~= false end
 -- mouseover only (the default) or always up
 function CP.RailHover() return DB().railHover ~= false end
-function CP.RailFade(f, dt)
+-- One step of the rail's fade. True while the alpha is still on its way
+-- (the caller keeps calling every frame), false once it is there. `look`:
+-- only look (where the mouse is, how long it has been away) and answer -
+-- the alpha is not moved (the look's tenth of a second is no frame).
+function CP.RailFade(f, dt, look)
     local want = 1
     if CP.RailHover() then
         local cf = DEFAULT_CHAT_FRAME
@@ -645,9 +649,20 @@ function CP.RailFade(f, dt)
     local a = f:GetAlpha() or 1
     if math.abs(a - want) < 0.02 then
         if a ~= want then f:SetAlpha(want) end
-        return
+        return false
     end
-    f:SetAlpha(a + (want - a) * math.min(1, (dt or 0.016) * 8))
+    if not look then f:SetAlpha(a + (want - a) * math.min(1, (dt or 0.016) * 8)) end
+    return true
+end
+-- the rail's clock as soon as possible: on the next frame, once however
+-- often it is asked for
+function CP.RailSoon()
+    if rail.soon then return end
+    rail.soon = true
+    C_Timer.After(0, function()
+        rail.soon = nil
+        if rail.frame and rail.frame:IsShown() then CP.RailTick() end
+    end)
 end
 function CP.RailItemHere(id)
     local it = RAIL_BY[id]
@@ -823,20 +838,47 @@ local function BuildRail()
     f:SetScript("OnMouseUp", function(self, button) if button == "RightButton" then RailMenu(self) end end)
     rail.buttons = {}
     for _, it in ipairs(CP.RAIL_ITEMS) do rail.buttons[it.id] = MakeButton(f, it) end
-    -- the clock: scrolled up? (a quarter second), the counts (every 5 s)
-    f:SetScript("OnShow", function() rail.t, rail.slow = 99, 99 end)
-    f:SetScript("OnUpdate", function(self, dt)
-        -- (2026-11-08, Zac: "make this area next to the chat mouse over by
-        -- default but have the ability in the ui to make it not hover")
-        -- the icons fade in while the mouse is over the chat or the rail,
-        -- and out a moment after it leaves; chat.railHover = false keeps
-        -- them up
-        CP.RailFade(self, dt)
-        rail.t = (rail.t or 99) + dt
-        if rail.t < 0.25 then return end
-        rail.slow = (rail.slow or 99) + rail.t
-        rail.t = 0
+    -- (2026-11-08, Zac: "make this area next to the chat mouse over by
+    -- default but have the ability in the ui to make it not hover")
+    -- the icons fade in while the mouse is over the chat or the rail, and
+    -- out a moment after it leaves; chat.railHover = false keeps them up.
+    --
+    -- AT REST NOTHING RUNS PER FRAME (2026-11-13, the idle pass; it was
+    -- one OnUpdate asking where the mouse is on every rendered frame).
+    -- Ten looks a second come from a ticker; a small frame's OnUpdate
+    -- carries the fade and hides itself the frame the fade is done. The
+    -- clock - scrolled up? (a quarter second), the counts (every 5 s) -
+    -- is a second ticker. Both live while the rail is shown.
+    local fader = CreateFrame("Frame", nil, f)
+    fader:Hide()
+    fader:SetScript("OnUpdate", function(self, dt)
+        if not CP.RailFade(f, dt) then self:Hide() end
+    end)
+    rail.fader = fader
+    local function Look()
+        if fader:IsShown() then return end
+        if CP.RailFade(f, 0.1, true) then fader:Show() end
+    end
+    local function Clock()
+        rail.slow = (rail.slow or 99) + 0.25
         CP.RailTick()
+    end
+    local function Track(t, name)
+        if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(t, name) end
+        return t
+    end
+    f:SetScript("OnShow", function()
+        rail.slow = 99
+        if not rail.look then
+            rail.look = Track(C_Timer.NewTicker(0.1, Look), "chat.railHover")
+            rail.clock = Track(C_Timer.NewTicker(0.25, Clock), "chat.rail")
+        end
+        fader:Show()         -- (the fade from the first frame, as it always was)
+        CP.RailSoon()
+    end)
+    f:SetScript("OnHide", function()
+        if rail.look then rail.look:Cancel() rail.look = nil end
+        if rail.clock then rail.clock:Cancel() rail.clock = nil end
     end)
     rail.frame = f
     return f
@@ -1103,7 +1145,7 @@ function CP.RailRefresh(d)
     -- while another docked tab is selected, and the rail stays)
     rail.frame:SetShown((Chat.DockUp and Chat.DockUp() or bg:IsShown()) and true or false)
     CP.RailSeam()
-    rail.t, rail.slow = 99, 99
+    rail.slow = 99
     CP.RailTick()
 end
 Chat.RailRefresh = CP.RailRefresh

@@ -207,6 +207,13 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
             -- an install made from here on starts on the new default spots
             -- (UIF_Movers: NEW DEFAULT SPOTS); an existing one never does
             if ns.freshInstall then ZacUIDB.defaultsGen = 2 end
+            -- ...and with its windows at 80% (2026-11-14, Zac: the windows
+            -- "are like super big by default"; UIF_Controls: ONE SCALE).
+            -- An existing install keeps what it has: nothing saved = 100%.
+            if ns.freshInstall then
+                ZacUIDB.config = type(ZacUIDB.config) == "table" and ZacUIDB.config or {}
+                if ZacUIDB.config.scale == nil then ZacUIDB.config.scale = ns.NEW_WINDOW_SCALE or 0.8 end
+            end
             if ns.MoversNewDefaults then ns.MoversNewDefaults() end
             ZacUIDB.modules = ZacUIDB.modules or {}
             -- the third-party skins are gone (2026-10-28): their switches too

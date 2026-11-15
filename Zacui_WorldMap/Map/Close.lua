@@ -403,7 +403,13 @@ local function UpdateGrain(layer, u, v, hu, hv, amount)
 	for _, g in ipairs(grain) do
 		local size = 2 ^ (n + g.octave - 1) / (g.tooth and 6 or 1)          -- world units
 		local a = (g.octave == 1 and (1 - f) or f) * amount * (g.tooth and 0.9 or 0.7)
-		g.tex:SetTexCoord(u0 * W / size, u1 * W / size, v0 * H / size, v1 * H / size)
+		-- (whole tiles taken off: the same picture, since the texture repeats. Close in, a tile is
+		-- a few world units and these ran into the tens of thousands; the modern clients refuse a
+		-- coordinate that far from 0 - "TexCoord out of range", WoW Forever 2026-11-14 - and the
+		-- grain was then not laid at all)
+		local tu0, tv0 = u0 * W / size, v0 * H / size
+		local ku, kv = math.floor(tu0), math.floor(tv0)
+		g.tex:SetTexCoord(tu0 - ku, u1 * W / size - ku, tv0 - kv, v1 * H / size - kv)
 		S.PlaceWorld(g.tex, u0, v0, u1, v1)
 		g.tex:SetAlpha(a)
 		g.tex:SetShown(a > 0.004)   -- (an octave crossfaded out still costs the whole view: hidden)

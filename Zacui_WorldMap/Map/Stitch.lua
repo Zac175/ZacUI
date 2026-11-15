@@ -1849,7 +1849,11 @@ end
 local function Tile(tex, u0, v0, u1, v1, sx, sy, alpha, shift)
 	if alpha <= 0.01 or u1 <= u0 or v1 <= v0 then tex:Hide() return end
 	local o = shift or 0
-	tex:SetTexCoord(u0 * W / sx + o, u1 * W / sx + o, v0 * H / sy + o * 1.6, v1 * H / sy + o * 1.6)
+	-- (whole tiles taken off, as the grain's in Close.lua: the texture repeats, and the modern
+	-- clients refuse a coordinate far from 0 - "TexCoord out of range")
+	local tu0, tv0 = u0 * W / sx + o, v0 * H / sy + o * 1.6
+	local ku, kv = math.floor(tu0), math.floor(tv0)
+	tex:SetTexCoord(tu0 - ku, u1 * W / sx + o - ku, tv0 - kv, v1 * H / sy + o * 1.6 - kv)
 	S.PlaceWorld(tex, u0, v0, u1, v1)
 	tex:SetAlpha(alpha)
 	tex:Show()
