@@ -332,10 +332,151 @@ function AB.CaptureStockSpots()
     for _, name in ipairs(AB.MICRO_BUTTONS or {}) do if _G[name] then list[#list + 1] = _G[name] end end
     l, b, r, t = AB.StockRect(list)
     if l then AB._stock.micro = { l, b, r, t } end
+    -- which micro buttons the GAME shows (2026-11-15, Zac's Forever row: the
+    -- character button over bar 1's last slot, the help button over the
+    -- key ring). The client only puts a button in its menu when the game's
+    -- rules allow it (the store, housing ...); the rest exist and stay
+    -- hidden. ZacUI showed every button that exists, so its row was two
+    -- buttons wider than the game's and ran over both neighbours. Read
+    -- here, before ZacUI takes the buttons.
+    AB._microShown = {}
+    local any = false
+    for _, name in ipairs(AB.MICRO_BUTTONS or {}) do
+        local mb = _G[name]
+        if type(mb) == "table" and mb.IsShown then
+            AB._microShown[name] = mb:IsShown() and true or false
+            if AB._microShown[name] then any = true end
+        end
+    end
+    -- (none shown at all: not a reading to act on)
+    if not any then AB._microShown = nil end
+end
+
+-- ============================================================
+-- THE GAME'S OWN MICRO MENU AND BAG BAR UNDER A GAME LOOK ON WOW FOREVER
+-- ============================================================
+-- (2026-11-15, Zac on his Forever client, three times in one night: the
+-- character button under bar 1's last slot, the help button under the key
+-- ring, the bag slots with half a border, the gryphon on the backpack.)
+-- ZacUI took the micro buttons and the bag slots off the game's frames and
+-- laid them out again itself, so every rule of the game's row had to be
+-- rebuilt here - which buttons the game shows, the reagent slot beside the
+-- key ring, the dividers, each slot's own size - and each one missed showed
+-- as an overlap. The reference UI never takes them: the micro menu and the
+-- bag bar stay the game's frames, where the game laid them, and it only
+-- fades the box art the look has none of and hangs the end cap on the end
+-- of the row. So, under a game look on Forever (the client that draws the
+-- one-row strip):
+--   - the game's MicroMenu and BagsBar are left exactly as the game has
+--     them: never hidden, moved, re-parented or re-laid (the game's Edit
+--     Mode moves them);
+--   - WoW Forever's look: nothing else - the game's own frame, dividers and
+--     slots are that look;
+--   - Blizzard style and Classic WoW UI: the bronze box round each (the
+--     menu's BorderArt and BackgroundArt, the bag bar's BorderArt and its
+--     dividers) is faded - alpha only, on the game's own regions; Classic
+--     also wears the 2004 buttons and slots (AB.ClassicMicro, ClassicBagSlot,
+--     region calls as before);
+--   - bar 1's right end cap rides the end of the game's row (AB.KitStripEnd
+--     reads AB.GameExtraRows).
+-- ZacUI's own look, and every other client, are as they were: ZacUI's own
+-- micro menu and bag bar. Latched for the session (a look change reloads).
+function AB.GameExtras()
+    local v = AB._gameExtras
+    if v == nil then
+        v = (_G.ZACUI_IS_FOREVER == true and AB.Kit ~= nil and AB.Kit() ~= "zacui"
+            and type(_G.MicroMenu) == "table" and type(_G.BagsBar) == "table") and true or false
+        AB._gameExtras = v
+    end
+    return v
+end
+local GAME_BAGS = { "KeyRingButton", "CharacterReagentBag0Slot", "CharacterBag3Slot", "CharacterBag2Slot",
+                    "CharacterBag1Slot", "CharacterBag0Slot", "MainMenuBarBackpackButton" }
+-- the rows the game shows now: its micro buttons, its bag buttons
+function AB.GameExtraRows()
+    local m, g = {}, {}
+    for _, name in ipairs(AB.MICRO_BUTTONS or {}) do
+        local b = _G[name]
+        if type(b) == "table" and b.IsVisible and b:IsVisible() then m[#m + 1] = b end
+    end
+    for _, name in ipairs(GAME_BAGS) do
+        local b = _G[name]
+        if type(b) == "table" and b.IsVisible and b:IsVisible() then g[#g + 1] = b end
+    end
+    return { m, g }
+end
+local function FadeOut(t)
+    if type(t) == "table" and t.SetAlpha then t:SetAlpha(0) end
+end
+local function FadeDividers(bar)
+    for _, key in ipairs({ "HorizontalDividersPool", "VerticalDividersPool" }) do
+        local pool = rawget(bar, key)
+        if type(pool) == "table" and pool.EnumerateActive then
+            for d in pool:EnumerateActive() do FadeOut(d) end
+        end
+    end
+end
+function AB.GameBagBar()
+    local bar = _G.BagsBar
+    if type(bar) ~= "table" then return end
+    local kit = AB.Kit()
+    if kit ~= "forever" then
+        FadeOut(rawget(bar, "BorderArt"))
+        FadeDividers(bar)
+        -- (the bar lays its dividers out again when a bag slot changes)
+        if not AB._gameBagHook and type(bar.UpdateDividers) == "function" then
+            AB._gameBagHook = true
+            hooksecurefunc(bar, "UpdateDividers", function(self) FadeDividers(self) end)
+        end
+    end
+    if kit == "classic" and AB.Modern2004() then
+        for _, name in ipairs(GAME_BAGS) do
+            local b = _G[name]
+            if type(b) == "table" then AB.ClassicBagSlot(b) end
+        end
+    end
+end
+function AB.GameMicro()
+    local mm = _G.MicroMenu
+    if type(mm) ~= "table" then return end
+    local kit = AB.Kit()
+    if kit ~= "forever" then
+        FadeOut(rawget(mm, "BorderArt"))
+        FadeOut(rawget(mm, "BackgroundArt"))
+    end
+    if kit == "classic" and AB.Modern2004() then
+        for _, name in ipairs(AB.MICRO_BUTTONS or {}) do
+            local b = _G[name]
+            if type(b) == "table" then AB.ClassicMicro(b) end
+        end
+    end
+    -- the game lays its menu out again (a button shown or hidden): bar 1
+    -- beside it, the end cap and the XP seat at the row's new end (a moment
+    -- later, once, out of combat)
+    if not AB._gameMicroHook then
+        AB._gameMicroHook = true
+        local function Later()
+            if AB._dockQueued then return end
+            AB._dockQueued = true
+            C_Timer.After(0.2, function()
+                AB._dockQueued = nil
+                AB.AfterCombat("dockrow", function()
+                    if AB.DockRow then pcall(AB.DockRow) end
+                    if AB.KitStripEnd then pcall(AB.KitStripEnd) end
+                    if AB.StatusReseat then pcall(AB.StatusReseat) end
+                end)
+            end)
+        end
+        AB.DockLater = Later
+        for _, f in ipairs({ mm, _G.MicroMenuContainer }) do
+            if type(f) == "table" and type(f.Layout) == "function" then hooksecurefunc(f, "Layout", Later) end
+        end
+    end
 end
 
 local function ApplyBagBar(profile)
     local cfg = profile.bagbar
+    if AB.GameExtras() then AB.GameBagBar() return end
     if not bagbar then
         bagbar = AB.NewHeader("bagbar", "ZacUIBagBar", "Bag bar")
         bagbar.buttons = {}
@@ -367,8 +508,9 @@ local function ApplyBagBar(profile)
     end
     -- a bar never placed (a fresh install): where the client's own bag
     -- buttons sit now, before they are taken (AB.SeatFromStock)
+    local seated = false
     if cfg.point == nil and AB.SeatFromStock then
-        AB.SeatFromStock(cfg, BagButtons(cfg), 37, "bagbar")
+        seated = AB.SeatFromStock(cfg, BagButtons(cfg), 37, "bagbar")
     end
     for i, b in ipairs(BagButtons(cfg)) do
         if not b.zHome then
@@ -434,6 +576,10 @@ local function ApplyBagBar(profile)
                     end
                 end
             end
+        elseif AB.Kit and AB.Kit() == "forever" and kb.zHome and (kb.zHome.w or 0) > 0 and (kb.zHome.h or 0) > 0 then
+            -- (WoW Forever's key ring is a slot of its own, 33 x 45, beside
+            -- the bags: the client's own size under its own look)
+            kb:SetSize(kb.zHome.w, kb.zHome.h)
         else
             kb:SetSize(18, 37)
         end
@@ -448,6 +594,12 @@ local function ApplyBagBar(profile)
             if AB.Kit() == "classic" and AB.Modern2004() then AB.ClassicBagSlot(b) end
         end
     end
+    -- (just seated on the client's row: centred on it at the row's real size,
+    -- and once more a frame later - AB.ReSeat)
+    if seated then rawset(bagbar, "_zSeated", true) end
+    if seated and AB.SeatTrue then AB.SeatTrue(bagbar, cfg, bagbar.buttons, "bagbar") end
+    -- (WoW Forever: the bags sit in the action bar's frame)
+    if AB.KitRowArt then AB.KitRowArt(bagbar, "bagbar", bagbar.buttons) end
 end
 AB.RegisterApplier(ApplyBagBar)
 
@@ -664,16 +816,22 @@ end
 local function MicroLayout()
     if not (micro and micro.cfg and micro.cfg.enabled) or InCombatLockdown() then return end
     AB.LayoutMicro(micro, micro.buttons, micro.cfg)
+    -- (the row's frame art follows the buttons the game shows now)
+    if AB.KitRowArt then AB.KitRowArt(micro, "micro", micro.buttons) end
 end
 
 local function ApplyMicro(profile)
     local cfg = profile.micro
+    if AB.GameExtras() then AB.GameMicro() return end
     if not micro then
         micro = AB.NewHeader("micro", "ZacUIMicroMenu", "Micro menu")
         micro.buttons = {}
+        -- (a game look wears the game's own menu: only the buttons the
+        -- game shows - AB.CaptureStockSpots; ZacUI's look as it always was)
+        local shown = (AB.Kit and AB.Kit() ~= "zacui") and AB._microShown or nil
         for _, name in ipairs(MICRO_BUTTONS) do
             local b = _G[name]
-            if b then micro.buttons[#micro.buttons + 1] = b end
+            if b and not (shown and shown[name] == false) then micro.buttons[#micro.buttons + 1] = b end
         end
         if UpdateMicroButtons then hooksecurefunc("UpdateMicroButtons", MicroLayout) end
         if UpdateMicroButtonsParent then
@@ -708,8 +866,9 @@ local function ApplyMicro(profile)
         SmallBarCommon(micro, cfg, {}, 32, 0, cfg.initial)
         return
     end
+    local seated = false
     if cfg.point == nil and not micro.owned and AB.SeatFromStock then
-        AB.SeatFromStock(cfg, micro.buttons, 32, "micro", 40)
+        seated = AB.SeatFromStock(cfg, micro.buttons, 32, "micro", 40)
     end
     -- (a game look keeps each button's own art: the game's micro menu)
     local stockArt = AB.Kit and AB.Kit() ~= "zacui"
@@ -739,6 +898,12 @@ local function ApplyMicro(profile)
     if stockArt and AB.Kit() == "classic" and AB.Modern2004() then
         for _, b in ipairs(micro.buttons) do AB.ClassicMicro(b) end
     end
+    -- (just seated on the client's row: centred on it at the row's real size,
+    -- and once more a frame later - AB.ReSeat)
+    if seated then rawset(micro, "_zSeated", true) end
+    if seated and AB.SeatTrue then AB.SeatTrue(micro, cfg, micro.buttons, "micro") end
+    -- (WoW Forever: the micro menu sits in the action bar's frame)
+    if AB.KitRowArt then AB.KitRowArt(micro, "micro", micro.buttons) end
 end
 AB.RegisterApplier(ApplyMicro)
 
@@ -973,6 +1138,13 @@ local function ApplyStatus(profile)
         local k = ((AB.actionBars[1].cfg and AB.actionBars[1].cfg.buttonSize or AB.BUTTON) / 45)
         local left = seatFramed and (F.l * k) or 0
         local w = seatFrame:GetWidth() + (seatFramed and ((F.r - F.l) * k) or 0)
+        -- (WoW Forever's row: the micro menu and the bags continue bar 1, and
+        -- the game's XP bar runs over the whole row - AB.KitStripEnd says
+        -- how far the row reaches past bar 1; nothing in the row: 0)
+        if AB.KitStripEnd then
+            local okS, reach = pcall(AB.KitStripEnd)
+            if okS and type(reach) == "number" and reach > 0 then w = w + reach end
+        end
         local lift = seatFramed and (F.t * k) or 0
         -- bar 1's units to the holder's (bar 1 may be scaled; the holder is not)
         status:SetScale(1)
@@ -1025,3 +1197,22 @@ local function ApplyStatus(profile)
     AB.MoverFor(status, cfg, function() if ns.RefreshConfig then ns.RefreshConfig() end end)
 end
 AB.RegisterApplier(ApplyStatus)
+
+-- the frame after an apply (AB.ApplyAll's settle): a bar seated on the
+-- client's spot this login is centred on it again at its settled size, and
+-- the game's XP bars are seated again at the row's settled width
+function AB.ReSeat()
+    for _, key in ipairs({ "micro", "bagbar" }) do
+        local h = AB.headers and AB.headers[key]
+        if h and rawget(h, "_zSeated") then
+            -- (once: from here on the bar is the player's to move)
+            rawset(h, "_zSeated", nil)
+            if h.cfg and h.cfg.enabled ~= false and AB.SeatTrue then AB.SeatTrue(h, h.cfg, h.buttons, key) end
+        end
+    end
+end
+function AB.StatusReseat()
+    if not (status and AB.Kit and AB.Kit() ~= "zacui") then return end
+    local ok, p = pcall(AB.Profile)
+    if ok and type(p) == "table" then ApplyStatus(p) end
+end

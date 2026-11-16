@@ -384,11 +384,38 @@ local function MinMax(host)
     end
 end
 
--- one three-slice of a tab sheet onto the template's left / middle / right
-local function TabSlice(l, m, r, file)
-    if l then FileArt(l, file, TAB_TC[1], TAB_TC[2], 0, 1) if l.SetWidth then l:SetWidth(TAB_CAP) end end
-    if m then FileArt(m, file, TAB_TC[2], TAB_TC[3], 0, 1) end
-    if r then FileArt(r, file, TAB_TC[3], TAB_TC[4], 0, 1) if r.SetWidth then r:SetWidth(TAB_CAP) end end
+-- one three-slice of a tab sheet onto the template's left / middle / right,
+-- at the 2004 tab's own measure (Classic's CharacterFrameTabButtonTemplate:
+-- 20 x 32 caps flush with the button's top corners, the selected set 4 px
+-- higher). The modern pieces are the atlas's size and place - 36 px tall
+-- unselected, 42 selected, hung 1 to 8 px off the corners - and the 2004
+-- sheets drawn on those were stretched, the selected tab a third taller
+-- than its art with its text left near the top (2026-11-15, Zac: "clicked
+-- merchant button has some weird text alignment"). raise: the selected set.
+local TAB_H = 32
+local function TabSlice(tab, l, m, r, file, raise)
+    local y = raise and 4 or 0
+    if l then
+        FileArt(l, file, TAB_TC[1], TAB_TC[2], 0, 1)
+        if tab and l.SetSize then l:SetSize(TAB_CAP, TAB_H) elseif l.SetWidth then l:SetWidth(TAB_CAP) end
+        if tab and l.ClearAllPoints then l:ClearAllPoints() l:SetPoint("TOPLEFT", tab, "TOPLEFT", 0, y) end
+    end
+    if r then
+        FileArt(r, file, TAB_TC[3], TAB_TC[4], 0, 1)
+        if tab and r.SetSize then r:SetSize(TAB_CAP, TAB_H) elseif r.SetWidth then r:SetWidth(TAB_CAP) end
+        if tab and r.ClearAllPoints then r:ClearAllPoints() r:SetPoint("TOPRIGHT", tab, "TOPRIGHT", 0, y) end
+    end
+    if m then
+        FileArt(m, file, TAB_TC[2], TAB_TC[3], 0, 1)
+        -- (the modern middle is a tiled strip: the sheet's middle is stretched)
+        if tab and l and r and m.ClearAllPoints then
+            if m.SetHorizTile then m:SetHorizTile(false) end
+            if m.SetHeight then m:SetHeight(TAB_H) end
+            m:ClearAllPoints()
+            m:SetPoint("TOPLEFT", l, "TOPRIGHT", 0, 0)
+            m:SetPoint("TOPRIGHT", r, "TOPLEFT", 0, 0)
+        end
+    end
 end
 
 -- a modern tab as the character sheet's 2004 tab: the inactive sheet on
@@ -399,11 +426,16 @@ local function Tab(t)
     rawset(t, "_zLookTab", true)
     local any = false
     local L, M, R = rawget(t, "Left"), rawget(t, "Middle"), rawget(t, "Right")
-    if L or M or R then TabSlice(L, M, R, TAB_INACTIVE) any = true end
+    -- the 2004 measure for a panel's bottom tabs only: a tab on top of its
+    -- window, or one of a tab system (its pieces are turned to suit), keeps
+    -- the template's own places
+    local own = (not rawget(t, "isTopTab") and not rawget(t, "isTabOnTop")
+        and rawget(t, "RotatedTextures") == nil) and t or nil
+    if L or M or R then TabSlice(own, L, M, R, TAB_INACTIVE) any = true end
     local LA, MA, RA = rawget(t, "LeftActive"), rawget(t, "MiddleActive"), rawget(t, "RightActive")
-    if LA or MA or RA then TabSlice(LA, MA, RA, TAB_ACTIVE) any = true end
+    if LA or MA or RA then TabSlice(own, LA, MA, RA, TAB_ACTIVE, true) any = true end
     local LD, MD, RD = rawget(t, "LeftDisabled"), rawget(t, "MiddleDisabled"), rawget(t, "RightDisabled")
-    if LD or MD or RD then TabSlice(LD, MD, RD, TAB_ACTIVE) any = true end
+    if LD or MD or RD then TabSlice(own, LD, MD, RD, TAB_ACTIVE, true) any = true end
     for _, k in ipairs({ "LeftHighlight", "MiddleHighlight", "RightHighlight" }) do Quiet(rawget(t, k)) end
     if not any then
         -- a tab drawn some other way (a TabSystem button with its own art):
@@ -415,7 +447,7 @@ local function Tab(t)
         l:SetPoint("TOPLEFT", t, "TOPLEFT", 0, 0) l:SetPoint("BOTTOMLEFT", t, "BOTTOMLEFT", 0, 0)
         r:SetPoint("TOPRIGHT", t, "TOPRIGHT", 0, 0) r:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", 0, 0)
         m:SetPoint("TOPLEFT", l, "TOPRIGHT", 0, 0) m:SetPoint("BOTTOMRIGHT", r, "BOTTOMLEFT", 0, 0)
-        TabSlice(l, m, r, TAB_INACTIVE)
+        TabSlice(nil, l, m, r, TAB_INACTIVE)
         rawset(t, "_zLookTabArt", { l, m, r })
     end
     local hi = OwnTex(t, "HIGHLIGHT")

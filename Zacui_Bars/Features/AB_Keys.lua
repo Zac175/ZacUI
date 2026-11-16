@@ -225,7 +225,7 @@ local function Strip()
     strip:SetFrameStrata("DIALOG")
     strip:SetFrameLevel(50)
     strip:SetPoint("TOP", UIParent, "TOP", 0, -120)
-    if ns.SkinBackdrop then ns.SkinBackdrop(strip, "windowBg", 0.95) end
+    if ns.SkinBackdrop then ns.SkinBackdrop(strip, "windowBg", 0.95, nil, false) end
     local edge = strip:CreateTexture(nil, "OVERLAY", nil, 6)
     edge._zui_own = true
     edge:SetTexture(ns.FLAT or "Interface\\Buttons\\WHITE8X8")

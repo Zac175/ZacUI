@@ -143,6 +143,14 @@ local function Copy(t)
 end
 local FOREVER = Copy(BLIZZARD)
 FOREVER.id = "forever"
+-- BLIZZARD STYLE'S PARTY FRAME (2026-11-16, Zac: "on the live style as well
+-- check party frames"). The party drew the small frame's art, which is the
+-- target-of-target's; the live game's party frame has art of its own, the
+-- same 120 x 49 box and the same bar tracks (the small frame's fits were
+-- made on it). So under Blizzard style a party slot wears the party frame's
+-- own art. WoW Forever's look keeps the small frame it was fitted to.
+BLIZZARD.party = Copy(BLIZZARD.mini)
+BLIZZARD.party.atlas = "UI-HUD-UnitFrame-Party-PortraitOn"
 do
     local P, T, M = FOREVER.player, FOREVER.target, FOREVER.mini
     local CIRCLE = "UI-HUD-UnitFrame-SmallCircle"
@@ -253,6 +261,9 @@ function K.For(frame)
     if not own then return nil end
     -- (a kit without pet art draws the pet on its small frame)
     local kind = (own == "pet" and not kit.pet) and "mini" or own
+    -- (a party slot: the kit's party frame where it has one, and this
+    -- client has its art)
+    if frame.isGroupUnit and kit.party and AtlasOK(kit.party.atlas) then kind = "party" end
     local G = kit[kind]
     -- a modern kit whose art this client lacks: the classic kit, whole
     if G and G.atlas and not AtlasOK(G.atlas) then
@@ -274,7 +285,10 @@ end
 -- ----------------------------------------------------------------------------
 local UF1 = { 4631591, "Interface\\HUD\\UIUnitFrame", 1024, 512 }
 local UF2 = { 4642466, "Interface\\HUD\\UIUnitFrame2x", 2048, 1024 }
-local RETAIL = {   -- name: 1x box (l, r, t, b), 2x box
+local PARTY1 = { 4681512, "Interface\\HUD\\UIPartyFrame", 256, 256 }
+local RETAIL = {   -- name: 1x box (l, r, t, b), 2x box; sheet = a sheet of its own (one tier)
+    -- (the party frame: its own sheet, no 2x; box from the client's atlas listing)
+    ["ui-hud-unitframe-party-portraiton"]          = { 123, 243, 57, 106, sheet = PARTY1 },
     ["ui-hud-unitframe-player-portraiton"]         = { 1, 199, 87, 158, 1, 397, 171, 313 },
     ["ui-hud-unitframe-target-portraiton"]         = { 1, 193, 229, 296, 1, 385, 451, 585 },
     ["ui-hud-unitframe-target-rare-portraiton"]    = { 1, 193, 298, 365, 1, 385, 587, 721 },
@@ -287,6 +301,11 @@ local RETAIL_MASK = {   -- name: 1x path, its id, 2x path, its id, width, height
     ["ui-hud-unitframe-target-portraiton-bar-health-mask"] = { "Interface\\HUD\\UIUnitFrameTargetHealthMask", 4680792, "Interface\\HUD\\UIUnitFrameTargetHealthMask2x", 5321212, 128, 32 },
     ["ui-hud-unitframe-target-portraiton-bar-mana-mask"]   = { "Interface\\HUD\\UIUnitFrameTargetManaMask", 4680795, "Interface\\HUD\\UIUnitFrameTargetManaMask2x", 5321221, 256, 16 },
     ["ui-hud-unitframe-player-portrait-mask"]              = { "Interface\\HUD\\UIUnitFramePlayerPortraitMask", 4682541, "Interface\\HUD\\UIUnitFramePlayerPortraitMask2x", 5321198, 64, 64 },
+    -- (2026-11-16: the small frames' bar masks - target of target, focus
+    -- target, pet, party - which the Forever client redrew too. One file
+    -- each, no 2x; file ids and sizes from the client's own atlas listing.)
+    ["ui-hud-unitframe-party-portraiton-bar-health-mask"]  = { "Interface\\HUD\\UIPartyFramePortraitOnHealthMask", 4737301, false, false, 128, 16 },
+    ["ui-hud-unitframe-party-portraiton-bar-mana-mask"]    = { "Interface\\HUD\\UIPartyFramePortraitOnManaMask", 4737298, false, false, 128, 16 },
 }
 local function FileHere(path, id)
     local f = _G.GetFileIDFromPath
@@ -309,12 +328,14 @@ local function Retail(name)
     e = false
     local row = key and RETAIL[key]
     local nf = row and NativeFile(name)
-    if row and nf ~= UF1[1] and nf ~= UF2[1] then
+    local s1 = row and (row.sheet or UF1)
+    local s2 = row and not row.sheet and UF2 or nil
+    if row and nf ~= s1[1] and not (s2 and nf == s2[1]) then
         local w, h = row[2] - row[1], row[4] - row[3]
-        if FileHere(UF2[2], UF2[1]) then
-            e = { UF2[2], row[5] / UF2[3], row[6] / UF2[3], row[7] / UF2[4], row[8] / UF2[4], w, h }
-        elseif FileHere(UF1[2], UF1[1]) then
-            e = { UF1[2], row[1] / UF1[3], row[2] / UF1[3], row[3] / UF1[4], row[4] / UF1[4], w, h }
+        if s2 and FileHere(s2[2], s2[1]) then
+            e = { s2[2], row[5] / s2[3], row[6] / s2[3], row[7] / s2[4], row[8] / s2[4], w, h }
+        elseif FileHere(s1[2], s1[1]) then
+            e = { s1[2], row[1] / s1[3], row[2] / s1[3], row[3] / s1[4], row[4] / s1[4], w, h }
         end
     end
     retailMemo[key or ""] = e
@@ -329,7 +350,7 @@ local function RetailMask(name)
     local row = key and RETAIL_MASK[key]
     local nf = row and NativeFile(name)
     if row and nf ~= row[2] and nf ~= row[4] then
-        if FileHere(row[3], row[4]) then e = { row[3], row[5], row[6] }
+        if row[3] and FileHere(row[3], row[4]) then e = { row[3], row[5], row[6] }
         elseif FileHere(row[1], row[2]) then e = { row[1], row[5], row[6] } end
     end
     maskMemo[key or ""] = e

@@ -286,6 +286,9 @@ Modules.bars = function()
         return
     end
     if AB.active then return end
+    -- (a starting layout to lay, and the client's Edit Mode has not placed
+    -- the game's bars yet: the bars start when it has - AB.LayoutWait)
+    if AB.LayoutWait and AB.LayoutWait(function() Modules.bars() end) then return end
     AB.active = true
     AB.HideBlizzard()
     AB.ApplyAll()

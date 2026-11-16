@@ -268,7 +268,7 @@ Modules.misc = function()
         if f then StripTextures(f) end
     end
     if GhostFrame then
-        SkinBackdrop(GhostFrame, "windowBg", 0.85)
+        SkinBackdrop(GhostFrame, "windowBg", 0.85, nil, false)
         if GhostFrameContentsFrame then StripTextures(GhostFrameContentsFrame) end
     end
 
@@ -344,7 +344,7 @@ Modules.misc = function()
     if AutoCompleteBox and not ZUI.skinned[AutoCompleteBox] then
         ZUI.skinned[AutoCompleteBox] = true
         StripTextures(AutoCompleteBox)
-        SkinBackdrop(AutoCompleteBox, "windowBg", 0.97)
+        SkinBackdrop(AutoCompleteBox, "windowBg", 0.97, nil, false)
     end
 
     -- The item-text (book / plaque) pages are parchment like the quest

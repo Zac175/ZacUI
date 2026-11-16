@@ -3000,7 +3000,15 @@ function ns.CastbarEvent(frame, event, evUnit, castGUID)
         -- STOP / FAILED / INTERRUPTED / CHANNEL_STOP. A stale stop/fail from a queued
         -- or double-pressed spell would otherwise hide a cast that's still going (the
         -- "flash then vanish"), so ignore it when its GUID isn't the cast we're showing.
-        if castGUID and cb.castGUID and castGUID ~= cb.castGUID then return end
+        -- (WoW Forever hands another unit's cast id over as a secret value: it
+        -- may be kept and passed on, never compared - 2026-11-15, Zac's
+        -- target interrupted: "attempt to compare local 'castGUID' (a secret
+        -- string value)". With a secret on either side the check is skipped
+        -- and the bar is simply read again, which is right for a stale stop
+        -- too: CastbarUpdate shows a cast that is still going.)
+        local sv = issecretvalue
+        local secret = sv ~= nil and (sv(castGUID) or sv(cb.castGUID))
+        if not secret and castGUID and cb.castGUID and castGUID ~= cb.castGUID then return end
         cb.castGUID = nil
         ns.CastbarUpdate(frame, true)                     -- hides if truly idle, else shows the live cast
     end

@@ -1117,12 +1117,45 @@ local function FitCamera(m)
     m:SetCamDistanceScale(base + (m.camExtra or 0))
 end
 
+-- WoW Forever / Retail (2026-11-15, Zac: "my chacter is omega cut off").
+-- Blizzard's character-sheet scene is set up for their stage - a tall one.
+-- On this page's wide, short one the same camera showed the character from
+-- the neck to the shins. The camera is pulled back by how much less of the
+-- view's height this stage's shape leaves (the view is measured corner to
+-- corner), against Blizzard's own stage where its size can be read, else
+-- against the classic one (233 x 300).
+local function FitScene(m)
+    local cam = m.GetActiveCamera and m:GetActiveCamera()
+    if not (cam and cam.GetZoomDistance and cam.SetZoomDistance) then return end
+    local secret = ns.IsSecret or function() return false end
+    local w, h = m:GetWidth(), m:GetHeight()
+    if secret(w) or secret(h) or not (w and h and w > 1 and h > 1) then return end
+    local w0, h0 = 233, 300
+    local ref = _G.CharacterModelScene
+    if ref and ref ~= m and ref.GetWidth then
+        local rw, rh = ref:GetWidth(), ref:GetHeight()
+        if not secret(rw) and not secret(rh) and rw and rh and rw > 1 and rh > 1 then w0, h0 = rw, rh end
+    end
+    local k = (h0 / math.sqrt(w0 * w0 + h0 * h0)) / (h / math.sqrt(w * w + h * h))
+    if k <= 1 then return end
+    if k > 3 then k = 3 end
+    local d = cam:GetZoomDistance()
+    if secret(d) or type(d) ~= "number" or d <= 0 then return end
+    local far = cam.GetMaxZoomDistance and cam:GetMaxZoomDistance()
+    if cam.SetMaxZoomDistance and type(far) == "number" and far < d * k * 1.5 then
+        cam:SetMaxZoomDistance(d * k * 1.5)
+    end
+    cam:SetZoomDistance(d * k)
+    if cam.SnapAllInterpolatedValues then cam:SnapAllInterpolatedValues() end
+end
+
 local function UpdateModel()
     if not model then return end
     -- WoW Forever / Retail: Blizzard's own character-sheet scene and orbit
-    -- camera (the one their paper doll uses) frames the whole character
+    -- camera (the one their paper doll uses), pulled back to this stage
     if model._zScene then
         pcall(ModelSceneUtil.SetUpCharacterSheetScene, model)
+        pcall(FitScene, model)
         return
     end
     model:SetUnit("player", false)
@@ -1502,10 +1535,39 @@ local function Build()
             if not InCombatLockdown() then HideUIPanel(CharacterFrame) end
         end,
     })
+    -- the gap between the slots of a column (Classic: SLOT_GAP)
+    local gap = SLOT_GAP
     if _G.ZACUI_MODERN then
         -- title, info line, the slot columns, a pad, the footer
         win._zContentH = M.TITLEBAR + 2 + INFO_H + 4 + 8 * SLOT + 7 * SLOT_GAP
             + Kit.PAD + Kit.FOOTER_H + 1
+        -- (2026-11-15, Zac: "there is a huge black nothiung below the
+        -- character pane") The modern character frame is taller than that:
+        -- the page stopped short and the window's own panel showed under
+        -- it. The page now runs to the frame's foot, the slots spread down
+        -- the columns and the model's stage takes the height. (A frame
+        -- whose size the client keeps secret: the page as it was.)
+        -- (Forever sizes the frame when it is first shown, not when it
+        -- loads - this page is built at login - so its height is read from
+        -- the game's own constant when the frame has none yet)
+        -- (2026-11-15, Zac's Forever sheet still had the band: before its
+        -- first show the frame is not 0 tall, it has its TEMPLATE's height -
+        -- ButtonFrameTemplate's 424 - so the page was fitted to that and
+        -- the 484 frame showed 60 under it. The game's own constant first;
+        -- the frame's height only where the client has no constant.)
+        local hh = tonumber(_G.CHARACTER_FRAME_HEIGHT)
+        if not (type(hh) == "number" and hh > 1) then
+            hh = CharacterFrame and CharacterFrame:GetHeight()
+            if ns.IsSecret and ns.IsSecret(hh) then hh = nil end
+        end
+        if type(hh) == "number" and hh > 1 then
+            local ins = ns.GetPanelInset("CharacterFrame", CharacterFrame)
+            local extra = math.floor(hh - (ins.t or 0) - (ins.b or 0) - win._zContentH)
+            if extra > 0 then
+                gap = SLOT_GAP + math.floor(extra / 7)
+                win._zContentH = win._zContentH + extra
+            end
+        end
     end
     win.Reanchor = function() PlaceOverCharacter(win) end
     win.Reanchor()
@@ -1526,7 +1588,7 @@ local function Build()
     -- Two columns of eight, Blizzard's order, anchored straight to the
     -- cover (secure buttons are never re-anchored after this).
     local top = -(M.TITLEBAR + 2 + INFO_H + 4)
-    local step = SLOT + SLOT_GAP
+    local step = SLOT + gap
     for i, name in ipairs(LEFT_SLOTS) do
         local b = BuildSlot(name, SLOT)
         b:SetPoint("TOPLEFT", win, "TOPLEFT", Kit.PAD, top - (i - 1) * step)
@@ -1554,7 +1616,7 @@ local function Build()
     -- The middle column: model on top, the two stat cards above the
     -- weapon row.
     local side = Kit.PAD + SLOT + COL_GAP
-    local zoneH = 8 * SLOT + 7 * SLOT_GAP
+    local zoneH = 8 * SLOT + 7 * gap
     mid = CreateFrame("Frame", nil, win)
     mid:SetPoint("TOPLEFT", win, "TOPLEFT", side, top)
     mid:SetPoint("TOPRIGHT", win, "TOPRIGHT", -side, top)

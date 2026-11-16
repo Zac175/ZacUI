@@ -140,7 +140,11 @@ local function TintBorder(frame, r, g, b, a)
     end
 end
 
-local function SkinBackdrop(frame, bgKey, alpha, look)
+-- finish: false keeps the fill plain. A WINDOW's fill (bgKey "windowBg")
+-- otherwise takes the surface finish (Core_Finish: the brushed ground and
+-- its soft depth); a tooltip, the chat's panel and other small pieces pass
+-- false, and every other bgKey is a piece inside a window and stays plain.
+local function SkinBackdrop(frame, bgKey, alpha, look, finish)
     if not frame then return end
     -- Classic: Blizzard's own backdrop - the dialog background and border
     -- on a window (bgKey "windowBg"), the tooltip ones on anything smaller
@@ -181,6 +185,9 @@ local function SkinBackdrop(frame, bgKey, alpha, look)
         frame._zui_cbg:SetAllPoints()
         frame._zui_cbg:SetTexture(FLAT)
         AddPixelBorder(frame)
+        if ns.Finish and finish ~= false and (bgKey or "windowBg") == "windowBg" then
+            ns.Finish.Dress(frame._zui_cbg, "window")
+        end
     end
     frame._zui_cbg:SetVertexColor(bg.r, bg.g, bg.b, alpha or bg.a or 1)
 end
@@ -429,8 +436,20 @@ local function SkinIconButton(btn, keepNormal, look)
         keepNormal = true
     end
 
+    -- A MASK IS NEVER STRIPPED (2026-11-16, Zac's Forever character and
+    -- inspect windows: "no icons showing and the empty slots are just
+    -- blank squares"). The modern item button rounds its icon with a mask
+    -- (Blizzard_ItemButton/Shared/ItemButtonTemplate.xml: Mask, on the
+    -- icon). The sweep below emptied it like any other piece of art, and an
+    -- icon cut by an empty mask draws nothing at all: worn items and the
+    -- empty-slot pictures alike. So a mask is left alone here, and then
+    -- taken OFF the icon: ZacUI's slot is square and shows the whole
+    -- picture, cropped like every icon (the bag bar does the same).
+    local function IsMask(region)
+        return region.GetObjectType and region:GetObjectType() == "MaskTexture"
+    end
     for _, region in ipairs({ btn:GetRegions() }) do
-        if region.IsObjectType and region:IsObjectType("Texture") then
+        if region.IsObjectType and region:IsObjectType("Texture") and not IsMask(region) then
             local keep = (region == icon) or (region == search)
                 or (keepNormal and region == normal)
                 or (region == quality) or (region == quest)
@@ -438,6 +457,13 @@ local function SkinIconButton(btn, keepNormal, look)
                 region:SetTexture(nil)
                 region:SetAlpha(0)
             end
+        end
+    end
+    if icon and icon.RemoveMaskTexture and icon.GetNumMaskTextures and icon.GetMaskTexture then
+        local okN, n = pcall(icon.GetNumMaskTextures, icon)
+        for k = (okN and type(n) == "number" and n or 0), 1, -1 do
+            local okM, mt = pcall(icon.GetMaskTexture, icon, k)
+            if okM and mt then pcall(icon.RemoveMaskTexture, icon, mt) end
         end
     end
     -- `normal ~= icon` is not redundant with the adoption above. That
@@ -608,6 +634,9 @@ local function SkinEditBox(eb, height, look)
         eb._zui_cbg:SetVertexColor(c.r, c.g, c.b, S and S.INPUT_A or 0.35)
         eb._zui_rest = { 1, 1, 1, S and S.INPUT_BRD_A or 0.10 }
         for _, t in ipairs(eb._zui_borderTex) do t:SetColorTexture(1, 1, 1, eb._zui_rest[4]) end
+        -- the surface finish (Core_Finish): a field is cut into the
+        -- window - dark under its top lip, a pale line under its foot
+        if ns.Finish then ns.Finish.Dress(eb._zui_cbg, "well", { always = true }) end
     end
     if height then eb:SetHeight(height) end
 end
@@ -678,7 +707,7 @@ local function SkinDropDownLists()
                     if bd then StripTextures(bd) end
                     local mb = _G[self:GetName() .. "MenuBackdrop"]
                     if mb then StripTextures(mb) end
-                    SkinBackdrop(self, "windowBg", 0.97)
+                    SkinBackdrop(self, "windowBg", 0.97, nil, false)
                     self._zui_bg = true
                 end
             end)

@@ -59,6 +59,78 @@ local function MainlineTab(frame)
     return _G.ZACUI_MODERN and rawget(frame, "LeftActive") ~= nil and rawget(frame, "MiddleActive") ~= nil
 end
 
+-- A GAME LOOK ON THE SCREEN, ZACUI'S STYLE ON THE WINDOWS (2026-11-16).
+-- The looks can be mixed part by part, and on WoW Forever the 2004 and
+-- Blizzard looks are mixed by default (Core_Look's Look.OwnWindows: the
+-- screen wears the look, the game's windows wear ZacUI's style). The
+-- classifier is the windows' skin: it walks EVERY frame, so with a game
+-- look on a screen part it would put ZacUI's flat close button on the
+-- game's bag window, its flat edit box in the game's chat, its X on the
+-- quest tracker's header. A frame that sits on a screen piece whose part
+-- wears a game look belongs to that look: left exactly as the game drew
+-- it, and marked so no later pass asks again. Which pieces: by the name
+-- of any frame it sits on (Blizzard's own names; the wow-ui-source
+-- branches of every client). Under ZacUI's look on every part none of
+-- this runs (the list is empty), so nothing changes there.
+--   { name pattern, look part }  ("tracker": Look.StandsDown's own rule)
+local SCREEN_PIECES = {
+    { "^ChatFrame%d", "chat" }, { "^GeneralDockManager", "chat" }, { "^ChatFrameMenuButton", "chat" },
+    { "^ChatFrameChannelButton", "chat" }, { "^ChatFrameToggleVoice", "chat" }, { "^QuickJoinToastButton", "chat" },
+    { "^ChatAlertFrame", "chat" }, { "^TextToSpeechButton", "chat" }, { "^CombatLogQuickButtonFrame", "chat" },
+    { "^GameTooltip", "tooltip" }, { "^ItemRefTooltip", "tooltip" }, { "^ShoppingTooltip", "tooltip" },
+    { "^ItemRefShoppingTooltip", "tooltip" }, { "^EmbeddedItemTooltip", "tooltip" }, { "^WorldMapTooltip", "tooltip" },
+    { "^MinimapCluster", "minimap" }, { "^Minimap", "minimap" }, { "^GameTimeFrame", "minimap" },
+    { "^TimeManagerClockButton", "minimap" }, { "^AddonCompartmentFrame", "minimap" },
+    { "^ExpansionLandingPageMinimapButton", "minimap" }, { "^MiniMap", "minimap" },
+    { "^WorldMapFrame", "maps" },
+    { "^ContainerFrame", "bags" }, { "^BankFrame", "bags" }, { "^ReagentBankFrame", "bags" },
+    { "^AccountBankPanel", "bags" }, { "^BankPanel", "bags" },
+    { "^PlayerFrame", "unitframes" }, { "^TargetFrame", "unitframes" }, { "^FocusFrame", "unitframes" },
+    { "^PetFrame", "unitframes" }, { "^PartyFrame", "unitframes" }, { "^PartyMemberFrame", "unitframes" },
+    { "^Boss%dTargetFrame", "unitframes" }, { "^BossTargetFrameContainer", "unitframes" },
+    { "^PlayerCastingBarFrame", "unitframes" }, { "^CastingBarFrame", "unitframes" },
+    { "^PetCastingBarFrame", "unitframes" }, { "^MirrorTimer", "unitframes" },
+    { "^BuffFrame", "auras" }, { "^DebuffFrame", "auras" }, { "^TemporaryEnchantFrame", "auras" },
+    { "^MicroMenu", "bars" }, { "^MicroButtonAndBagsBar", "bars" }, { "^BagsBar", "bars" },
+    { "^MainMenuBar", "bars" }, { "^MainActionBar", "bars" }, { "^MultiBar", "bars" }, { "^StanceBar", "bars" },
+    { "^PetActionBar", "bars" }, { "^PossessActionBar", "bars" }, { "^OverrideActionBar", "bars" },
+    { "^StatusTrackingBarManager", "bars" }, { "^ExtraActionBarFrame", "bars" }, { "^ExtraAbilityContainer", "bars" },
+    { "^ZoneAbilityFrame", "bars" }, { "^QueueStatusButton", "bars" },
+    { "^ObjectiveTrackerFrame", "tracker" }, { "^QuestWatchFrame", "tracker" }, { "^WatchFrame", "tracker" },
+}
+local screenLive          -- the rows whose part wears a game look this session (false: none)
+local function ScreenRows()
+    if screenLive ~= nil then return screenLive end
+    local L = ns.Look
+    if not (L and L.Stock and L.StandsDown and L.Settled and L.Settled()) then return false end
+    local rows = {}
+    for _, row in ipairs(SCREEN_PIECES) do
+        local stock
+        if row[2] == "tracker" then stock = L.StandsDown("tracker") else stock = L.Stock(row[2]) end
+        if stock then rows[#rows + 1] = row[1] end
+    end
+    screenLive = (#rows > 0) and rows or false
+    return screenLive
+end
+-- does this frame sit on a screen piece that wears a game look?
+local function OnScreenPiece(frame)
+    local rows = ScreenRows()
+    if not rows then return false end
+    local f, n = frame, 0
+    while f and n < 24 do
+        local name = f.GetName and f:GetName()
+        if type(name) == "string" then
+            for _, pat in ipairs(rows) do
+                if name:find(pat) then return true end
+            end
+        end
+        f = f.GetParent and f:GetParent()
+        n = n + 1
+    end
+    return false
+end
+ns.OnScreenPiece = OnScreenPiece
+
 local function ClassifyAndSkin(frame)
     if ZUI.skinned[frame] then return end
 
@@ -78,6 +150,11 @@ local function ClassifyAndSkin(frame)
     local name = frame.GetName and frame:GetName()
     if name and (name:find("^NamePlate") or name:find("^Compact")
         or name:find("^EditMode")) then
+        ZUI.skinned[frame] = true
+        return
+    end
+    -- (a screen piece that wears a game look: the game's, untouched)
+    if OnScreenPiece(frame) then
         ZUI.skinned[frame] = true
         return
     end
@@ -211,7 +288,7 @@ Modules.sweep = function()
         or (WorldMapFrame and WorldMapFrame.BorderFrame
             and WorldMapFrame.BorderFrame.CloseButton)
         or (WorldMapFrame and WorldMapFrame.CloseButton)
-    if mapClose then SkinCloseButton(mapClose) end
+    if mapClose and not OnScreenPiece(mapClose) then SkinCloseButton(mapClose) end
 
     -- ChatConfig panels themselves
     if ChatConfigFrame and not ZUI.skinned[ChatConfigFrame] then

@@ -50,6 +50,8 @@ Modules.gamemenu = function()
         bg:SetVertexColor(w.r, w.g, w.b, 0.97)
         GameMenuFrame._zui_bg = bg
         AddPixelBorder(GameMenuFrame)
+        -- the surface finish (Core_Finish), as on every window's ground
+        if ns.Finish then ns.Finish.Dress(bg, "window") end
     end
 
     -- HEADER BAR - one aligned unit, not three floating pieces. The
@@ -78,6 +80,10 @@ Modules.gamemenu = function()
         local h = Col("headerBg")
         band:SetVertexColor(h.r, h.g, h.b, 0)
         GameMenuFrame._zui_band = band
+        -- (2026-11-16) a raised bar again, without a colour of its own:
+        -- the window's ground lifted, lit along its top, a dark line along
+        -- its foot (Core_Finish, "bar"); the rule below is its pale step
+        if ns.Finish then ns.Finish.Dress(band, "bar", { always = true, step = false, inset = 0 }) end
 
         local line = GameMenuFrame:CreateTexture(nil, "OVERLAY", nil, 6)
         line._zui_own = true
@@ -269,6 +275,7 @@ Modules.gamemenu = function()
         local w = Col("windowBg")
         bg:SetVertexColor(w.r, w.g, w.b, 0.97)
         AddPixelBorder(strip)
+        if ns.Finish then ns.Finish.Dress(bg, "window") end
         strip.buttons = {}
         for i, e in ipairs(entries) do
             local b = CreateFrame("Button", nil, strip)

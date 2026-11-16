@@ -69,7 +69,7 @@ function TipLook.Skin(tt)
     local bg = CreateFrame("Frame", nil, tt, "BackdropTemplate")
     bg:SetAllPoints()
     bg:SetFrameLevel(math.max(0, tt:GetFrameLevel() - 1))
-    SkinBackdrop(bg, "windowBg", 0.95)
+    SkinBackdrop(bg, "windowBg", 0.95, nil, false)
     tt._zui_bg = bg
     -- a palette change repaints this; the tooltip's own settings win
     bg._zPaint = function() TipLook.Paint(tt) end
@@ -84,7 +84,7 @@ function TipLook.Paint(tt, cfg)
     if type(cfg.bgColor) == "table" and bg._zui_cbg then
         bg._zui_cbg:SetVertexColor(ns.ColorOf(cfg.bgColor))
     else
-        SkinBackdrop(bg, "windowBg", 0.95)
+        SkinBackdrop(bg, "windowBg", 0.95, nil, false)
     end
     if not tt._zui_tinted and ns.TintBorder then
         if type(cfg.borderColor) == "table" then

@@ -747,6 +747,8 @@ function CT.NewTreeView(parent, geo)
     UI.Border(view, "ui", "border")
     view._zPaint = UI.PaintBox
     view:_zPaint()
+    -- the surface finish (Core_Finish): each tree is a plate on the window
+    if ns.Finish then ns.Finish.Dress(view._zFill, "card") end
 
     local header = CreateFrame("Frame", nil, view)
     header:SetHeight(g.header)

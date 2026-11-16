@@ -2,7 +2,7 @@
 ## Title: ZacUI
 ## Notes: Flat dark skin for the whole Classic Era interface - HUD, windows, and your other addons.
 ## Author: Zac
-## Version: 3.0.12
+## Version: 3.0.13
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## SavedVariables: ZacUIDB
 ## SavedVariablesPerCharacter: ZacUICharDB
@@ -97,6 +97,10 @@ Core\Core_LookPanels.lua
 # look (ns.Pixel). After the Look (it asks which look is live), before
 # the UI framework (every primitive draws its borders through it).
 Core\Core_Pixel.lua
+# The surface finish of ZacUI's own style (2026-11-16): soft depth and a
+# brushed ground over the flat fills. After Pixel (its lines are one pixel),
+# before the UI framework (its builders call it).
+Core\Core_Finish.lua
 Core\Core_Services.lua
 Core\Core_Encounter.lua
 # Each game version's raids: which kill ends one (clear timer, raid summary)
@@ -183,6 +187,9 @@ Modules\Blizzard\Blz_UnitFrames.lua
 Modules\Blizzard\Blz_Dialogs.lua
 Modules\Blizzard\Blz_GameMenu.lua
 Modules\Blizzard\Blz_Vendor.lua
+# The game's own windows restyled in place, by the art they are made of
+# (before the window files that call it).
+Modules\Blizzard\Blz_Sweep.lua
 Modules\Blizzard\Blz_Character.lua
 Modules\Blizzard\Blz_Windows.lua
 Modules\Blizzard\Blz_Gossip.lua

@@ -121,11 +121,14 @@ local function PaintRow(self)
                 pl:Paint({ r = 0, g = 0, b = 0, a = 0 }, { r = 0, g = 0, b = 0, a = 0 },
                     { r = a.r, g = a.g, b = a.b, a = 0.70 }, 0)
             elseif hot then
-                pl:Paint({ r = 1, g = 1, b = 1, a = 0.085 }, { r = 1, g = 1, b = 1, a = 0.05 },
-                    { r = a.r, g = a.g, b = a.b, a = 0.50 }, 0.06)
+                local N = PLc.NAV
+                pl:Paint({ r = 1, g = 1, b = 1, a = N.TOP_H }, { r = 1, g = 1, b = 1, a = N.BOT_H },
+                    { r = a.r, g = a.g, b = a.b, a = N.EDGE_H }, N.SHEEN_H, N.DROP)
             else
-                pl:Paint({ r = 1, g = 1, b = 1, a = 0.045 }, { r = 1, g = 1, b = 1, a = 0.02 },
-                    { r = 1, g = 1, b = 1, a = off and 0.04 or 0.085 }, 0.03)
+                -- (2026-11-16: a row at rest stands out more - UI.PL.NAV)
+                local N = PLc.NAV
+                pl:Paint({ r = 1, g = 1, b = 1, a = N.TOP }, { r = 1, g = 1, b = 1, a = N.BOT },
+                    { r = 1, g = 1, b = 1, a = off and N.EDGE_OFF or N.EDGE }, N.SHEEN, off and 0 or N.DROP)
             end
         end
     end
@@ -1052,12 +1055,13 @@ local function Build()
         row._zPaint = function(self)
             local hot = self._zHot
             local ac = GetColor("ui", "accent")
+            local N = UI.PL.NAV
             if hot then
-                plate:Paint({ r = 1, g = 1, b = 1, a = 0.085 }, { r = 1, g = 1, b = 1, a = 0.05 },
-                    { r = ac.r, g = ac.g, b = ac.b, a = 0.50 }, 0.06)
+                plate:Paint({ r = 1, g = 1, b = 1, a = N.TOP_H }, { r = 1, g = 1, b = 1, a = N.BOT_H },
+                    { r = ac.r, g = ac.g, b = ac.b, a = N.EDGE_H }, N.SHEEN_H, N.DROP)
             else
-                plate:Paint({ r = 1, g = 1, b = 1, a = 0.045 }, { r = 1, g = 1, b = 1, a = 0.02 },
-                    { r = 1, g = 1, b = 1, a = 0.085 }, 0.03)
+                plate:Paint({ r = 1, g = 1, b = 1, a = N.TOP }, { r = 1, g = 1, b = 1, a = N.BOT },
+                    { r = 1, g = 1, b = 1, a = N.EDGE }, N.SHEEN, N.DROP)
             end
             hl:SetShown(false)
             hl:SetVertexColor(1, 1, 1, S.NAV_HL)
@@ -1148,7 +1152,7 @@ local function Build()
                     { r = x.r * 0.87, g = x.g * 0.87, b = x.b * 0.87, a = 1 }, PL.SHEEN_H)
             else
                 pl:Paint(hot and PL.TOP_H or PL.TOP, hot and PL.BOT_H or PL.BOT,
-                    { r = 1, g = 1, b = 1, a = hot and 0.22 or PL.EDGE }, hot and PL.SHEEN_H or PL.SHEEN)
+                    { r = 1, g = 1, b = 1, a = hot and 0.32 or PL.EDGE }, hot and PL.SHEEN_H or PL.SHEEN, PL.DROP)
             end
             if glyph then glyph:SetVertexColor(1, 1, 1, (hot or danger) and 1 or 0.80) end
         end

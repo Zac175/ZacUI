@@ -90,7 +90,7 @@ local SECTIONS = {
       desc = "The embedded aura engine's switches (not the auras themselves, which live in ZacUI_Auras)." },
     { key = "buffRem",    label = "Buff reminders",    keys = { "buffRem" },
       desc = "The group buff reminders and tracker: which buffs, when they show, their look and texts." },
-    { key = "look",       label = "Look",              keys = { "look", "iconZoom" },
+    { key = "look",       label = "Look",              keys = { "look", "iconZoom", "finish" },
       desc = "Which art the world wears - ZacUI's flat look or the game's Classic one - overall and per part. Applied at the next reload." },
 }
 local SECTION_BY_KEY = {}

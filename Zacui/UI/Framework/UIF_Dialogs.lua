@@ -127,15 +127,21 @@ function UI.PopupField(box)
 end
 
 -- The red one: the settings button's fade, in the negative colour.
+-- (2026-11-16) a raised plate like every button (UI.PaintSetButton's
+-- "close"), its face the red where that one's is the accent: it was a flat
+-- dark box with a thin red edge and a dim red label.
 local function PaintDestructive(self)
-    local S = UI.S
+    local PL = UI.PL
     local t = self._zDisabled and 0 or (self._zP or 0)
     local k = self._zDisabled and 0.5 or 1
     local c = GetColor("text", "red")
-    local a = (S.CLOSE_A + (1 - S.CLOSE_A) * t) * k
-    if self._zFill then self._zFill:SetVertexColor(S.BG.r, S.BG.g, S.BG.b, S.FOOT_BG_A) end
-    if self._zBorder then for _, e in ipairs(self._zBorder) do e:SetVertexColor(c.r, c.g, c.b, a) end end
-    if self._zText then self._zText:SetTextColor(c.r, c.g, c.b, a) end
+    local ft, fb = PL.CTA_TOP + (PL.CTA_TOP_H - PL.CTA_TOP) * t, PL.CTA_BOT + (PL.CTA_BOT_H - PL.CTA_BOT) * t
+    if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
+    if self._zBorder then for _, e in ipairs(self._zBorder) do e:SetVertexColor(0, 0, 0, 0) end end
+    local pl = UI.Plate(self, 0, 0, 0, 0)
+    pl:Paint({ r = c.r * ft, g = c.g * ft, b = c.b * ft, a = k }, { r = c.r * fb, g = c.g * fb, b = c.b * fb, a = k },
+        { r = c.r, g = c.g, b = c.b, a = (0.85 + 0.15 * t) * k }, (PL.SHEEN + (PL.SHEEN_H - PL.SHEEN) * t) * k, PL.DROP * k)
+    if self._zText then self._zText:SetTextColor(1, 1, 1, (0.94 + 0.06 * t) * k) end
 end
 local function PaintPopupButton(self)
     if self._zDestructive then return PaintDestructive(self) end
@@ -409,6 +415,11 @@ function UI.FlatBar(bar, opts)
         bar._zFlatRule = line
     end
     if opts.close then opts.close._zSet = true end
+    -- (2026-11-16) the bar is a raised piece of the window: the window's
+    -- colour lifted a little, the brushed grain, a lit top edge, a dark
+    -- line along its foot and a pale one under that (Core_Finish, "bar").
+    -- No gradient across it.
+    if ns.Finish and bar._zFill and opts.finish ~= false then ns.Finish.Dress(bar._zFill, "bar") end
     local function Paint(self)
         self = self or bar
         local r, g, b, a

@@ -26,7 +26,44 @@ local function HideGame()
     if b and b.focus ~= false and f and f.enabled then ns.HideGameFrames({ "FocusFrame" }) end
 end
 
+-- A NEW INSTALL STARTS WITH THE FOCUS FRAME ON (2026-11-15, Zac: "focus
+-- frames not styled to match the style picked" - the game's own focus
+-- frame beside ZacUI's player and target). Where the game has a focus,
+-- ZacUI's focus frame is the one that wears the picked style, like the
+-- target frame; switched off, the game's own shows. So a fresh install (or
+-- Reset ZacUI) switches it on, once; an install from before keeps what it
+-- has (off until ticked on the Unit frames page), and the focus-target
+-- frame stays off for everyone until asked for.
+local function FreshOn()
+    local z = ns.ZUI or _G.ZacUI
+    if not (z and (z.freshInstall == true or z.openSetupAfterReset == true)) then return end
+    local f = ns.db and ns.db.frames and ns.db.frames.focus
+    if type(f) ~= "table" or f._zFreshOn then return end
+    f._zFreshOn = true
+    f.enabled = true
+end
+
+-- AND ON WOW FOREVER UNDER THE 2004 OR BLIZZARD LOOK, ONCE (2026-11-15, Zac
+-- again, his focus frame switched off in a save from before: "also the
+-- focus frame is still forever style"). There the game's own focus frame
+-- can only ever be the client's bronze one, whatever look is picked, so
+-- the look's focus frame has to be ZacUI's: it is switched on the first
+-- time such a look is worn (marked, so it happens once - switched off
+-- again on the Unit frames page it stays off). WoW Forever's own look and
+-- every other client keep what the save has: the game's frame is that look.
+local function LookOn()
+    if _G.ZACUI_IS_FOREVER ~= true then return end
+    local kit = ns.Kit and ns.Kit.Active and ns.Kit.Active()
+    if type(kit) ~= "table" or kit.id == "forever" then return end
+    local f = ns.db and ns.db.frames and ns.db.frames.focus
+    if type(f) ~= "table" or f._zLookOn then return end
+    f._zLookOn = true
+    f.enabled = true
+end
+
 local function Spawn()
+    pcall(FreshOn)
+    pcall(LookOn)
     for _, k in ipairs(KEYS) do
         local cfg = ns.db.frames[k]
         if cfg and cfg.enabled and not ns.frames[k] then ns.SpawnUnit(k) end

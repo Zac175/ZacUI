@@ -579,13 +579,25 @@ local function KitFont(fs, size)
     if fs.SetShadowOffset then fs:SetShadowOffset(0, 0) end
 end
 
--- ZacUI's flat fill and pixel edge on a widget step back (alpha 0: the
--- paint passes that recolour them leave the alpha alone)
+-- A PIECE OF ZACUI'S OWN STEPS BACK AND STAYS BACK (2026-11-15, Zac, the
+-- bag under a game look: "duplicate text on the groups button"). The
+-- client keeps one alpha per region, and a text's or a texture's colour
+-- carries it: a ZacUI label, fill or edge hidden here with SetAlpha(0)
+-- was back the moment one of ZacUI's paints gave it its colour again (the
+-- Groups button is painted whenever it is lit) - ZacUI's label through
+-- the look's own, the flat box round the red button. Core_Look's Back
+-- hides the piece and holds it hidden.
+local function Back(x)
+    if not (type(x) == "table" and x.SetAlpha) then return end
+    local LK = ns.Look
+    if LK and LK.Back then LK.Back(x) else x:SetAlpha(0) end
+end
+
+-- ZacUI's flat fill and pixel edge on a widget step back
 local function HideFlat(f)
     if not f then return end
-    local fill = rawget(f, "_zFill")
-    if fill and fill.SetAlpha then fill:SetAlpha(0) end
-    for _, t in ipairs(rawget(f, "_zBorder") or {}) do if t.SetAlpha then t:SetAlpha(0) end end
+    Back(rawget(f, "_zFill"))
+    for _, t in ipairs(rawget(f, "_zBorder") or {}) do Back(t) end
 end
 
 -- a stock three-slice on `host` (left cap, stretched middle, right cap), the
@@ -619,7 +631,7 @@ local function KitLabel(host, src, size, justify)
     if justify and fs.SetJustifyH then fs:SetJustifyH(justify) end
     if src then
         fs:SetText(src.GetText and src:GetText() or "")
-        src:SetAlpha(0)
+        Back(src)
         if hooksecurefunc and src.SetText then
             hooksecurefunc(src, "SetText", function(_, t) fs:SetText(t) end)
         end
@@ -636,7 +648,7 @@ local function KitButton(b)
     HideFlat(b)
     -- ZacUI's own hover wash and pushed shade step back
     for _, r in ipairs({ b:GetRegions() }) do
-        if r ~= b._zFill and r.IsObjectType and r:IsObjectType("Texture") and r._zui_own then r:SetAlpha(0) end
+        if r ~= b._zFill and r.IsObjectType and r:IsObjectType("Texture") and r._zui_own then Back(r) end
     end
     local h = b:GetHeight() or KIT.btnH
     if type(h) ~= "number" or h <= 0 then h = KIT.btnH end
@@ -676,9 +688,9 @@ local function KitSortButton(b, kit, tpl)
     if kit == "classic" or not AtlasOK(KIT.sortUp) then return KitButton(b) end
     HideFlat(b)
     for _, r in ipairs({ b:GetRegions() }) do
-        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= b._zFill then r:SetAlpha(0) end
+        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= b._zFill then Back(r) end
     end
-    if b._zText then b._zText:SetAlpha(0) end
+    Back(b._zText)
     b:SetSize(24, 24)
     local n = OwnTex(b, "ARTWORK")
     n:SetAllPoints(b)
@@ -831,7 +843,7 @@ local function KitChrome(view)
     local bar = f.titleBar
     if bar then bar:SetAlpha(0) end
     if f.titleText then
-        f.titleText:SetAlpha(0)
+        Back(f.titleText)
         if hooksecurefunc and f.titleText.SetText then
             hooksecurefunc(f.titleText, "SetText", function(_, t) title:SetText(t) end)
         end
@@ -874,7 +886,7 @@ end
 local function KitClose(b, kit, size)
     if not b or rawget(b, "_zKitBtn") then return b end
     rawset(b, "_zKitBtn", true)
-    if rawget(b, "_zA") then b._zA:SetAlpha(0) end
+    Back(rawget(b, "_zA"))
     local modern = kit ~= "classic" and AtlasOK(KIT.closeModern[1])
     local art = modern and KIT.closeModern or KIT.closeClassic
     b:SetSize(size or art.size, size or art.size)
@@ -937,7 +949,7 @@ local function KitSearch(host)
     end
     local x = host.clearButton
     if x and AtlasOK(KIT.clearX) then
-        if rawget(x, "_zA") then x._zA:SetAlpha(0) end
+        Back(rawget(x, "_zA"))
         local t = OwnTex(x, "ARTWORK")
         t:SetSize(10, 10)
         t:SetPoint("CENTER", x, "CENTER", 0, 0)
@@ -956,7 +968,7 @@ local function KitDropdown(dd)
     rawset(dd, "_zKitBtn", true)
     HideFlat(dd)
     for _, r in ipairs({ dd:GetRegions() }) do
-        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= dd._zFill then r:SetAlpha(0) end
+        if r.IsObjectType and r:IsObjectType("Texture") and r._zui_own and r ~= dd._zFill then Back(r) end
     end
     local h = dd:GetHeight() or 22
     if type(h) ~= "number" or h <= 0 then h = 22 end
@@ -1916,7 +1928,7 @@ local function DressViewKit(view, kit)
         local _, mark = label:GetPoint(1)
         if mark and mark ~= bar and mark.IsObjectType and mark:IsObjectType("Texture") then
             mark:Hide()
-            mark:SetAlpha(0)
+            Back(mark)          -- (a title paint shows it again: held at nothing)
         end
         local t = KitLabel(bar, label, 12, "CENTER")
         if kit == "classic" then

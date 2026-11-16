@@ -518,6 +518,28 @@ local function StylePage(L)
         L:Add(Look.IconSamples(L.current), 6)
         L:EndCard()
     end
+
+    -- the surface finish (Core_Finish): how much of the soft depth ZacUI's
+    -- windows wear (the grain is off since 2026-11-16). Live, no reload; 100% saves as
+    -- nothing. Only where the finish loaded (a client restarted since the
+    -- update that brought it).
+    if ns.Finish then
+        L:Card("Surface finish")
+        local function Shown()
+            return math.floor(ns.Finish.Strength() * 100 + 0.5)
+        end
+        local fs = UI.Slider(L.current, { width = 220, min = 0, max = 100, step = 5, value = math.min(100, Shown()), label = "Surface finish",
+            format = function(v) return v .. "%" end,
+            onChange = function(v)
+                ZacUIDB.finish = (v ~= 100) and (v / 100) or nil
+                ns.Finish.Refresh()
+            end })
+        L:Row(fs, 40)
+        L:Desc("ZacUI's windows have a little shading, lit edges and raised title bars instead of one flat "
+            .. "colour. 100% is how it ships; 0% turns it off and brings the flat windows back. "
+            .. "Readycheck's windows follow this.")
+        L:EndCard()
+    end
 end
 if RegisterPage then RegisterPage("Style", StylePage) end
 

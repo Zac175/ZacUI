@@ -893,7 +893,7 @@ local function SkinTimeBits()
     end
     if StopwatchFrame then
         StripTextures(StopwatchFrame)
-        SkinBackdrop(StopwatchFrame, "windowBg", 0.9)
+        SkinBackdrop(StopwatchFrame, "windowBg", 0.9, nil, false)
         RemoveClose(StopwatchCloseButton)
         RemoveClose(StopwatchFrameCloseButton)
         RemoveClose(StopwatchFrame.CloseButton)
@@ -1813,7 +1813,13 @@ Modules.minimap = function()
     local function Step(z, nz)
         local t = Indoor() and YARDS.indoor or YARDS.outdoor
         local ratio = (t[z] and t[nz] and t[nz] > 0) and (t[z] / t[nz]) or nil
-        if not ratio or not Setting("smoothZoom") or InCombatLockdown() then
+        -- (2026-11-15, Zac on WoW Forever: the zoom "makes the minimap
+        -- jitter". The ease moves the minimap into a clipping frame and
+        -- scales it for the step; on the modern client the minimap belongs
+        -- to its cluster's own layout, which takes it back mid-step. There
+        -- the wheel is the game's own plain step until the ease is built
+        -- for that client; Classic Era and TBC ease as before.)
+        if not ratio or not Setting("smoothZoom") or InCombatLockdown() or _G.ZACUI_MODERN then
             Minimap:SetZoom(nz)
             return
         end

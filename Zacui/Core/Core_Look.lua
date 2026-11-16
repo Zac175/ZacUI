@@ -454,6 +454,32 @@ function Look.Get(id) return LOOKS[id] end
 -- ============================================================
 -- THE ACCESSORS
 -- ============================================================
+-- ============================================================
+-- WOW FOREVER: THE 2004 AND BLIZZARD LOOKS DRESS THE SCREEN; THE GAME'S
+-- WINDOWS WEAR ZACUI'S STYLE (2026-11-16)
+-- ============================================================
+-- Zac on his Forever client, 2026-11-15 21:32, the 2004 look's merchant
+-- window and the Blizzard look's trade window: bronze WoW Forever windows
+-- under a look that is not WoW Forever's. On that client the game's own
+-- windows can only ever be the client's (the modern layouts, in bronze):
+-- there is no 2004 window and no live-game window to hand back to, so
+-- "the game's own window, untouched" is not that look. 23:41: "just look at
+-- EllesmereUI code and how he styles things ... his addon is already
+-- refined". The reference's looks dress the on-screen pieces (bars, unit
+-- frames, nameplates, cast bars, minimap, tracker, chat); the game's
+-- windows wear its one skin under every look. So here, on the Forever
+-- client only, under Classic WoW UI and Blizzard style: the two window
+-- parts ("blizzard": the skins of the game's windows; "windows": ZacUI's
+-- covers over them) wear ZacUI's look unless the player gave that part a
+-- look of its own on the Style page. Every other part follows the picked
+-- look as before; WoW Forever's own look keeps the game's windows (they
+-- ARE that look); Era, TBC, Anniversary and Retail are untouched (their
+-- game windows are the look's real thing).
+local WINDOW_PARTS = { blizzard = true, windows = true }
+function Look.OwnWindows(global)
+    return (global == "classic" or global == "blizzard") and RealFlavor() == "forever"
+end
+
 function Look.For(part)
     if forced then return forced end
     local a = Live()
@@ -462,6 +488,10 @@ function Look.For(part)
         part = PART_ALIAS[part] or part
         local id = a.parts[part]
         if id then return LOOKS[id] end
+        if WINDOW_PARTS[part] then
+            if a.ownWindows == nil then a.ownWindows = Look.OwnWindows(a.global) and true or false end
+            if a.ownWindows then return LOOKS.zacui end
+        end
     end
     return LOOKS[a.global] or LOOKS.zacui
 end
@@ -544,6 +574,12 @@ end
 function Look.StandsDown(module)
     local part = Look.STOCK[module]
     if not part then return false end
+    -- (the quest tracker is on the screen, not a window: on WoW Forever it
+    -- follows the picked look itself, not the windows' - Look.OwnWindows)
+    if module == "tracker" and not forced then
+        local a = Live()
+        if a and a.parts[part] == nil then return a.global ~= "zacui" end
+    end
     return Look.Stock(part)
 end
 
@@ -1447,7 +1483,12 @@ function Look.Choices()
     for _, id in ipairs(ORDER) do
         local l = LOOKS[id]
         if Look.Offered(id) then
-            out[#out + 1] = { id = l.id, name = l.name, tag = l.tag, desc = l.desc }
+            local desc = l.desc
+            -- (WoW Forever: said on the card, so the pick is no surprise)
+            if Look.OwnWindows(id) and type(desc) == "string" then
+                desc = desc .. " On WoW Forever the game's windows wear ZacUI's style."
+            end
+            out[#out + 1] = { id = l.id, name = l.name, tag = l.tag, desc = desc }
         end
     end
     return out

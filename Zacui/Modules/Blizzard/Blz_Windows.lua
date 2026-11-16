@@ -257,7 +257,7 @@ Modules.friends = function()
             if bd and not ZUI.skinned[bd] then
                 ZUI.skinned[bd] = true
                 if bd.NineSlice then bd.NineSlice:SetAlpha(0) end
-                SkinBackdrop(bd, "windowBg", 0.9)
+                SkinBackdrop(bd, "windowBg", 0.9, nil, false)
             end
             for i = 1, 40 do
                 local bn = pn .. "Button" .. i

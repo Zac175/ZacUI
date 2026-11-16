@@ -327,9 +327,16 @@ local function BuildRow(row)
                     canAfford = math.floor(GetMoney() / (e.price / e.count))
                 end
                 local most = math.min(maxStack, canAfford)
-                if maxStack > 1 and most > 0 and OpenStackSplitFrame then
-                    self._zSplitItem = e
-                    OpenStackSplitFrame(most, self, "BOTTOMLEFT", "TOPLEFT", e.count)
+                -- (Forever: the split box is opened through the frame itself)
+                local ssf = _G.StackSplitFrame
+                if maxStack > 1 and most > 0 then
+                    if OpenStackSplitFrame then
+                        self._zSplitItem = e
+                        OpenStackSplitFrame(most, self, "BOTTOMLEFT", "TOPLEFT", e.count)
+                    elseif ssf and ssf.OpenStackSplitFrame then
+                        self._zSplitItem = e
+                        ssf:OpenStackSplitFrame(most, self, "BOTTOMLEFT", "TOPLEFT", e.count)
+                    end
                 end
                 return
             end
@@ -549,11 +556,24 @@ end
 -- can be turned off on its own.
 local function BlizzardTabs()
     local f = MerchantFrame
-    return {
-        _G.MerchantFrameTab1, _G.MerchantFrameTab2,
-        f and f.PortraitContainer, _G.MerchantFramePortrait,
-        f and f.NineSlice, f and f.CloseButton, _G.MerchantFrameCloseButton,
-    }
+    -- Appended one by one, never a table literal: a piece missing on one
+    -- client would leave a hole, and ipairs stops at the first hole.
+    local t = {}
+    local function Add(x) if x then t[#t + 1] = x end end
+    Add(_G.MerchantFrameTab1)
+    Add(_G.MerchantFrameTab2)
+    if f then
+        Add(f.PortraitContainer)
+        Add(f.NineSlice)
+        Add(f.CloseButton)
+        -- Forever's modern merchant window: its own title strip (level 510)
+        -- drew over the cover's title (2026-11-15, Zac: "some overlap when
+        -- i opened a merchant with zui style")
+        Add(f.TitleContainer)
+    end
+    Add(_G.MerchantFramePortrait)
+    Add(_G.MerchantFrameCloseButton)
+    return t
 end
 
 local function Apply()

@@ -539,6 +539,8 @@ local function BuildTree(index)
     UI.Border(tree, "ui", "border")
     tree._zPaint = UI.PaintBox
     tree:_zPaint()
+    -- the surface finish (Core_Finish): each tree is a plate on the window
+    if ns.Finish then ns.Finish.Dress(tree._zFill, "card") end
     tree.tab = index
 
     local header = CreateFrame("Frame", nil, tree)

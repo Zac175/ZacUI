@@ -391,6 +391,7 @@ function AB.Place(frame, cfg, initial)
         local init = initial or cfg.initial or { "CENTER", 0, -250 }
         frame:SetPoint(init[1], UIParent, init[1], init[2] / s, init[3] / s)
         AB.SavePosition(frame, cfg)
+        if AB.LayoutSeated then AB.LayoutSeated(cfg) end
         AB.ApplyLayer(frame, cfg)
         return
     end
@@ -416,6 +417,10 @@ function AB.SavePosition(frame, cfg)
     local point = v .. h
     if point == "" then point = "CENTER" end
     cfg.point, cfg.x, cfg.y = point, x, y
+    -- (a bar dropped somewhere new: the strip's right cap, AB.KitStripEnd)
+    if AB.KitStripEnd and AB.headers and AB.headers.bar1 and rawget(AB.headers.bar1, "_zChrome") then
+        pcall(AB.KitStripEnd)
+    end
 end
 
 -- Lays a header's buttons out in rows from its anchor corner, and sizes
@@ -582,11 +587,17 @@ function AB.HideBlizzard()
     -- Core_FreshLayout; nothing on an existing install), read before they go
     -- (a fresh install under a game look first takes that look's stock bar
     -- settings, so the spots below are worked out for them)
+    -- (a layout nobody has touched follows the look: AB.LayoutPrepare clears
+    -- it here, and the starting layout below is laid again for this look)
+    if AB.LayoutPrepare then pcall(AB.LayoutPrepare) end
     if AB.KitFreshDefaults then pcall(AB.KitFreshDefaults) end
     -- ...and under ZacUI's own look, ZacUI's tidy layout (below); it places
     -- its bars first, so the read of Blizzard's spots leaves them alone
     if AB.ZacuiFreshLayout then pcall(AB.ZacuiFreshLayout) end
     if ns.FreshLayout and ns.FreshLayout.Bars then pcall(ns.FreshLayout.Bars, AB) end
+    -- ...and WoW Forever's stack over its main bar (bars 2 and 3, the stance
+    -- and pet bars), laid by the game's own rule rather than read (below)
+    if AB.ForeverStack then pcall(AB.ForeverStack) end
     -- ...and where the client's bag buttons and micro menu sit (AB_Extras;
     -- read only, used only by a bar that was never placed)
     if AB.CaptureStockSpots then pcall(AB.CaptureStockSpots) end
@@ -625,7 +636,10 @@ function AB.HideBlizzard()
                               "MultiBar5Button", "MultiBar6Button", "MultiBar7Button" }) do
         for i = 1, 12 do Button(_G[prefix .. i]) end
     end
-    Frame(_G.MicroButtonAndBagsBar, false)
+    -- (a game look on WoW Forever keeps the game's own micro menu and bag
+    -- bar, where the game laid them: AB.GameExtras, AB_Extras)
+    local keepExtras = AB.GameExtras and AB.GameExtras()
+    if not keepExtras then Frame(_G.MicroButtonAndBagsBar, false) end
     Frame(_G.StanceBar, true)
     Frame(_G.StanceBarFrame, true)
     Frame(_G.PossessActionBar, true)
@@ -634,8 +648,10 @@ function AB.HideBlizzard()
     Frame(_G.PetActionBar, true)
     Frame(_G.PetActionBarFrame, true)
     Frame(_G.StatusTrackingBarManager, false)
-    Frame(_G.BagsBar, true)
-    Frame(_G.MicroMenu, true)
+    if not keepExtras then
+        Frame(_G.BagsBar, true)
+        Frame(_G.MicroMenu, true)
+    end
     -- the vehicle / taxi leave button: on the modern client (vehicles,
     -- Retail's flight paths) it stays the client's, lifted off the hidden
     -- main bar so it can still show; elsewhere put away as before
@@ -2320,6 +2336,24 @@ AB.KIT_CAPS = {
         near = { "RIGHT", "LEFT", 30, 5, "LEFT", "RIGHT", -30, 5 },
     },
 }
+-- THE STRIP (2026-11-15): on WoW Forever the main bar, the micro menu and
+-- the bags are one row with a cap at each end - the right cap comes after
+-- the bags, not after button 12 (Forever's Edit Mode preset anchors it on
+-- BagsBar: LEFT to RIGHT, -30, 5; the left one on the main bar). So the
+-- right cap sits at the end of whatever continues bar 1's row: the micro
+-- menu and / or the bag bar, each no more than KIT_STRIP_GAP past the
+-- piece before it and on bar 1's line. Nothing in the row: round bar 1,
+-- as before.
+-- EVERY game look (Zac, an hour later, on the 2004 and live looks on the
+-- Forever client: "just fixed for 1 style and not the rest" - their right
+-- cap sat on the micro menu). The row is the CLIENT's layout, whatever
+-- look is worn over it: where the bars are in a row the cap ends the row,
+-- where they are not (the live game: micro menu and bags in the corner)
+-- nothing continues bar 1 and the cap stays where it was.
+AB.KIT_CAPS.forever.strip = true
+AB.KIT_CAPS.classic.strip = true
+AB.KIT_CAPS.blizzard.strip = true
+AB.KIT_STRIP_GAP = 56
 AB.KIT_CAPS.forever.art = {
     Alliance = { "ui-hud-actionbar-gryphon-left", "ui-hud-actionbar-gryphon-right" },
     Horde    = { "ui-hud-actionbar-wyvern-left",  "ui-hud-actionbar-wyvern-right" },
@@ -2481,8 +2515,12 @@ function AB.KitChrome(header, cfg, size, count, n)
             t:SetPoint(g[i], host, g[i + 1], g[i + 2] * kc, g[i + 3] * kc + AB.KIT_CAP_LIFT)
             if (side == 1 and okL) or (side == 2 and okR) then t:Show() else t:Hide() end
         end
+        -- (the right cap's own spot, for the strip below)
+        st.capRAt = { g[5], g[6], g[7] * kc, g[8] * kc + AB.KIT_CAP_LIFT }
+        st.strip = (c.strip and n == 1 and rows == 1) or nil
         rawset(header, "_zGryphons", { st.capL, st.capR })
         host:Show()
+        if st.strip and AB.KitStripEnd then AB.KitStripEnd() end
     elseif host then
         host:Hide()
     end
@@ -2689,7 +2727,270 @@ function AB.SeatFromStock(cfg, list, size, kind, hgt)
     cx = math.max(bw / 2, math.min(uw - bw / 2, cx))
     cy = math.max(bh / 2, math.min(uh - bh / 2, cy))
     cfg.point, cfg.x, cfg.y = AB.SpotFor(cfg, cx, cy, count, size, hgt)
+    if AB.LayoutSeated then AB.LayoutSeated(cfg) end
     return true
+end
+
+-- A bar just seated on the client's spot, once its buttons are laid out:
+-- the row as it really is (a game look keeps each bag slot at the client's
+-- own size, the key ring is narrower, the micro buttons overlap) is centred
+-- on the client's row, whatever AB.SeatFromStock worked out from one button
+-- size. Only for a spot read from the client (not ZacUI's corner).
+function AB.SeatTrue(header, cfg, buttons, kind)
+    local seen = AB._stock and AB._stock[kind]
+    if not seen or AB._cornerFresh or type(cfg) ~= "table" or cfg.point == nil then return false end
+    local l, b, r, t = StockRect(buttons)
+    if not l then return false end
+    local dx = (seen[1] + seen[3]) / 2 - (l + r) / 2
+    local dy = (seen[2] + seen[4]) / 2 - (b + t) / 2
+    if math.abs(dx) < 0.5 and math.abs(dy) < 0.5 then return false end
+    -- (never off the screen)
+    local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
+    if l + dx < 0 or r + dx > uw + 0.5 or b + dy < 0 or t + dy > uh + 0.5 then return false end
+    cfg.x = math.floor(cfg.x + dx + 0.5)
+    cfg.y = math.floor(cfg.y + dy + 0.5)
+    AB.Place(header, cfg)
+    return true
+end
+
+-- ------------------------------------------------------------
+-- THE STARTING LAYOUT FOLLOWS THE LOOK (2026-11-15, Zac: "our defaults for
+-- the action bar with forever style and probably the other styles as well
+-- is just wrong"; "is it because before the style picker it already styled
+-- to zui instead of waiting till the user picks the style"). It was: the
+-- bars are laid out on the first login, under whatever look is on then
+-- (ZacUI's), and picking a game look afterwards only changed the art.
+--
+-- Now the starting layout belongs to the look it was laid for:
+--   p.layoutFor   the look the bars were laid out for ("zacui" or a kit)
+--   p.layoutSig   what that layout left on every bar: its spot, scale,
+--                 button size, spacing, rows, on / off
+-- At login, a profile whose look is no longer p.layoutFor and whose bars
+-- all still read exactly as p.layoutSig (nobody moved, resized or switched
+-- one) is laid out again for the look it wears now, by the same code a
+-- fresh install runs. ONE value changed by hand and nothing moves, ever. A
+-- profile from before this (no p.layoutSig) is never touched either; the
+-- Position tab's "Arrange for this style" does it on request
+-- (p.layoutRedo, then a reload: the game's own bars are read at login).
+-- ------------------------------------------------------------
+local SIG_KEYS = { "scale", "buttonSize", "padding", "enabled", "rows", "buttons", "showgrid",
+                   "vertical", "growH", "growV" }
+-- what a starting layout sets, put back to the shipped value before a new one
+local LAID_KEYS = { "scale", "buttonSize", "padding", "enabled", "rows", "showgrid" }
+local NO_SPOT = "-|-|-"
+local function SigNum(v)
+    if type(v) == "number" then return string.format("%.2f", v) end
+    return tostring(v)
+end
+local function SigSpot(cfg)
+    if cfg.point == nil then return NO_SPOT end
+    return tostring(cfg.point) .. "|" .. SigNum(cfg.x) .. "|" .. SigNum(cfg.y)
+end
+local function SigRest(cfg)
+    local t = {}
+    for i, k in ipairs(SIG_KEYS) do t[i] = SigNum(cfg[k]) end
+    t[#t + 1] = (cfg.layout ~= nil) and "L" or "-"
+    return table.concat(t, "|")
+end
+-- every bar a starting layout places: key -> its settings
+local function LaidBars(p)
+    local out = {}
+    for n = 1, AB.NUM_BARS do
+        if type(p.bars) == "table" and type(p.bars[n]) == "table" then out["bar" .. n] = p.bars[n] end
+    end
+    for _, k in ipairs({ "pet", "stance", "bagbar", "micro" }) do
+        if type(p[k]) == "table" then out[k] = p[k] end
+    end
+    return out
+end
+function AB.LayoutSig(p)
+    local sig = {}
+    for key, cfg in pairs(LaidBars(p)) do sig[key] = SigSpot(cfg) .. "#" .. SigRest(cfg) end
+    return sig
+end
+-- does every bar still read as the starting layout left it?
+function AB.LayoutUntouched(p)
+    local was = p and p.layoutSig
+    if type(was) ~= "table" then return false end
+    local now = AB.LayoutSig(p)
+    for key, v in pairs(now) do if was[key] ~= v then return false end end
+    for key in pairs(was) do if now[key] == nil then return false end end
+    return true
+end
+local function IsFresh() return ns.freshInstall == true or ns.openSetupAfterReset == true end
+-- is a starting layout being laid this login?
+function AB.LayingOut() return IsFresh() or AB._relayout == true end
+-- a game look's layout is read from the game's own bars: are they there?
+local function GameBarsThere()
+    local list = {}
+    for i = 1, 12 do list[#list + 1] = _G["ActionButton" .. i] end
+    return (StockRect(list)) ~= nil
+end
+-- what this login lays: "fresh" (a new install, or Reset ZacUI), "redo"
+-- (asked for on the Position tab), "look" (untouched, and the look
+-- changed), or nil. Reads only.
+function AB.LayoutPending()
+    if IsFresh() then return "fresh" end
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table") then return nil end
+    local kit = AB.Kit()
+    if kit ~= "zacui" and not GameBarsThere() then return nil end
+    if p.layoutRedo then return "redo" end
+    if p.layoutFor ~= nil and p.layoutFor ~= kit and AB.LayoutUntouched(p) then return "look" end
+    return nil
+end
+function AB.LayoutPrepare()
+    if AB._layoutWhy ~= nil then return end
+    local why = AB.LayoutPending()
+    AB._layoutWhy = why or false
+    if why ~= "look" and why ~= "redo" then return end
+    local p = AB.Profile()
+    local d = AB.DefaultProfile()
+    for key, cfg in pairs(LaidBars(p)) do
+        local n = tonumber(key:match("^bar(%d+)$"))
+        local def = n and d.bars[n] or d[key] or {}
+        cfg.point, cfg.x, cfg.y = nil, nil, nil
+        for _, k in ipairs(LAID_KEYS) do cfg[k] = def[k] end
+    end
+    p.kitFresh, p.zacuiFresh, p.layoutRedo = nil, nil, nil
+    p.layoutFor, p.layoutSig = nil, nil
+    AB._relayout = true
+end
+-- after the first full apply of a login that laid one: what it left
+function AB.LayoutRecord()
+    local why = AB._layoutWhy
+    if not why then return end
+    AB._layoutWhy = false
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table") then return end
+    p.layoutFor = AB.Kit()
+    p.layoutSig = AB.LayoutSig(p)
+end
+-- a bar that had no spot when the layout was recorded (its part was off,
+-- or it was built later) takes its starting spot now: that is the layout's
+-- doing, not the player's
+function AB.LayoutSeated(cfg)
+    local d = ZacUIDB and ZacUIDB.bars
+    if type(d) ~= "table" or type(d.profiles) ~= "table" then return end
+    for _, p in pairs(d.profiles) do
+        if type(p) == "table" and type(p.layoutSig) == "table" then
+            for key, c in pairs(LaidBars(p)) do
+                if c == cfg then
+                    if p.layoutSig[key] == NO_SPOT .. "#" .. SigRest(cfg) then
+                        p.layoutSig[key] = SigSpot(cfg) .. "#" .. SigRest(cfg)
+                    end
+                    return
+                end
+            end
+        end
+    end
+end
+-- the Position tab's button: every bar back to this look's starting layout
+-- at the next login (the caller reloads)
+function AB.LayoutRedo()
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table") then return false end
+    p.layoutRedo = true
+    return true
+end
+-- A layout is laid this login and the client's Edit Mode has not placed
+-- the game's bars yet (they still sit on their XML anchors, not where the
+-- player sees them): the bars start once it has (the game's handler first,
+-- then one frame), never later than WAIT seconds. True = wait; `resume`
+-- runs then. Any other login starts at once, as always.
+AB.LAYOUT_WAIT = 5
+function AB.LayoutWait(resume)
+    if AB._layoutWaited then return false end
+    local em = _G.EditModeManagerFrame
+    if not (type(em) == "table" and em.IsInitialized) then return false end
+    local ok, ready = pcall(em.IsInitialized, em)
+    if not ok or ready then return false end
+    if not AB.LayoutPending() then return false end
+    AB._layoutWaited = true
+    local w = CreateFrame("Frame")
+    local done = false
+    local function Go()
+        if done then return end
+        done = true
+        w:UnregisterAllEvents()
+        AB.AfterCombat("layoutwait", resume)
+    end
+    w:RegisterEvent("EDIT_MODE_LAYOUTS_UPDATED")
+    w:SetScript("OnEvent", function() C_Timer.After(0, Go) end)
+    C_Timer.After(AB.LAYOUT_WAIT, Go)
+    return true
+end
+
+-- ------------------------------------------------------------
+-- WOW FOREVER'S STACK OVER THE MAIN BAR (2026-11-15, Zac's first real
+-- arrange under the Forever look: the row was right, the stance button sat
+-- left of the left gryphon). The game does not keep these bars on spots of
+-- their own: its Edit Mode stacks whatever is SHOWN over the main bar, from
+-- the main bar's left end (Blizzard_EditMode: UpdateBottomActionBarPositions
+-- with the Camelot constants) - the XP bars first, then bar 2 (22 in) and
+-- bar 3 (606 in) side by side on one row, then the stance bar and the pet
+-- bar (30 in), 4 apart. A bar that is not shown when ZacUI reads it (a
+-- stance bar before its forms arrive, bars 2 and 3 switched off) still
+-- sits where its XML put it, which is nowhere near. So under the Forever
+-- client a starting layout under any game look lays these four by that
+-- rule, on the main bar as it was read; the main bar, micro menu and bags
+-- are read as before.
+-- ------------------------------------------------------------
+AB.FOREVER_STACK = { gap = 4, bar2 = 22, bar3 = 606, small = 30, xpTop = 21, frameTop = 6 }
+function AB.ForeverStack()
+    -- (the Forever CLIENT's rule, under whichever game look is worn on it:
+    -- the 2004 and live looks on that client read the same row)
+    if not AB.LayingOut() or AB.Kit() == "zacui" or not _G.ZACUI_IS_FOREVER then return false end
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table" and type(p.bars) == "table") then return false end
+    local list = {}
+    for i = 1, 12 do list[#list + 1] = _G["ActionButton" .. i] end
+    local sl, sb, sr, stp = StockRect(list)
+    if not sl then return false end
+    local S = AB.FOREVER_STACK
+    local c1 = p.bars[1] or {}
+    local k = (c1.buttonSize or AB.BUTTON) / 45
+    -- ZacUI's bar 1 as it will stand: centred on the game's main bar, at its
+    -- own size (the 2004 look's 36 px buttons make a narrower bar)
+    local _, _, _, w1, h1 = AB.SpotFor(c1, 0, 0, c1.buttons or 12, c1.buttonSize or AB.BUTTON)
+    local L = (sl + sr) / 2 - w1 / 2
+    local T = (sb + stp) / 2 + h1 / 2
+    -- what sits on the main bar: its frame art, and the XP / reputation
+    -- bars when the game is showing one
+    -- (the XP band is kept clear whenever the game's XP bars are seated on
+    -- bar 1 - AB_Extras' seat - shown just now or not: a bar that turns up
+    -- later must not land on the stance bar)
+    local top = T + S.frameTop * k
+    if _G.StatusTrackingBarManager ~= nil
+        and not (type(p.status) == "table" and (p.status.enabled or p.status.kitSeat == false)) then
+        top = T + S.xpTop * k
+    end
+    local laid = 0
+    local function Lay(cfg, left, count, size)
+        local _, _, _, w, h = AB.SpotFor(cfg, 0, 0, count, size)
+        cfg.point, cfg.x, cfg.y = AB.SpotFor(cfg, left + w / 2, top + S.gap + h / 2, count, size)
+        laid = laid + 1
+        return h
+    end
+    -- bars 2 and 3 (ZacUI's 6 and 5): one row
+    local rowH = 0
+    for _, spec in ipairs({ { 6, S.bar2 }, { 5, S.bar3 } }) do
+        local c = p.bars[spec[1]]
+        if type(c) == "table" and c.enabled then
+            c.rows = 1
+            rowH = math.max(rowH, Lay(c, L + spec[2] * k, c.buttons or 12, c.buttonSize or AB.BUTTON))
+        end
+    end
+    if rowH > 0 then top = top + S.gap + rowH end
+    -- the stance bar, then the pet bar
+    for _, key in ipairs({ "stance", "pet" }) do
+        local c = p[key]
+        if type(c) == "table" then
+            local h = Lay(c, L + S.small * k, 10, c.buttonSize or AB.PET_BUTTON)
+            top = top + S.gap + h
+        end
+    end
+    return laid
 end
 
 -- ------------------------------------------------------------
@@ -2714,7 +3015,7 @@ AB.KIT_STOCK = {
 -- ZacUI bar -> the game's bar it stands in for (Core_FreshLayout's pairs)
 AB.KIT_STOCK_BARS = { [3] = "MultiBarRight", [4] = "MultiBarLeft", [5] = "MultiBarBottomRight", [6] = "MultiBarBottomLeft" }
 function AB.KitFreshDefaults()
-    if not (ns.freshInstall == true or ns.openSetupAfterReset == true) then return false end
+    if not AB.LayingOut() then return false end
     local kit = AB.Kit()
     local st = AB.KIT_STOCK[kit]
     if not st then return false end
@@ -2740,6 +3041,11 @@ function AB.KitFreshDefaults()
     end
     if type(p.stance) == "table" and p.stance.scale == 1.5 then p.stance.scale = 1 end
     if type(p.micro) == "table" and p.micro.scale == 0.8 then p.micro.scale = 1 end
+    -- (the modern client's micro buttons overlap by 5: MicroMenuTemplate's
+    -- childXPadding; ZacUI's shipped 3 is its own look's)
+    if type(p.micro) == "table" and p.micro.padding == -3 and modernClient and kit ~= "classic" then
+        p.micro.padding = -5
+    end
     return true
 end
 
@@ -2768,7 +3074,7 @@ end
 -- ------------------------------------------------------------
 AB.ZACUI_FRESH = { margin = 8, gap = 4 }
 function AB.ZacuiFreshLayout()
-    if not (ns.freshInstall == true or ns.openSetupAfterReset == true) then return false end
+    if not AB.LayingOut() then return false end
     if AB.Kit() ~= "zacui" then return false end
     local ok, p = pcall(AB.Profile)
     if not (ok and type(p) == "table" and type(p.bars) == "table") then return false end
@@ -2813,6 +3119,235 @@ function AB.ZacuiFreshLayout()
     return true
 end
 
+-- WOW FOREVER'S ROW ART (2026-11-15, Zac's row against the stock UI: the
+-- micro menu and the bags bare between the gryphons). On Forever the micro
+-- menu and the bags each sit in the action bar's own frame: MicroMenu's
+-- BorderArt (the frame atlas, 8 out all round) over its BackgroundArt (13 /
+-- 14 wider, 4 up from the foot), BagsBar's BorderArt (6 out left and top, 5
+-- right and bottom) with the action bar's dividers between its slots
+-- (Blizzard_MicroMenu/Camelot/MainMenuBarMicroMenu.xml, Blizzard_
+-- MainMenuBarBagButtons/Camelot). ZacUI takes the buttons off those
+-- frames, so under the Forever look it draws the same art round its own
+-- row: anchored on the row's end buttons, so it follows them. One line of
+-- buttons only; cfg.kitFrame = false: none. Any other look: none.
+AB.KIT_ROW = {
+    micro  = { l = -8, t = 8, r = 8, b = -8, bg = { "UI-HUD-ActionBar-IconFrame-Background", -13, 0, 14, 4 } },
+    bagbar = { l = -6, t = 6, r = 5, b = -5, dividers = true },
+}
+function AB.KitRowArt(header, kind, buttons)
+    if not header then return false end
+    local R = AB.KIT_ROW[kind]
+    local st = rawget(header, "_zRowArt")
+    local cfg = rawget(header, "cfg") or {}
+    local F = AB.KIT_FRAME
+    -- the shown buttons, left to right
+    local row = {}
+    for _, b in ipairs(buttons or {}) do
+        if b.IsShown and b:IsShown() and b.GetLeft and b:GetLeft() then row[#row + 1] = b end
+    end
+    table.sort(row, function(a, b) return a:GetLeft() < b:GetLeft() end)
+    local on = R ~= nil and AB.Kit() == "forever" and cfg.enabled ~= false and cfg.kitFrame ~= false
+        and #row > 0 and AB.AtlasOK(F.frame)
+    -- one line: every button's middle inside the first one's height
+    if on then
+        local b1, t1 = row[1]:GetBottom(), row[1]:GetTop()
+        for _, b in ipairs(row) do
+            local m = ((b:GetBottom() or 0) + (b:GetTop() or 0)) / 2
+            if not (b1 and t1 and m > b1 and m < t1) then on = false break end
+        end
+    end
+    if not on then
+        if st then st.host:Hide() end
+        return false
+    end
+    if not st then
+        st = { divs = {} }
+        rawset(header, "_zRowArt", st)
+        st.host = CreateFrame("Frame", nil, header)
+        st.host._zui_own = true
+        st.host:EnableMouse(false)
+        st.frame = st.host:CreateTexture(nil, "BACKGROUND", nil, -3)
+        st.frame._zui_own = true
+        st.frame:SetAtlas(F.frame)
+        if R.bg and AB.AtlasOK(R.bg[1]) then
+            st.bg = st.host:CreateTexture(nil, "BACKGROUND", nil, -4)
+            st.bg._zui_own = true
+            st.bg:SetAtlas(R.bg[1])
+        end
+    end
+    local first, last = row[1], row[#row]
+    st.host:SetFrameLevel(header:GetFrameLevel() or 0)
+    st.host:ClearAllPoints()
+    st.host:SetPoint("TOPLEFT", first, "TOPLEFT", 0, 0)
+    st.host:SetPoint("BOTTOMRIGHT", last, "BOTTOMRIGHT", 0, 0)
+    st.frame:ClearAllPoints()
+    st.frame:SetPoint("TOPLEFT", st.host, "TOPLEFT", R.l, R.t)
+    st.frame:SetPoint("BOTTOMRIGHT", st.host, "BOTTOMRIGHT", R.r, R.b)
+    if st.bg then
+        st.bg:ClearAllPoints()
+        st.bg:SetPoint("TOPLEFT", st.frame, "TOPLEFT", R.bg[2], R.bg[3])
+        st.bg:SetPoint("BOTTOMRIGHT", st.frame, "BOTTOMRIGHT", R.bg[4], R.bg[5])
+    end
+    -- the dividers between slots (the action bar's: 12 across, starting 7
+    -- before the next slot), at the game's spacing only
+    local ds = F.divH
+    local nDiv = 0
+    if R.dividers and (cfg.padding or 2) <= 2 and AB.AtlasOK(ds[1]) and AB.AtlasOK(ds[2]) and AB.AtlasOK(ds[3]) then
+        nDiv = #row - 1
+    end
+    for i = 1, nDiv do
+        local d = st.divs[i]
+        if not d then
+            d = { st.host:CreateTexture(nil, "BACKGROUND", nil, -2), st.host:CreateTexture(nil, "BACKGROUND", nil, -2),
+                  st.host:CreateTexture(nil, "BACKGROUND", nil, -2) }
+            for _, t in ipairs(d) do t._zui_own = true end
+            d[1]:SetAtlas(ds[1]) d[2]:SetAtlas(ds[2]) d[3]:SetAtlas(ds[3])
+            st.divs[i] = d
+        end
+        local nextB = row[i + 1]
+        local a, b, m = d[1], d[2], d[3]
+        a:ClearAllPoints() b:ClearAllPoints() m:ClearAllPoints()
+        a:SetSize(F.across, ds[4]) b:SetSize(F.across, ds[5])
+        a:SetPoint("TOPLEFT", nextB, "TOPLEFT", -F.before, 0)
+        b:SetPoint("BOTTOMLEFT", nextB, "BOTTOMLEFT", -F.before, 0)
+        m:SetPoint("TOPLEFT", a, "BOTTOMLEFT")
+        m:SetPoint("BOTTOMRIGHT", b, "TOPRIGHT")
+        a:Show() b:Show() m:Show()
+    end
+    for i = nDiv + 1, #st.divs do
+        local d = st.divs[i]
+        d[1]:Hide() d[2]:Hide() d[3]:Hide()
+    end
+    st.host:Show()
+    return true
+end
+
+-- The strip's right cap (AB.KIT_CAPS: THE STRIP). Run when bar 1's chrome
+-- is painted, after every bar has been applied (the micro menu and the bags
+-- are placed after bar 1) and when a bar is dropped. Out of combat only;
+-- reads rects, moves one texture of ZacUI's own. Returns how far the cap
+-- went (0: round bar 1).
+function AB.KitStripEnd()
+    local h1 = AB.headers and AB.headers.bar1
+    local st = h1 and rawget(h1, "_zChrome")
+    if not (st and st.host and st.capR and st.capRAt) then return nil end
+    if InCombatLockdown and InCombatLockdown() then return nil end
+    local host, at = st.host, st.capRAt
+    local dx = 0
+    if st.strip and host:IsShown() then
+        local us = UIParent:GetEffectiveScale() or 1
+        if us <= 0 then us = 1 end
+        local hs = (host:GetEffectiveScale() or us) / us
+        local hl, hb, hw, hh = host:GetRect()
+        if hl and hs > 0 then
+            local left, bottom, right, top = hl * hs, hb * hs, (hl + hw) * hs, (hb + hh) * hs
+            local pieces = {}
+            local function Piece(buttons)
+                local l, b, r, t = StockRect(buttons)
+                -- on bar 1's line, and to its right
+                if l and (b + t) / 2 > bottom and (b + t) / 2 < top and l > (left + right) / 2 then
+                    pieces[#pieces + 1] = { l, r }
+                end
+            end
+            if AB.GameExtras and AB.GameExtras() then
+                -- (the game's own micro menu and bag bar: the buttons it shows)
+                for _, list in ipairs(AB.GameExtraRows and AB.GameExtraRows() or {}) do Piece(list) end
+            else
+                for _, key in ipairs({ "micro", "bagbar" }) do
+                    local h = AB.headers[key]
+                    if h and h.cfg and h.cfg.enabled ~= false and h:IsShown() and type(h.buttons) == "table" then
+                        Piece(h.buttons)
+                    end
+                end
+            end
+            table.sort(pieces, function(a, b) return a[1] < b[1] end)
+            local reach = right
+            for _, pc in ipairs(pieces) do
+                if pc[1] - reach > AB.KIT_STRIP_GAP then break end
+                reach = math.max(reach, pc[2])
+            end
+            dx = (reach - right) / hs
+        end
+    end
+    st.capR:ClearAllPoints()
+    st.capR:SetPoint(at[1], host, at[2], at[3] + dx, at[4])
+    st.stripReach = dx
+    return dx
+end
+
+-- ------------------------------------------------------------
+-- BAR 1 STANDS BESIDE THE GAME'S MICRO MENU (2026-11-15, Zac's Forever row
+-- under Blizzard style, the game's own menu kept: "overlap here with the
+-- action bar and micro menu" - bar 1's last button under the character
+-- button). The game hangs its own main bar off the menu's left end (its
+-- Edit Mode preset: the bar's BOTTOMRIGHT on MicroMenuContainer's
+-- BOTTOMLEFT, 4.5 clear), and the menu is centred on its spot: when the
+-- game shows more or fewer buttons than it did at the login ZacUI's layout
+-- was read, the menu's left end moves, the game's bar would move with it,
+-- and ZacUI's bar 1 - a saved spot - stayed. So while the game's own menu
+-- is kept (AB.GameExtras) and bar 1 still stands where the starting layout
+-- left it, bar 1 is put back beside the menu, and the bars the layout
+-- stacked on it (bars 2, 5, 6, the stance and pet bars - each only while
+-- it too is where the layout left it) move with it. A bar the player has
+-- moved is never touched. Out of combat; run on the settle pass after an
+-- apply and whenever the game lays its menu out again (AB_Extras).
+-- ------------------------------------------------------------
+AB.ROW_GAP = 4.5
+AB.ROW_REACH = 200          -- (further off than this is not the same row)
+local DOCK_KEYS = { "bar1", "bar2", "bar5", "bar6", "stance", "pet" }
+function AB.DockRow()
+    if not (AB.GameExtras and AB.GameExtras() and AB.GameExtraRows) then return false end
+    if InCombatLockdown and InCombatLockdown() then return false end
+    local ok, p = pcall(AB.Profile)
+    if not (ok and type(p) == "table") then return false end
+    local bars = LaidBars(p)
+    local laying = AB._layoutWhy and true or false
+    local function AsLaid(key)
+        local cfg = bars[key]
+        if type(cfg) ~= "table" or cfg.point == nil or type(cfg.x) ~= "number" then return false end
+        if laying then return true end
+        return p.layoutFor == AB.Kit() and type(p.layoutSig) == "table"
+            and p.layoutSig[key] == SigSpot(cfg) .. "#" .. SigRest(cfg)
+    end
+    if not AsLaid("bar1") then return false end
+    local h1 = AB.headers and AB.headers.bar1
+    if not (h1 and h1:IsShown() and type(h1.buttons) == "table") then return false end
+    -- bar 1's own box: every button of it, shown or not
+    local us = UIParent:GetEffectiveScale() or 1
+    if us <= 0 then us = 1 end
+    local l1, b1, r1, t1
+    for _, btn in ipairs(h1.buttons) do
+        local okR, l, b, w, h = pcall(btn.GetRect, btn)
+        if okR and type(l) == "number" and type(b) == "number" and type(w) == "number" and type(h) == "number"
+            and w > 0 and h > 0 then
+            local k = (btn:GetEffectiveScale() or us) / us
+            l, b, w, h = l * k, b * k, w * k, h * k
+            l1 = (l1 and math.min(l1, l)) or l
+            b1 = (b1 and math.min(b1, b)) or b
+            r1 = (r1 and math.max(r1, l + w)) or (l + w)
+            t1 = (t1 and math.max(t1, b + h)) or (b + h)
+        end
+    end
+    local rows = AB.GameExtraRows()
+    local ml, mb, _, mt = StockRect(rows and rows[1])
+    if not (l1 and ml) then return false end
+    -- (the menu on bar 1's line, to its right)
+    local my = (mb + mt) / 2
+    if not (my > b1 and my < t1 and ml > (l1 + r1) / 2) then return false end
+    local dx = (ml - AB.ROW_GAP) - r1
+    if math.abs(dx) < 0.5 or math.abs(dx) > AB.ROW_REACH then return false end
+    for _, key in ipairs(DOCK_KEYS) do
+        if AsLaid(key) then
+            local cfg = bars[key]
+            cfg.x = cfg.x + dx
+            local h = AB.headers[key]
+            if h and rawget(h, "cfg") == cfg then AB.Place(h, cfg) end
+            if not laying then p.layoutSig[key] = SigSpot(cfg) .. "#" .. SigRest(cfg) end
+        end
+    end
+    return dx
+end
+
 -- (kept for callers from before the kits: bar 1's caps on a header)
 function AB.Gryphons(header, size)
     if not header then return end
@@ -2830,6 +3365,34 @@ function AB.ApplyAll()
             if not ok then Print("Action bars: " .. tostring(err)) end
         end
         if AB.unlocked then AB.SetUnlocked(true) end
+        -- (the strip's right cap: the micro menu and the bags are placed
+        -- after bar 1's chrome is painted)
+        if AB.KitStripEnd then pcall(AB.KitStripEnd) end
+        -- ONE FRAME LATER, ONCE MORE (2026-11-15, Zac's Forever row: the
+        -- right gryphon over his backpack). The bag slots and the key ring
+        -- take the client's own size AFTER they are laid out, and the
+        -- client does not always hand back a row's new edges in the frame
+        -- it was resized in: the row was centred, and the cap and the XP
+        -- seat measured, on the row as it was before. So a frame on, with
+        -- the row settled: a bar seated on the client's spot this login is
+        -- centred on it again, the cap and the XP seat are measured again,
+        -- and only then is a starting layout's record taken.
+        if not AB._settling then
+            AB._settling = true
+            local function Settle()
+                AB._settling = nil
+                AB.AfterCombat("layoutsettle", function()
+                    if AB.ReSeat then pcall(AB.ReSeat) end
+                    -- (the game's own micro menu kept: bar 1 beside it)
+                    if AB.DockRow then pcall(AB.DockRow) end
+                    if AB.KitStripEnd then pcall(AB.KitStripEnd) end
+                    if AB.StatusReseat then pcall(AB.StatusReseat) end
+                    -- (a login that laid a starting layout: what it left, once)
+                    if AB._layoutWhy then pcall(AB.LayoutRecord) end
+                end)
+            end
+            if C_Timer and C_Timer.After then C_Timer.After(0, Settle) else Settle() end
+        end
     end)
 end
 

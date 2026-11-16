@@ -540,6 +540,12 @@ function UI.Box(parent, cat, key, opts)
     end
     f._zPaint = PaintBox
     f:_zPaint()
+    -- the surface finish (Core_Finish): a box in the card colour is a pane
+    -- of a window (a detail pane, a stage, a list's ground) - a plate, like
+    -- a card. Any other box is a control or a row and stays plain.
+    if ns.Finish and not UI._zSettings and (cat or "ui") == "ui" and key == "cardBg" and opts.finish ~= false then
+        ns.Finish.Dress(f._zFill, "card", { inset = (opts.border ~= false) and 1 or 0 })
+    end
     return f
 end
 
@@ -664,10 +670,20 @@ function UI.Plate(f, l, r, t, b)
     p.sheen:ClearAllPoints()
     p.sheen:SetPoint("TOPLEFT", p.fill, "TOPLEFT", 1, -1)
     p.sheen:SetPoint("TOPRIGHT", p.fill, "TOPRIGHT", -1, -1)
-    function p:Paint(top, bot, edge, sheen)
+    -- (2026-11-16) the plate's shadow: one dark pixel under its foot, so it
+    -- stands off the window (as a raised title bar's foot does)
+    p.drop = T("BACKGROUND", -1)
+    if ns.Pixel then ns.Pixel.Edge(p.drop, "TOP", f) else p.drop:SetHeight(1) end
+    p.drop:ClearAllPoints()
+    p.drop:SetPoint("TOPLEFT", p.fill, "BOTTOMLEFT", 0, 0)
+    p.drop:SetPoint("TOPRIGHT", p.fill, "BOTTOMRIGHT", 0, 0)
+    p.drop:SetVertexColor(0, 0, 0, 0)
+    -- drop: the shadow's strength (nil = none)
+    function p:Paint(top, bot, edge, sheen, drop)
         VGrad(self.fill, bot, top)
         for _, e in ipairs(self.edges) do e:SetVertexColor(edge.r, edge.g, edge.b, edge.a or 1) end
         self.sheen:SetVertexColor(1, 1, 1, sheen or 0)
+        self.drop:SetVertexColor(0, 0, 0, drop or 0)
     end
     function p:SetShown(on)
         for _, x in ipairs(self.parts) do x:SetShown(on and true or false) end
@@ -678,10 +694,22 @@ function UI.Plate(f, l, r, t, b)
     return p
 end
 -- the plate's shades (the settings window)
+-- (2026-11-16 07:34, Zac: "i feel like in both uis the buttons and sidebar
+-- stuff needs to be emphisized more". Every plate stands out further: a
+-- brighter face, a clearer edge and top line, a shadow under its foot. Was
+-- TOP 0.205 / BOT 0.140, EDGE 0.13, SHEEN 0.10 / 0.16, no shadow.)
 local PL = {
-    TOP = { r = 0.205, g = 0.200, b = 0.195, a = 1 }, BOT = { r = 0.140, g = 0.136, b = 0.132, a = 1 },
-    TOP_H = { r = 0.250, g = 0.232, b = 0.195, a = 1 }, BOT_H = { r = 0.165, g = 0.152, b = 0.125, a = 1 },
-    EDGE = 0.13, EDGE_H = 0.70, SHEEN = 0.10, SHEEN_H = 0.16,
+    TOP = { r = 0.250, g = 0.244, b = 0.236, a = 1 }, BOT = { r = 0.152, g = 0.148, b = 0.143, a = 1 },
+    TOP_H = { r = 0.305, g = 0.282, b = 0.236, a = 1 }, BOT_H = { r = 0.186, g = 0.171, b = 0.140, a = 1 },
+    EDGE = 0.26, EDGE_H = 0.80, SHEEN = 0.18, SHEEN_H = 0.26, DROP = 0.55,
+    -- a sidebar row (a page, Edit Mode): a quieter plate than a button, over
+    -- the sidebar's own shade. White at these alphas; the edge goes to the
+    -- accent under the mouse. (Was 0.045 / 0.02, edge 0.085, top line 0.03.)
+    NAV = { TOP = 0.085, BOT = 0.035, EDGE = 0.16, EDGE_OFF = 0.06, SHEEN = 0.09, DROP = 0.40,
+            TOP_H = 0.130, BOT_H = 0.070, EDGE_H = 0.62, SHEEN_H = 0.13 },
+    -- the one button a window wants pressed (a popup's Accept, the window's
+    -- Close): its face is the accent, darkened this much at top and foot
+    CTA_TOP = 0.60, CTA_BOT = 0.38, CTA_TOP_H = 0.74, CTA_BOT_H = 0.48,
 }
 UI.PL = PL
 local function MixC(a, b, t) return { r = Lerp(a.r, b.r, t), g = Lerp(a.g, b.g, t), b = Lerp(a.b, b.b, t), a = Lerp(a.a or 1, b.a or 1, t) } end
@@ -729,33 +757,24 @@ local function PaintSetButton(self)
     end
     local st, a = self._zStyle, Accent()
     local k = self._zDisabled and 0.5 or 1
-    local bg, ba, br, bgc, bb, tr, tc
-    if st == "footer" or st == "close" then
-        bgc, ba = S.BG, S.FOOT_BG_A
-    else
-        bgc, ba = S.BTN_BG, Lerp(S.BTN_BG_A, S.BTN_BG_HA, t)
-    end
-    if st == "close" or (self._zActive and st ~= "footer") then
-        br, tr = a, a
-        bb, tc = Lerp(S.CLOSE_A, 1, t), Lerp(S.CLOSE_A, 1, t)
-    elseif st == "footer" then
-        br, tr = WHITE, WHITE
-        bb, tc = Lerp(S.FOOT_BRD_A, S.FOOT_BRD_HA, t), Lerp(S.FOOT_TXT_A, S.FOOT_TXT_HA, t)
-    else
-        br, tr = WHITE, WHITE
-        bb, tc = Lerp(S.BTN_BRD_A, S.BTN_BRD_HA, t), Lerp(S.BTN_TXT_A, S.BTN_TXT_HA, t)
-    end
-    if st == "footer" or st == "close" then
-        if self._zFill then self._zFill:SetVertexColor(bgc.r, bgc.g, bgc.b, ba) end
-        Strips(self, br.r, br.g, br.b, bb * k)
-        if fs then fs:SetTextColor(tr.r, tr.g, tr.b, tc * k) end
-        return
-    end
     -- (2026-11-09) a raised plate: the edge warms to the accent under the
-    -- mouse; a picked button keeps the accent on its edge and label
+    -- mouse; a picked button keeps the accent on its edge and label.
+    -- (2026-11-16) EVERY button is one, a popup's and the window's footer
+    -- buttons too: "footer" was a flat dark box with a thin edge and a dim
+    -- label, "close" the same in the accent - the weakest things on a
+    -- popup were its buttons. "footer" is now the plate every button is;
+    -- "close" - the button the window wants pressed - is a plate whose
+    -- FACE is the accent, with a white label.
     if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
     Strips(self, 0, 0, 0, 0)
     local pl = UI.Plate(self, 0, 0, 0, 0)
+    if st == "close" then
+        local ft, fb = Lerp(PL.CTA_TOP, PL.CTA_TOP_H, t), Lerp(PL.CTA_BOT, PL.CTA_BOT_H, t)
+        pl:Paint({ r = a.r * ft, g = a.g * ft, b = a.b * ft, a = k }, { r = a.r * fb, g = a.g * fb, b = a.b * fb, a = k },
+            { r = a.r, g = a.g, b = a.b, a = Lerp(0.85, 1, t) * k }, Lerp(PL.SHEEN, PL.SHEEN_H, t) * k, PL.DROP * k)
+        if fs then fs:SetTextColor(1, 1, 1, Lerp(0.94, 1, t) * k) end
+        return
+    end
     local edge
     if self._zActive then
         edge = { r = a.r, g = a.g, b = a.b, a = Lerp(0.85, 1, t) * k }
@@ -764,10 +783,10 @@ local function PaintSetButton(self)
     end
     local top, bot = MixC(PL.TOP, PL.TOP_H, t), MixC(PL.BOT, PL.BOT_H, t)
     top.a, bot.a = k, k
-    pl:Paint(top, bot, edge, Lerp(PL.SHEEN, PL.SHEEN_H, t) * k)
+    pl:Paint(top, bot, edge, Lerp(PL.SHEEN, PL.SHEEN_H, t) * k, PL.DROP * k)
     if fs then
         if self._zActive then fs:SetTextColor(a.r, a.g, a.b, k)
-        else fs:SetTextColor(1, 1, 1, Lerp(0.82, 1, t) * k) end
+        else fs:SetTextColor(1, 1, 1, Lerp(0.86, 1, t) * k) end
     end
 end
 UI.PaintSetButton = PaintSetButton
@@ -2931,6 +2950,8 @@ function UI.Card(parent, title, y, opts)
         return self:GetHeight()
     end
     card:_zPaint()
+    -- the surface finish (Core_Finish): a card is a plate on the window
+    if ns.Finish then ns.Finish.Dress(card._zFill, "card") end
     -- (2026-11-14) in a window that wears a game look, the look's small box
     -- (Core_LookPanels Kit.Card)
     rawset(card, "_zIs", "card")
@@ -4387,6 +4408,10 @@ function UI.Window(name, width, height, title, opts)
     UI.Border(f, "ui", "border")
     f._zPaint = PaintBox
     f:_zPaint()
+    -- the surface finish (Core_Finish): the brushed ground and its soft
+    -- depth, on every ZacUI window - this one, the settings window and the
+    -- popups (opts.bare) alike
+    if ns.Finish then ns.Finish.Dress(f._zFill, "window") end
     if name then tinsert(UISpecialFrames, name) end
     f:SetScript("OnMouseDown", function(self) self:Raise() end)
 

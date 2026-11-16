@@ -603,10 +603,20 @@ ns.FEATURE_FLAVORS = {
       changed = { retail = "the merchant, mail, trade, gossip, loot, macros, inspect, trainer, social and spellbook windows run "
                   .. "(the modern ones with the ZacUI title bar); the character sheet, pet, talents, quest log, PvP, group finder "
                   .. "and flight times stay the game's own, in ZacUI's skin" } },
+    -- (WoW Forever, 2026-11-15, Zac on his Forever client: ZacUI's sheet
+    -- "looks like ass ... too wide". It was drawn for the 384-wide Classic
+    -- window; Forever's is its own two-pane window with side tabs, 398 or
+    -- 631 wide. So there, as on Retail, the game's own character window
+    -- stays and ZacUI restyles it in place - Blz_Character + Blz_Sweep.)
     { id = "win_character", part = "Zacui_Windows", name = "The character sheet, its pages and the pet page",
       off = { retail = "Retail's character sheet is its own (character, reputation and currency tabs, no skills or honor page) "
-              .. "and the pet page is the stable; " .. LATER_R },
-      kind = { retail = "cant" }, notes = { "gamewindows" } },
+              .. "and the pet page is the stable; " .. LATER_R,
+              forever = "Forever's character window is its own (two panes, side tabs, a pane you can fold away): "
+              .. "the game's own pages are used, in ZacUI's style" },
+      kind = { retail = "cant", forever = "not_needed" }, notes = { "gamewindows" } },
+    { id = "win_inspect", part = "Zacui_Windows", name = "The inspect window",
+      off = { forever = "Forever's inspect window is its own (side tabs, a guild page): the game's own is used, in ZacUI's style" },
+      kind = { forever = "not_needed" }, notes = { "gamewindows" } },
     { id = "win_talents", part = "Zacui_Windows", name = "The talents window",
       off = { retail = "Retail's talents are trees of their own inside the game's spellbook window (hero talents too), not the three Classic trees" },
       kind = { retail = "not_there" }, notes = { "gamewindows" } },

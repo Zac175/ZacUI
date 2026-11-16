@@ -52,6 +52,15 @@ local PANEL_LINES = {
     CharacterFrame = -46,
     InspectFrame   = -46,   -- same shell and name plate as CharacterFrame
 }
+-- (2026-11-16) WoW Forever's own character and inspect windows (restyled in
+-- place there) write the level line 40 down from the top, where a 46 title
+-- band ended: its foot ran through the words. There the title bar is 30, the
+-- height of ZacUI's title bar on the character window, and the level line
+-- sits in the row under it.
+if _G.ZACUI_IS_FOREVER then
+    PANEL_LINES.CharacterFrame = -30
+    PANEL_LINES.InspectFrame = -30
+end
 
 -- Resolution order: user override > modern-template auto-detect (zero) >
 -- classic preset > zero. Modern ButtonFrameTemplate windows (detected by
@@ -573,6 +582,8 @@ local function SkinPanel(frame, opts)
             bg._zui_own = true
             bg:SetTexture(FLAT)
             frame._zui_artbg = bg
+            -- the surface finish (Core_Finish), as on every window's ground
+            if ns.Finish then ns.Finish.Dress(bg, "window") end
         end
         frame._zui_artbg:ClearAllPoints()
         frame._zui_artbg:SetPoint("TOPLEFT", frame, "TOPLEFT", ins.l or 0, -(ins.t or 0))
@@ -649,6 +660,12 @@ local function SkinPanel(frame, opts)
         -- windows: the band stays (things anchor to it) and is not drawn
         band:SetVertexColor(hb.r, hb.g, hb.b, 0)
         frame._zui_band = band
+        -- (2026-11-16, Zac's pick from the finish mocks) the title sits on
+        -- a raised bar again, without a colour of its own: the window's
+        -- ground lifted a little, its brushed grain, a lit top edge and a
+        -- dark line along its foot (Core_Finish, "bar"). The rule under it
+        -- (frame._zui_line) is the pale line a bar's foot is followed by.
+        if ns.Finish then ns.Finish.Dress(band, "bar", { always = true, step = false, inset = 0 }) end
     end
 
     if frame._zui_artbg then

@@ -1110,6 +1110,8 @@ local function HonorBuild(p)
     UI.Border(tbl, "ui", "border")
     tbl._zPaint = UI.PaintBox
     tbl:_zPaint()
+    -- the surface finish (Core_Finish): the table is a plate on the window
+    if ns.Finish then ns.Finish.Dress(tbl._zFill, "card") end
 
     local columns = {
         { text = "HK",    title = HONORABLE_KILLS or "Honorable kills",       body = NEWBIE_TOOLTIP_HONORABLE_KILLS },

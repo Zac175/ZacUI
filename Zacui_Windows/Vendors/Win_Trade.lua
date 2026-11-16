@@ -483,6 +483,10 @@ local function Leftovers()
     Add(f.PortraitContainer)
     Add(f.TitleContainer)
     Add(f.CloseButton or _G.TradeFrameCloseButton)
+    -- (the modern client's second portrait: the other player's face and its
+    -- metal corner sit on a frame of their own at level 550, over the window
+    -- - 2026-11-15, Zac's Forever trade window had it across the header)
+    if type(rawget(f, "RecipientOverlay")) == "table" then Add(f.RecipientOverlay) end
     Add(f.Inset or _G.TradeFrameInset)
     Add(f._zui_panel)
     for i = 1, NUM_TRADE do

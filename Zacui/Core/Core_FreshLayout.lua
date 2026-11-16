@@ -114,7 +114,9 @@ local function BarSpot(AB, cfg, cx, cy, count, size)
 end
 
 function FL.Bars(AB)
-    if FL.done.bars or not Fresh() then return end
+    -- (or a layout nobody has touched, laid again for the look it wears now:
+    -- AB.LayoutPrepare)
+    if FL.done.bars or not (Fresh() or (AB and AB._relayout == true)) then return end
     FL.done.bars = 0
     local ok, p = pcall(AB.Profile)
     if not (ok and type(p) == "table") then return end

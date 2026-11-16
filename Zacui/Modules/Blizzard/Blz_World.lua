@@ -107,7 +107,7 @@ Modules.worldmap = function()
             if t then t:SetAlpha(0) end
         end
         StripTextures(BattlefieldMinimapTab)
-        if BattlefieldMinimapTab then SkinBackdrop(BattlefieldMinimapTab, "windowBg", 0.9) end
+        if BattlefieldMinimapTab then SkinBackdrop(BattlefieldMinimapTab, "windowBg", 0.9, nil, false) end
         if BattlefieldMinimapCloseButton then
             SkinCloseButton(BattlefieldMinimapCloseButton)
         end

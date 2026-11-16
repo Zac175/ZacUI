@@ -757,7 +757,7 @@ local function PaintPanel(bg, d)
     d = d or DB()
     -- (the chat part's look: Core_Look, part "chat")
     local pa = PanelOpacity(d)
-    SkinBackdrop(bg, "windowBg", pa, "chat")
+    SkinBackdrop(bg, "windowBg", pa, "chat", false)
     local r, g, b = PanelRGB(d)
     if r and bg._zui_cbg then
         bg._zui_cbg:SetVertexColor(r, g, b, pa)
@@ -3384,7 +3384,7 @@ Modules.chat = function()
                     ZUI.skinned[bubble] = true
                     local inner = select(1, bubble:GetChildren()) or bubble
                     StripDeep(inner, 0)
-                    SkinBackdrop(inner, "windowBg", 0.92)
+                    SkinBackdrop(inner, "windowBg", 0.92, nil, false)
                 end
             end
         end

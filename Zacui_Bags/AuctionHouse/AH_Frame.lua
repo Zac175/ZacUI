@@ -1770,6 +1770,8 @@ local function Build()
         UI.Border(panel, "ui", "border", 0.6)
         panel._zPaint = UI.PaintBox
         panel:_zPaint()
+        -- the surface finish (Core_Finish): the page is a plate on the window
+        if ns.Finish then ns.Finish.Dress(panel._zFill, "card") end
         panel:Hide()
         panels[spec.key] = panel
         spec.build(panel)
@@ -2071,6 +2073,7 @@ local function NewSample(parent)
     UI.Border(panel, "ui", "border", 0.6)
     panel._zPaint = UI.PaintBox
     panel:_zPaint()
+    if ns.Finish then ns.Finish.Dress(panel._zFill, "card") end
     local list = CreateList(panel, SearchColumns(), { icons = true })
     list:SetPoint("TOPLEFT", 12, -60)
     list:SetPoint("BOTTOMRIGHT", -12, 56)

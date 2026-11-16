@@ -316,6 +316,15 @@ local function EveryBarGeneral(L, A, p)
 end
 
 local function GeneralTab(L, A, p, id, kind, cfg, n)
+    -- (WoW Forever under a game look: the micro menu and the bag bar are the
+    -- game's own frames, left where the game put them - AB.GameExtras - so
+    -- the settings on these tabs have nothing to move)
+    if (kind == "bagbar" or kind == "micro") and A.GameExtras and A.GameExtras() then
+        L:Desc("Under a game look on WoW Forever this is the game's own "
+            .. (kind == "micro" and "micro menu" or "bag bar")
+            .. ", where the game put it: move it in the game's Edit Mode. "
+            .. "The settings on these tabs apply under ZacUI's own look.")
+    end
     L:Card("Show")
     Check(L, "Show this bar", function() return cfg.enabled end, function(v) cfg.enabled = v end, nil, true)
     if kind == "action" then
@@ -818,6 +827,30 @@ local function AdvancedTab(L, A, p, id, kind, cfg)
             end })
     end, width = 170 } })
     L:EndCard()
+
+    -- every bar back to the starting layout of the style the bars wear now
+    -- (AB_Core: THE STARTING LAYOUT FOLLOWS THE LOOK). Bars nobody has moved
+    -- follow a change of style by themselves; this is for the ones that were.
+    if A.LayoutRedo then
+        local lk = ns.Look and ns.Look.For and ns.Look.For("bars")
+        local style = (lk and lk.name) or "ZacUI"
+        L:Card("Starting layout")
+        L:Desc("Puts every bar, the bags and the micro menu back to the starting layout of the style "
+            .. "the bars wear now (" .. style .. "), at its own sizes and spacing. Bars you never moved "
+            .. "do this by themselves when the style changes; this is for bars that were moved.")
+        ButtonRow(L, { { "Arrange for this style", function()
+            UI.Confirm({ title = "Arrange the bars", destructive = true, acceptText = "Arrange + reload",
+                text = "Move every bar, the bags and the micro menu to the starting layout of " .. style
+                    .. "? Each bar's position, scale, button size, spacing and rows are replaced. "
+                    .. "What is on the bars, their keys and their look stay. The interface reloads.",
+                onAccept = function()
+                    -- the reload FIRST, then the write (WoW Forever; ns.AskReload)
+                    if ns.RequestReload then ns.RequestReload() else ReloadUI() end
+                    A.LayoutRedo()
+                end })
+        end, width = 170 } })
+        L:EndCard()
+    end
 
     L:Card("Keys")
     L:Desc("Bars 1, 3, 4, 5 and 6 use Blizzard's own key names (Action Bar, Right Bar, Left Bar, "

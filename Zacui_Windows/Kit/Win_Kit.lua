@@ -363,18 +363,16 @@ function Kit.Cover(host, opts)
         if opts.width or opts.height then
             f:ClearAllPoints()
             f:SetPoint("TOPLEFT", host, "TOPLEFT", ins.l or 0, -(ins.t or 0))
-            local hw, hh = host:GetWidth(), host:GetHeight()
-            if Secret(hw) or Secret(hh) then
-                -- Forever keeps this window's size secret: the dimension
-                -- not given is anchored instead of worked out
-                if opts.width then f:SetWidth(opts.width)
-                else f:SetPoint("TOPRIGHT", host, "TOPRIGHT", -(ins.r or 0), -(ins.t or 0)) end
-                if opts.height then f:SetHeight(opts.height)
-                else f:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", ins.l or 0, ins.b or 0) end
-            else
-                f:SetSize(opts.width or (hw - (ins.l or 0) - (ins.r or 0)),
-                          opts.height or (hh - (ins.t or 0) - (ins.b or 0)))
-            end
+            -- The dimension not given is ANCHORED to the window, not worked
+            -- out from its size: Forever can keep a window's size secret,
+            -- and a window can change size while it is open (2026-11-16,
+            -- Zac's Forever character window with its stats pane folded
+            -- away: the title bar stayed at the open width, hanging over
+            -- nothing - it had been sized once).
+            if opts.width then f:SetWidth(opts.width)
+            else f:SetPoint("TOPRIGHT", host, "TOPRIGHT", -(ins.r or 0), -(ins.t or 0)) end
+            if opts.height then f:SetHeight(opts.height)
+            else f:SetPoint("BOTTOMLEFT", host, "BOTTOMLEFT", ins.l or 0, ins.b or 0) end
         else
             ns.AnchorPanel(f, host, ins)
         end
@@ -386,6 +384,8 @@ function Kit.Cover(host, opts)
     -- art ghost through is exactly the "stuff showing through" bug.
     UI.Fill(f, "ui", "windowBg", 1)
     UI.Border(f, "ui", "border")
+    -- the surface finish (Core_Finish), as on every window's ground
+    if ns.Finish then ns.Finish.Dress(f._zFill, "window") end
     -- the theme's colours, or the ones picked on the Game windows page
     f._zPaint = Kit.StyleCover
 
@@ -962,6 +962,8 @@ function Kit.Footer(parent, height)
     f:SetPoint("BOTTOMLEFT", 1, 1)
     f:SetPoint("BOTTOMRIGHT", -1, 1)
     UI.Fill(f, "ui", "headerBg")
+    -- the surface finish (Core_Finish): a raised strip, lit under its rule
+    if ns.Finish then ns.Finish.Dress(f._zFill, "strip") end
     local rule = f:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
@@ -1266,6 +1268,23 @@ function Kit.RecheckHeaders()
             else
                 h:Hide()
             end
+            -- (2026-11-16, Zac's Forever character window: "weird lines at
+            -- the top". The window's own skin draws a title rule where the
+            -- game's title ends; this title bar is taller and has its own
+            -- lower edge, so the rule was a second line across the page a
+            -- little under it. While this bar is up the rule is not drawn.)
+            local rule = rawget(host, "_zui_line")
+            if type(rule) == "table" and rule.SetShown then rule:SetShown(not want) end
+            -- (2026-11-16 07:21, Zac: "a couple issues with the lines that i
+            -- think we still need but need to be placed better". Since the
+            -- surface finish the window skin's title band is a raised bar
+            -- with a dark line along its foot; under this taller title bar
+            -- that was a second bar whose foot ran through the level line
+            -- and behind the side tabs. While this bar is up the band is
+            -- not drawn either - its finish follows it (Core_Finish) - so
+            -- the one line under the title is this bar's own.)
+            local band = rawget(host, "_zui_band")
+            if type(band) == "table" and band.SetShown then band:SetShown(not want) end
         end
     end)
 end

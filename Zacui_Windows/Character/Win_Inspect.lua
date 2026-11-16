@@ -38,6 +38,10 @@ local ADDON_NAME = ...
 -- Zacui_Windows is a part of ZacUI: one namespace, published by Core_Boot.
 local ns = _G.ZacUI
 if not ns then return end
+-- Not on every game version (Core_Flavor's feature table: WoW Forever's
+-- inspect window is its own and is restyled in place - Blz_Character):
+-- this window stands down there, before it makes a frame or a module.
+if ns.FeatureOn and not ns.FeatureOn("win_inspect") then return end
 
 -- shared state from earlier ZacUI files
 local FLAT = ns.FLAT
@@ -1006,6 +1010,26 @@ end
 -- APPLY
 -- ============================================================
 -- Nothing secure, so no combat gate: the toggle is read on every open.
+-- THE MODERN CLIENT'S PAGES (2026-11-15, Zac's Forever inspect window: the
+-- game's item slots, bronze frames and all, drawn over ZacUI's rows).
+-- Blizzard_InspectUI/Camelot builds every inspect slot at frame level 100
+-- (InspectPaperDollItemSlotButtonTemplate), above the cover (the window's
+-- level + 50), and hangs its side tabs beside the window. Taken by name
+-- and hushed whole (Kit.Hush: faded, the mouse off on everything under
+-- them, never hidden; put back as they were when the cover goes) - the
+-- way the character window's slots are. The Classic clients' pages sit
+-- under the cover and are left exactly as they were.
+local MODERN_PARTS = { "InspectPaperDollFrame", "InspectPVPFrame", "InspectGuildFrame", "InspectUITabs" }
+local function ModernParts()
+    local t = {}
+    if not (_G.ZACUI_MODERN and Kit.Hush) then return t end
+    for _, name in ipairs(MODERN_PARTS) do
+        local f = _G[name]
+        if type(f) == "table" and f.SetAlpha then t[#t + 1] = f end
+    end
+    return t
+end
+
 function Apply()
     if not InspectFrame then return end
     if Enabled() then
@@ -1013,9 +1037,11 @@ function Apply()
         win.Reanchor()
         win:Show()
         Kit.Silence(Leftovers())
+        Kit.HushList(ModernParts())
     elseif win then
         win:Hide()
         Kit.Unsilence(Leftovers())
+        Kit.UnhushList(ModernParts())
     end
 end
 

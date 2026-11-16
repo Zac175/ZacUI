@@ -1213,7 +1213,16 @@ local function QuestLeftovers()
     local function Add(x) if x then t[#t + 1] = x end end
     Add(_G.QuestFrameCloseButton)
     Add(_G.QuestFramePortrait)
-    if QuestFrame then AddRegions(t, QuestFrame) end
+    if QuestFrame then
+        -- Forever's modern quest window (the same template as the gossip
+        -- and merchant windows): its frame art (level 500), portrait (400),
+        -- title strip (510) and X draw over any cover
+        Add(QuestFrame.NineSlice)
+        Add(QuestFrame.PortraitContainer)
+        Add(QuestFrame.TitleContainer)
+        Add(QuestFrame.CloseButton)
+        AddRegions(t, QuestFrame)
+    end
     for _, key in ipairs(PANEL_ORDER) do AddRegions(t, PanelFor(key)) end
     return t
 end

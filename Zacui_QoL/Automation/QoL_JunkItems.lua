@@ -277,6 +277,7 @@ local function Window()
         UI.Fill(win, "ui", "windowBg")
         UI.Border(win, "ui", "border")
         if UI.PaintBox then UI.PaintBox(win) end
+        if ns.Finish then ns.Finish.Dress(win._zFill, "window") end
     end
     local title = win:CreateFontString(nil, "OVERLAY")
     Font(title, 12)

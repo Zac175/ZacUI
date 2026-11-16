@@ -28,6 +28,53 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.13",
+        date = "2026-11-16",
+        title = "WoW Forever: game styles that fit, and the game's own micro menu and bags",
+        titles = { era = "Windows and buttons with more depth", tbc = "Windows and buttons with more depth",
+                   retail = "Windows and buttons with more depth" },
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "ZacUI's windows have a little shading, lit edges and raised title bars instead of one flat colour. The Style page has a \"Surface finish\" slider; 0% brings the flat windows back.",
+                    "Action bars page, Advanced tab: \"Arrange for this style\" lays your bars out again for the style you picked.",
+                    { "Gear slots in the character and inspect windows show each item's level.", only = "forever" },
+                    { "Blizzard style: party frames wear the live game's party frame.", only = { "forever", "retail" } },
+                    { "Blizzard style: the quest tracker wears the live game's art.", only = "forever" },
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "Buttons and the settings window's page rows stand out more: a brighter raised face, a clearer outline and a thin shadow underneath.",
+                    "Popup buttons are raised like every other button. The main choice has a gold face, a destructive one a red face.",
+                    "Bars you have not moved are laid out again when you pick another style. Bars you moved stay where you put them.",
+                    { "Under a game style the micro menu and the bag bar are the game's own, where the game puts them. Move them in the game's Edit Mode.", only = "forever" },
+                    { "Under a game style the first action bar stays beside the game's micro menu, with the end cap at the end of the row and the XP bar across it.", only = "forever" },
+                    { "Under Classic WoW UI and Blizzard style the game's windows wear ZacUI's style. Bars, unit frames, chat, minimap and the quest tracker keep the style you picked.", only = "forever" },
+                    { "The character and inspect windows are the game's own, in ZacUI's style.", only = "forever" },
+                    { "The Reputation, Skills, Statistics, Currency and PvP pages are styled.", only = "forever" },
+                    { "New installs start with ZacUI's focus frame on.", feature = "uf_focus" },
+                    { "Under Classic WoW UI and Blizzard style ZacUI's focus frame is switched on once, so it matches the other frames.", only = "forever" },
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    { "The merchant window showed an error and overlapped its title.", only = "forever" },
+                    { "The quest window showed the game's frame through ZacUI's.", only = "forever" },
+                    { "The trade window showed the other player's portrait over the header.", only = "forever" },
+                    { "An error when a target's cast was interrupted.", only = "forever" },
+                    { "The stance bar sat left of the gryphon under a game style.", only = "forever" },
+                    { "Minimap zoom jittered.", only = { "forever", "retail" } },
+                    { "Classic WoW UI: a window's bottom tabs were the wrong size.", only = { "forever", "retail" } },
+                    { "Bags under a game style: doubled labels on the Groups and Sort buttons.", feature = "bags" },
+                },
+            },
+        },
+    },
+    {
         version = "3.0.12",
         date = "2026-11-15",
         title = "Shorter loading screens, a faster threat meter, and game styles on more of the screen",
