@@ -499,3 +499,24 @@ ns.CHANGELOG = {
         },
     },
 }
+
+-- A TAGGED LINE WRITES ITSELF AS ITS TEXT. The release notes are made by
+-- joining each line onto "- " (the release tool, outside the addon), and a
+-- tagged line is a table: joined as it stood, 3.0.12's and 3.0.13's notes
+-- could not be written and those versions were never packaged. With this a
+-- tagged line joins as its words, wherever lines are joined into text.
+local LINE = {
+    __concat = function(a, b)
+        if type(a) == "table" then a = a[1] or "" end
+        if type(b) == "table" then b = b[1] or "" end
+        return a .. b
+    end,
+    __tostring = function(t) return t[1] or "" end,
+}
+for _, entry in ipairs(ns.CHANGELOG) do
+    for _, sec in ipairs(entry.sections or {}) do
+        for _, item in ipairs(sec.items or {}) do
+            if type(item) == "table" and getmetatable(item) == nil then setmetatable(item, LINE) end
+        end
+    end
+end
