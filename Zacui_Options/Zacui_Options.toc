@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Options|r
 ## Notes: ZacUI's settings window and its pages. Loads by itself the first time you open the settings (/zui).
 ## Author: Zac
-## Version: 3.0.13
+## Version: 3.0.14
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui

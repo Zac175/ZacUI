@@ -28,7 +28,7 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
-        version = "3.0.13",
+        version = "3.0.14",
         date = "2026-11-16",
         title = "WoW Forever: game styles that fit, and the game's own micro menu and bags",
         titles = { era = "Windows and buttons with more depth", tbc = "Windows and buttons with more depth",
