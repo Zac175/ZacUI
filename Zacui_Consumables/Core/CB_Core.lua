@@ -94,6 +94,7 @@ end
 -- conflictGroupPreferences, conflictGroupQuickUse, clickActions,
 -- hordeByFaction, visibilityRaids, style, anchors, formats, visibility,
 -- chrome, position, stoneBySlot, itemTTS. nil reads as "none".
+-- weaponStones (the consumables bar) is not there either: unset reads as on.
 
 function CB.Cfg()
     if type(ZacUIDB) ~= "table" then return CB.DEFAULTS end
@@ -132,26 +133,43 @@ function CB.SetHidden(key, cfg, id, on)
     h[id] = on and true or false
 end
 
--- Horde mode (no main-hand stone button: Windfury Totem): per bar and
--- per faction - unset is on for Horde, off for Alliance
+-- THE MAIN HAND BUTTON (2026-11-16, Zac: "for era i want alliance
+-- warriors ... to always show weapon stones for main hand off hand and
+-- bag where horde i only want offhand and bag ... anni and forever have
+-- windfury on both sides ... its just era that doesnt"; then "there
+-- shouldnt be an option anymore"). Nothing to switch on: a Horde
+-- character on Classic Era starts without it (Windfury Totem is on the
+-- main hand there), everyone else with it. The Weapons tab's "Main hand"
+-- tick says otherwise, per bar and per faction, kept only where it
+-- differs from that start:
+--   cfg.hordeByFaction = { Horde = true|false, Alliance = true|false }
+-- (true: hidden. The name is the old "Horde mode" option's, whose saved
+-- answers these are.)
 local function Faction()
     local f = UnitFactionGroup and UnitFactionGroup("player")
     if f == "Horde" or f == "Alliance" then return f end
 end
-function CB.HordeMode(cfg)
-    -- (2026-11-09) not on TBC: both factions have Windfury Totem there
-    if ns.Flavor and ns.Flavor() == "tbc" then return false end
+local function MainHandStartsHidden() return ns.Flavor() == "era" and Faction() == "Horde" end
+function CB.MainHandHidden(cfg)
     local f = Faction()
     local set = T(cfg, "hordeByFaction")
     local v = set and f and set[f]
-    if v == nil then return f == "Horde" end
+    if v == nil then return MainHandStartsHidden() end
     return v and true or false
 end
-function CB.SetHordeMode(cfg, on)
+function CB.SetMainHandShown(cfg, shown)
     local f = Faction()
     if not f then return end
-    if type(cfg.hordeByFaction) ~= "table" then cfg.hordeByFaction = {} end
-    cfg.hordeByFaction[f] = on and true or false
+    local hide = not shown
+    if hide == MainHandStartsHidden() then
+        if type(cfg.hordeByFaction) == "table" then
+            cfg.hordeByFaction[f] = nil
+            if next(cfg.hordeByFaction) == nil then cfg.hordeByFaction = nil end
+        end
+    else
+        if type(cfg.hordeByFaction) ~= "table" then cfg.hordeByFaction = {} end
+        cfg.hordeByFaction[f] = hide
+    end
 end
 
 local function IsRogue() return UnitClass and select(2, UnitClass("player")) == "ROGUE" end
@@ -703,7 +721,7 @@ function CB.Collect(key, cfg, w)
     local thr = tonumber(cfg.showBeforeExpiry) or 60
     local now = w.Now()
     if key == "weapons" then
-        if cfg.showEquippedWeapons ~= false then HandButtons(out, cfg, w, CB.HordeMode(cfg), nil, false) end
+        if cfg.showEquippedWeapons ~= false then HandButtons(out, cfg, w, CB.MainHandHidden(cfg), nil, false) end
         if cfg.showBagWeapons then BagWeaponButtons(out, cfg, w) end
         return out, nil
     end
@@ -713,9 +731,12 @@ function CB.Collect(key, cfg, w)
     for _, e in ipairs(CB.Catalogue(key, cfg)) do
         if CB.Hidden(key, cfg, e.id) then hidden[e.id] = true end
     end
-    if key == "main" then
+    -- (the consumables bar's weapon buttons: one switch for the hands and
+    -- the bag weapons, the Weapons tab picks among them)
+    local stones = key == "main" and cfg.weaponStones ~= false
+    if stones then
         local hm = T(cfg, "hiddenItems") or {}
-        HandButtons(out, cfg, w, CB.HordeMode(cfg), hm, true)
+        HandButtons(out, cfg, w, CB.MainHandHidden(cfg), hm, true)
     end
     local groups, reps = {}, {}
     local onlyAvail = cfg.showOnlyAvailable == true
@@ -771,7 +792,7 @@ function CB.Collect(key, cfg, w)
             end
         end
     end
-    if key == "main" and cfg.showBagWeapons then BagWeaponButtons(out, cfg, w) end
+    if stones and cfg.showBagWeapons then BagWeaponButtons(out, cfg, w) end
 
     -- order: yours, then category, the clash groups ahead of loose items, name
     local order, hasOrder = OrderLookup(cfg)

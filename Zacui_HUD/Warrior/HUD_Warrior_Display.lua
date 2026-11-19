@@ -401,12 +401,22 @@ end
 -- watches the abilities and decides): gold = up with the rage, grey with
 -- a steady red ring = up but no rage, a big fast red glow and the icon a
 -- size bigger = the NOOB (it has sat unpressed past the grace).
+-- WAIT, grey, across the icon = Readycheck's raid config has it switched
+-- on for this boss and its reminder has not gone off yet (onCd: the icon
+-- is counting a cooldown down, which says enough).
 local HES_GOLD = { 1, 0.82, 0.2, 1 }
 local HES_RED = { 1, 0.15, 0.1, 1 }
-local function ApplyHesitation(icon, name)
+local function ApplyHesitation(icon, name, onCd)
     local Hs = ns.Hesitation
     local st, usable, short, first
     if Hs and Hs.HudState then st, usable, short, first = Hs.HudState(name) end
+    local wait = st == "wait" and not onCd
+    if st == "wait" then st = nil end
+    if wait and not icon.texts.wait then
+        icon:AddText("wait", "CENTER", 11, HES_GOLD, 0, 0)
+    end
+    if icon.texts.wait then icon:SetText("wait", wait and "WAIT" or "") end
+    if wait then icon:SetDesat(true) end
     -- how much rage it is short while it is (nearly) back: "-6", top-right
     if short and not icon.texts.short then
         icon:AddText("short", "INNER_TOPRIGHT", 10, { 1, 0.3, 0.3, 1 }, -1, -1)
@@ -504,7 +514,7 @@ local function UpdateSpellIcon(icon, def)
         local at = tonumber(cfg and cfg.wwFlashAt) or 4
         icon:SetGlow("mobs", (not owned and n >= at and ready) or false)
     end
-    ApplyHesitation(icon, sp.name)
+    ApplyHesitation(icon, sp.name, cd and cd.real)
 end
 
 -- Countdown texts (0.1s ticker). NB: the WA's "duration < 2 -> hide
@@ -1761,7 +1771,7 @@ local function UpdateAuraIcon(icon, def)
         if Hs and Hs.cds then
             for _, e in ipairs(Hs.cds) do if e.slot == 13 then tname = e.name break end end
         end
-        ApplyHesitation(icon, tname)
+        ApplyHesitation(icon, tname, icon.trinketCd)
         return true
     end
     return false

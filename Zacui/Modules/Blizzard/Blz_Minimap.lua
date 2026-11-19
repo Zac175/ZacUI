@@ -84,6 +84,16 @@ end
 --                   stays the Text size setting, or the panel's own sizes)
 --   pillColor       the pills' backing (pillAlpha is its darkness)
 --   pillBorder      a 1px edge round each pill, in pillBorderColor
+--   pillShape       what a piece sits on: nil / "box" the flat box it
+--                   always was, "glow" a soft shadow that fades to nothing
+--                   (in pillColor at pillAlpha), "none" nothing
+--   pillOutline     the pieces' text outlined, whatever the font says
+--   pillFade        the map's top and bottom edges darken (pillFadeAlpha)
+--   pillCorners     the mail and tracking icons wear the pieces' backing;
+--                   unset they keep the box and ring they always had
+--                   (THE BACKING BEHIND THE PIECES, below; the Minimap
+--                   page's presets - Minimap_Options, MM.BACKINGS - write
+--                   these, and a preset is nothing more than their values)
 --   pillPad/pillGap the pills' gap from the map's edge / between pills
 --   borderColor / borderSize   the map's outline
 --   edgeColor       the ring that lights up under the mouse
@@ -98,18 +108,25 @@ local function Empty(spec) return type(spec) ~= "table" or next(spec) == nil end
 -- Blizzard's own strings, in the ZacUI font at a given size (their
 -- templates are the stock font, which reads out of place in the panel).
 -- With a map font chosen: its face, outline and shadow at the same size.
+local EMPTY_SPEC = {}
 local function StyleFS(fs, size)
     if not fs or not fs.GetFont then return end
     local spec = Setting("pillFont")
-    if Empty(spec) or not ns.ApplyFontSpec then
+    -- (pillOutline: text with no backing has to carry its own edge; only
+    -- on the map - the panel's texts sit on a strip)
+    local edged = Setting("pillOutline") and Setting("layout") ~= "panel"
+    if (Empty(spec) and not edged) or not ns.ApplyFontSpec then
         ns.HouseFont(fs, size)
         return
     end
+    if Empty(spec) then spec = EMPTY_SPEC end
     local f = ZacUIDB and ZacUIDB.font
-    ns.ApplyFontSpec(fs, { face = spec.face, outline = spec.outline, shadow = spec.shadow,
+    local outline = spec.outline
+    if edged and (outline == nil or outline == "none" or outline == "NONE") then outline = "outline" end
+    ns.ApplyFontSpec(fs, { face = spec.face, outline = outline, shadow = spec.shadow,
         shadowX = spec.shadowX, shadowY = spec.shadowY },
         { size = size + ((f and f.delta) or 0),
-          outline = (f and f.outline == "NONE") and "none" or "outline", shadow = true })
+          outline = (edged or not (f and f.outline == "NONE")) and "outline" or "none", shadow = true })
 end
 
 local function ZoneButton()
@@ -177,13 +194,61 @@ local function PillRGB()
     return c.r, c.g, c.b
 end
 
+-- THE BACKING BEHIND THE PIECES (2026-11-18, Zac: "improve the backgrounds
+-- for things on the minimap like time instead of just a solid black box",
+-- then "give the users the option to pick or do something custom"). A
+-- piece's backing is a flat box (as always), a soft shadow or nothing.
+-- The soft shadow is one round falloff texture (Media/Textures/softdot,
+-- drawn by tools/make_softdot.py) stretched a little past the piece and
+-- held inside the map by a mask, so it never spills over the map's edge.
+local GLOW_TEX = (MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Textures\\softdot"
+local GLOW_X, GLOW_Y = 10, 3     -- how far past the piece the shadow reaches
+local CORNER_GLOW = 3            -- and past a corner icon
+local FADE_SHARE = 0.173         -- the edge fade's height, of the map's
+local FADE_KNEE, FADE_MID = 0.55, 0.549   -- 55% of the way in it is at 0.549 of its darkness
+
+local function PillShape()
+    local v = Setting("pillShape")
+    if v == "glow" or v == "none" then return v end
+    return "box"
+end
+
+-- the soft shadow of one piece: on `frame`, behind `back` (its box),
+-- clipped to `clip` (the map it sits on)
+local function PillGlow(frame, back, clip)
+    local g = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
+    g._zui_own = true
+    g:SetTexture(GLOW_TEX)
+    g:SetPoint("TOPLEFT", frame, "TOPLEFT", -GLOW_X, GLOW_Y)
+    g:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", GLOW_X, -GLOW_Y)
+    if clip and frame.CreateMaskTexture and g.AddMaskTexture then
+        local m = frame:CreateMaskTexture()
+        m:SetTexture(ns.FLAT, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        m:SetAllPoints(clip)
+        g:AddMaskTexture(m)
+    end
+    g:Hide()
+    back._zGlow = g
+    return g
+end
+
 local function PaintPill(t)
     local r, g, b = PillRGB()
-    t:SetVertexColor(r, g, b, PillAlpha())
+    local shape = PillShape()
+    local a = PillAlpha()
+    t:SetVertexColor(r, g, b, shape == "box" and a or 0)
+    -- (a backing that is put away - the coordinates in an instance, where
+    -- there are none - takes its shadow and its edge with it)
+    local up = t:IsShown()
+    local glow = t._zGlow
+    if glow then
+        glow:SetShown(shape == "glow" and up)
+        if shape == "glow" then glow:SetVertexColor(r, g, b, a) end
+    end
     -- the optional edge (Pill gives every pill one, hidden unless asked)
     local strips = t._zEdge
     if strips then
-        local on = Look("pillBorder") and true or false
+        local on = (shape == "box" and Look("pillBorder") and up) and true or false
         local c = Setting("pillBorderColor")
         local er, eg, eb, ea
         if type(c) == "table" then er, eg, eb, ea = ns.ColorOf(c)
@@ -196,6 +261,59 @@ local function PaintPill(t)
             e:SetVertexColor(er, eg, eb, ea)
         end
     end
+end
+
+-- THE EDGE FADE (pillFade): the map's top and bottom edges darken, and the
+-- pieces sit on that instead of a box each. Two bands of two gradients
+-- (dark at the edge, 55% of the way in at 0.549 of that, then to nothing),
+-- on one frame under the pieces. `holder` keeps it (the real map's pieces,
+-- or the Minimap page's sample); made on first need, laid out again only
+-- when the darkness or the map's height changed. Map-only look.
+local function FadeGradient(tex, top, bot)
+    if CreateColor and tex.SetGradient then
+        if pcall(tex.SetGradient, tex, "VERTICAL", CreateColor(0, 0, 0, bot), CreateColor(0, 0, 0, top)) then return end
+    end
+    if tex.SetGradientAlpha then pcall(tex.SetGradientAlpha, tex, "VERTICAL", 0, 0, 0, bot, 0, 0, 0, top) end
+end
+function mm.PaintFade(map, holder)
+    local f = holder._zFade
+    if not (Overlay() and Setting("pillFade")) then
+        if f then f:Hide() end
+        return
+    end
+    if not f then
+        f = CreateFrame("Frame", nil, map)
+        f:SetAllPoints(map)
+        f:SetFrameLevel((map:GetFrameLevel() or 1) + 3)
+        f.t = {}
+        for i = 1, 4 do
+            local t = f:CreateTexture(nil, "BACKGROUND")
+            t._zui_own = true
+            t:SetTexture(ns.FLAT)
+            f.t[i] = t
+        end
+        holder._zFade = f
+    end
+    local a = math.max(0, math.min(1, tonumber(Setting("pillFadeAlpha")) or 0.82))
+    local h = math.max(8, math.floor((map:GetHeight() or 140) * FADE_SHARE + 0.5))
+    local sig = a * 1000 + h
+    if f._sig ~= sig then
+        f._sig = sig
+        f.alpha, f.band = a, h
+        local outer = math.floor(h * FADE_KNEE + 0.5)
+        local mid = a * FADE_MID
+        local t = f.t
+        for i = 1, 4 do t[i]:ClearAllPoints() end
+        t[1]:SetPoint("TOPLEFT") t[1]:SetPoint("TOPRIGHT") t[1]:SetHeight(outer)
+        FadeGradient(t[1], a, mid)
+        t[2]:SetPoint("TOPLEFT", t[1], "BOTTOMLEFT") t[2]:SetPoint("TOPRIGHT", t[1], "BOTTOMRIGHT") t[2]:SetHeight(h - outer)
+        FadeGradient(t[2], mid, 0)
+        t[3]:SetPoint("BOTTOMLEFT") t[3]:SetPoint("BOTTOMRIGHT") t[3]:SetHeight(outer)
+        FadeGradient(t[3], mid, a)
+        t[4]:SetPoint("BOTTOMLEFT", t[3], "TOPLEFT") t[4]:SetPoint("BOTTOMRIGHT", t[3], "TOPRIGHT") t[4]:SetHeight(h - outer)
+        FadeGradient(t[4], 0, mid)
+    end
+    f:Show()
 end
 
 -- The map's outline and the hover ring: UI.Border boxes, in the palette
@@ -266,7 +384,7 @@ local function PillAnchor(key)
     return k and type(a) == "table" and a[k] or nil
 end
 local pillDef = {}
-local function PlacePillsOn(map, list, busy)
+local function PlacePillsOn(map, list, busy, lift)
     local pad = tonumber(Look("pillPad")) or PILL_PAD
     local gap = tonumber(Look("pillGap")) or PILL_GAP
     local stack = {}
@@ -293,7 +411,7 @@ local function PlacePillsOn(map, list, busy)
                 t.point, t.relPoint, t.to, t.x, t.y = point, point, map, x, top and -pad or pad
                 ns.ApplyAnchor(f, spec, t, To)
             else
-                local y = pad + (stack[point] or 0)
+                local y = pad + (stack[point] or 0) + ((not top) and lift or 0)
                 f:ClearAllPoints()
                 f:SetPoint(point, map, point, x, top and -y or y)
                 stack[point] = (stack[point] or 0) + (f:GetHeight() or 0) + gap
@@ -453,7 +571,18 @@ end
 
 local function PlacePills()
     if not mm.zonePill then return end
-    PlacePillsOn(Minimap, PillList(), CornerBusy)
+    PlacePillsOn(Minimap, PillList(), CornerBusy, mm.lift)
+end
+
+-- Something lies along the map's bottom edge (the button tray's "On the
+-- map" band): the pieces at the bottom spots stand `px` higher while it
+-- does (0 / nil = back down). A piece with a fine placement stays put.
+local function Lift(px)
+    px = tonumber(px) or 0
+    if px <= 0 then px = nil end
+    if mm.lift == px then return end
+    mm.lift = px
+    if Setting("layout") ~= "panel" then PlacePills() end
 end
 
 -- Coordinates: on the panel look along the map's bottom edge; on the
@@ -751,6 +880,11 @@ local function Layout()
     PlaceIcons(LiveParts())
     p:_zPaint()
     if mm.edge then mm.edge:_zPaint() end
+    -- the pieces' backing: the corner icons that wear it, the edge fade
+    for _, f in pairs(mm.iconFrames or {}) do
+        if f and f._zRing then f._zRing:_zPaint() end
+    end
+    mm.PaintFade(Minimap, mm)
     if Overlay() then
         OverlayLayout()
         if mm.PlaceSecure then mm.PlaceSecure() end
@@ -1241,6 +1375,7 @@ function Pill(parent, name)
     t:SetTexture(ns.FLAT)
     t:SetAllPoints()
     t._zEdge = PillEdge(pf)
+    PillGlow(pf, t, parent)
     pf._zBack = t
     pf._zPaint = function() PaintPill(t) end
     pf:Hide()
@@ -1329,6 +1464,7 @@ local function BuildPanel()
     pill:SetTexture(ns.FLAT)
     pill:SetAllPoints()
     pill._zEdge = PillEdge(co)
+    PillGlow(co, pill, Minimap)
     local ct = UI.Font(co, UI.F.SMALL, { cat = "text", key = "normal" })
     ct:SetPoint("CENTER")
     co._zPaint = function()
@@ -1339,6 +1475,7 @@ local function BuildPanel()
             local c = GetColor("ui", "windowBg")
             pill:SetVertexColor(c.r, c.g, c.b, 0.65)
             for _, e in ipairs(pill._zEdge or {}) do e:Hide() end
+            if pill._zGlow then pill._zGlow:Hide() end
         end
     end
     mm.coordsText = ct
@@ -1358,6 +1495,7 @@ local function BuildPanel()
         end
         -- Instances report no position: no text, no pill.
         if text ~= lastText then
+            local wasUp = pill:IsShown()
             lastText = text
             ct:SetText(text)
             if text == "" then
@@ -1366,6 +1504,8 @@ local function BuildPanel()
                 pill:Show()
                 co:SetWidth(math.ceil(ct:GetStringWidth()) + (Overlay() and 14 or 10))
             end
+            -- gone or back: its shadow and edge with it
+            if wasUp ~= pill:IsShown() then co._zPaint() end
         end
     end)
     -- A font change re-measures on the next tick.
@@ -1463,9 +1603,44 @@ local function CornerIcon(frame, icon, point, x, y, name, map)
         ring:SetFrameLevel(frame:GetFrameLevel() + 1)
         ns.UI.Border(ring, "ui", "border")
         ring._zPaint = function(self)
-            ns.UI.PaintBox(self)
-            local c = GetColor("ui", "windowBg")
-            back:SetVertexColor(c.r, c.g, c.b, 0.8)
+            local strips = self._zBorder
+            local glow = back._zGlow
+            if not Setting("pillCorners") then
+                -- as it always was: the window colour and the palette's edge
+                ns.UI.PaintBox(self)
+                for _, e in ipairs(strips or {}) do e:Show() end
+                local c = GetColor("ui", "windowBg")
+                back:SetVertexColor(c.r, c.g, c.b, 0.8)
+                if glow then glow:Hide() end
+                return
+            end
+            -- the pieces' backing: its shape, colour, darkness and edge
+            local shape = PillShape()
+            local r, g, b = PillRGB()
+            local a = PillAlpha()
+            back:SetVertexColor(r, g, b, shape == "box" and a or 0)
+            local edge = (shape == "box" and Look("pillBorder")) and true or false
+            if edge then PaintOutline(self, "pillBorderColor") end
+            for _, e in ipairs(strips or {}) do e:SetShown(edge) end
+            -- a soft shadow under the icon: the shape's own, or (no backing,
+            -- outlined text) the icon's share of that outline
+            local soft = shape == "glow" or (shape == "none" and Setting("pillOutline") and true or false)
+            if soft and not glow then
+                glow = frame:CreateTexture(nil, "BACKGROUND", nil, -7)
+                glow._zui_own = true
+                glow:SetTexture(GLOW_TEX)
+                glow:SetPoint("TOPLEFT", frame, "TOPLEFT", -CORNER_GLOW, CORNER_GLOW)
+                glow:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", CORNER_GLOW, -CORNER_GLOW)
+                back._zGlow = glow
+            end
+            if glow then
+                glow:SetShown(soft)
+                if shape == "glow" then
+                    glow:SetVertexColor(r, g, b, a * 0.9)
+                elseif soft then
+                    glow:SetVertexColor(0, 0, 0, 0.5)
+                end
+            end
         end
         ring:_zPaint()
         frame._zRing = ring
@@ -2031,7 +2206,8 @@ end
 --   bgColor      the tray's background (palette window colour at 95%)
 --   borderColor  its 1px edge (palette)
 --   barColor     the bar you hover to open it (accent)
---   openAnim     how it appears (none = at once, as it always has)
+--   openAnim     how it appears (none = at once, as it always has; docked
+--                to the map with nothing picked, it slides out of that edge)
 -- Each wraps the tray's own repaint, so a palette change keeps a chosen
 -- colour; nothing here moves, sizes or reparents a collected button.
 local TrayLook = {}
@@ -2069,9 +2245,11 @@ function TrayLook.PaintBar(bar)
     end
 end
 
+-- (the tray's own answer: what is saved, else docked to the map it slides
+-- out of that edge, else at once)
 function TrayLook.OpenSpec()
-    local spec = TrayDB().openAnim
-    if type(spec) == "table" and spec.style and spec.style ~= "none" then return spec end
+    local T = ns.Tray
+    return T and T.AnimSpec("openAnim") or nil
 end
 
 -- Once the tray exists (it is built by its own module, which may run
@@ -2123,8 +2301,13 @@ ns.MinimapLook = {
     Overlay = Overlay,
     TextSize = TextSize,
     PillAlpha = PillAlpha,
+    PillShape = PillShape,
     Pill = Pill,
     PaintPill = PaintPill,
+    PaintFade = mm.PaintFade,
+    -- the button tray's band along the map's bottom edge (UI/Tray)
+    Lift = Lift,
+    CornerBusy = CornerBusy,
     StyleFS = StyleFS,
     PlacePillsOn = PlacePillsOn,
     PillDefault = PillDefault,

@@ -150,6 +150,7 @@ local function AddEntry(def, entry, unticked)
     local list = def[name]
     list[#list + 1] = copy
 end
+V2.AddEntry = AddEntry      -- (HUD_V2_Custom: your own entries join the lists the same way)
 
 function V2.Normalize(def)
     if type(def) ~= "table" or def._v2 then return def end

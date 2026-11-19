@@ -634,9 +634,14 @@ local function VGrad(tex, lo, hi)
         tex:SetVertexColor((lo.r + hi.r) / 2, (lo.g + hi.g) / 2, (lo.b + hi.b) / 2, ((lo.a or 1) + (hi.a or 1)) / 2)
     end
 end
+-- (every frame that wears a plate, so a change of the button depth can
+-- repaint them all: UI.RepaintPlates)
+local plated = setmetatable({}, { __mode = "k" })
 function UI.Plate(f, l, r, t, b)
     local p = rawget(f, "_zPlate")
     if p then return p end
+    if UI.PlateSync then UI.PlateSync() end
+    plated[f] = true
     l, r, t, b = l or 0, r or 0, t or 0, b or 0
     p = { parts = {} }
     local function T(layer, sub)
@@ -712,6 +717,103 @@ local PL = {
     CTA_TOP = 0.60, CTA_BOT = 0.38, CTA_TOP_H = 0.74, CTA_BOT_H = 0.48,
 }
 UI.PL = PL
+
+-- BUTTON DEPTH (2026-11-18, Zac: looks he picked are a default, not the
+-- only choice). PL above is what ships (100%). ZacUIDB.buttonDepth, 0 to
+-- 1.5 (nil = 1), moves every number between the flat plate - one shade, a
+-- faint edge, no top line, no shadow - and the shipped one, and on past it.
+-- PL is rewritten in place, so everything that reads UI.PL when it paints
+-- follows. ZacUIDB.mainButton = "plain": the button a window wants pressed
+-- is a plate like the others with the accent on its edge and label (nil:
+-- its face is the accent).
+local PL0 = {}
+for k, v in pairs(PL) do
+    if type(v) == "table" then
+        PL0[k] = {}
+        for k2, v2 in pairs(v) do PL0[k][k2] = v2 end
+    else
+        PL0[k] = v
+    end
+end
+UI.PL_SHIPPED = PL0
+local EDGE_FLAT, NAV_EDGE_FLAT = 0.13, 0.085
+function UI.ButtonDepth()
+    local v = type(ZacUIDB) == "table" and tonumber(ZacUIDB.buttonDepth) or nil
+    if not v or v ~= v then return 1 end
+    return math.max(0, math.min(1.5, v))
+end
+function UI.MainPlain()
+    return type(ZacUIDB) == "table" and ZacUIDB.mainButton == "plain"
+end
+local plK
+local function PlateSync()
+    local k = UI.ButtonDepth()
+    if plK == k then return end
+    plK = k
+    local function At(flat, shipped)
+        if k == 1 then return shipped end
+        return math.max(0, math.min(1, flat + (shipped - flat) * k))
+    end
+    -- two shades of one face: both move away from (or onto) their middle
+    local function Pair(dst, src, top, bot)
+        local T, B = src[top], src[bot]
+        if type(T) == "table" then
+            for _, ch in ipairs({ "r", "g", "b" }) do
+                local mid = (T[ch] + B[ch]) / 2
+                dst[top][ch], dst[bot][ch] = At(mid, T[ch]), At(mid, B[ch])
+            end
+        else
+            local mid = (T + B) / 2
+            dst[top], dst[bot] = At(mid, T), At(mid, B)
+        end
+    end
+    Pair(PL, PL0, "TOP", "BOT")
+    Pair(PL, PL0, "TOP_H", "BOT_H")
+    Pair(PL, PL0, "CTA_TOP", "CTA_BOT")
+    Pair(PL, PL0, "CTA_TOP_H", "CTA_BOT_H")
+    PL.EDGE = At(EDGE_FLAT, PL0.EDGE)
+    PL.SHEEN, PL.SHEEN_H, PL.DROP = At(0, PL0.SHEEN), At(0, PL0.SHEEN_H), At(0, PL0.DROP)
+    local N, N0 = PL.NAV, PL0.NAV
+    Pair(N, N0, "TOP", "BOT")
+    Pair(N, N0, "TOP_H", "BOT_H")
+    N.EDGE = At(NAV_EDGE_FLAT, N0.EDGE)
+    N.SHEEN, N.SHEEN_H, N.DROP = At(0, N0.SHEEN), At(0, N0.SHEEN_H), At(0, N0.DROP)
+end
+UI.PlateSync = PlateSync
+-- Every plate repaints from its frame's own painter.
+function UI.RepaintPlates()
+    PlateSync()
+    for f in pairs(plated) do
+        local paint = f._zPaint
+        if type(paint) == "function" then pcall(paint, f) end
+    end
+end
+function UI.SetButtonDepth(v)
+    if type(ZacUIDB) ~= "table" then return end
+    v = tonumber(v)
+    ZacUIDB.buttonDepth = (v and math.abs(v - 1) > 0.001) and math.max(0, math.min(1.5, v)) or nil
+    UI.RepaintPlates()
+    if ns.StyleChanged then ns.StyleChanged() end
+end
+function UI.SetMainPlain(on)
+    if type(ZacUIDB) ~= "table" then return end
+    ZacUIDB.mainButton = on and "plain" or nil
+    UI.RepaintPlates()
+    if ns.StyleChanged then ns.StyleChanged() end
+end
+
+-- THE WHEEL IN ZACUI'S WINDOWS. ZacUIDB.wheelSpeed, 0.25 to 4 (nil = 1): how
+-- far a notch goes, times what ships. ZacUIDB.wheelSmooth = false: a notch
+-- jumps instead of gliding (animations switched off does the same).
+function UI.WheelSpeed()
+    local v = type(ZacUIDB) == "table" and tonumber(ZacUIDB.wheelSpeed) or nil
+    if not v or v ~= v then return 1 end
+    return math.max(0.25, math.min(4, v))
+end
+function UI.WheelSmooth()
+    return not (type(ZacUIDB) == "table" and ZacUIDB.wheelSmooth == false)
+end
+
 local function MixC(a, b, t) return { r = Lerp(a.r, b.r, t), g = Lerp(a.g, b.g, t), b = Lerp(a.b, b.b, t), a = Lerp(a.a or 1, b.a or 1, t) } end
 UI.MixC = MixC
 
@@ -729,6 +831,7 @@ local function PaintSetButton(self)
         -- (2026-11-09) the open tab is a raised plate with the accent line
         -- along its top; a closed one lifts a little under the mouse
         local pl = UI.Plate(self, 0, 0, 5, 5)
+        PlateSync()
         local act = self._zActive and true or false
         if act then
             pl:SetShown(true)
@@ -768,7 +871,10 @@ local function PaintSetButton(self)
     if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
     Strips(self, 0, 0, 0, 0)
     local pl = UI.Plate(self, 0, 0, 0, 0)
-    if st == "close" then
+    PlateSync()
+    -- (the main button as a plain plate: the accent on its edge and label)
+    local mainPlain = st == "close" and UI.MainPlain()
+    if st == "close" and not mainPlain then
         local ft, fb = Lerp(PL.CTA_TOP, PL.CTA_TOP_H, t), Lerp(PL.CTA_BOT, PL.CTA_BOT_H, t)
         pl:Paint({ r = a.r * ft, g = a.g * ft, b = a.b * ft, a = k }, { r = a.r * fb, g = a.g * fb, b = a.b * fb, a = k },
             { r = a.r, g = a.g, b = a.b, a = Lerp(0.85, 1, t) * k }, Lerp(PL.SHEEN, PL.SHEEN_H, t) * k, PL.DROP * k)
@@ -776,7 +882,7 @@ local function PaintSetButton(self)
         return
     end
     local edge
-    if self._zActive then
+    if self._zActive or mainPlain then
         edge = { r = a.r, g = a.g, b = a.b, a = Lerp(0.85, 1, t) * k }
     else
         edge = MixC({ r = 1, g = 1, b = 1, a = PL.EDGE * k }, { r = a.r, g = a.g, b = a.b, a = PL.EDGE_H * k }, t)
@@ -785,7 +891,7 @@ local function PaintSetButton(self)
     top.a, bot.a = k, k
     pl:Paint(top, bot, edge, Lerp(PL.SHEEN, PL.SHEEN_H, t) * k, PL.DROP * k)
     if fs then
-        if self._zActive then fs:SetTextColor(a.r, a.g, a.b, k)
+        if self._zActive or mainPlain then fs:SetTextColor(a.r, a.g, a.b, k)
         else fs:SetTextColor(1, 1, 1, Lerp(0.86, 1, t) * k) end
     end
 end
@@ -2726,9 +2832,9 @@ function UI.ScrollArea(parent, opts)
         local now = GetTime and GetTime() or 0
         if now - lastWheel < 0.2 then boost = math.min(4, boost * 1.5) else boost = 1 end
         lastWheel = now
-        local v = math.max(minV, math.min(maxV, from - delta * (thin and S.WHEEL or M.WHEEL or 24) * boost))
+        local v = math.max(minV, math.min(maxV, from - delta * (thin and S.WHEEL or M.WHEEL or 24) * boost * UI.WheelSpeed()))
         local Motion = ns.Motion
-        if (Motion and Motion.Enabled and not Motion.Enabled()) or not scroll:IsVisible() then
+        if (Motion and Motion.Enabled and not Motion.Enabled()) or not UI.WheelSmooth() or not scroll:IsVisible() then
             Stop()
             bar:SetValue(v)
         else

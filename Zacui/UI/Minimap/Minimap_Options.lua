@@ -35,7 +35,58 @@ local MM = {}
 -- DEFAULTS MATCH WHAT THE ADDON ALREADY DID, without exception. Adding
 -- options to something people are already using must not change it under
 -- them: the first time this loads, every answer is "carry on".
+-- THE BACKING BEHIND THE PIECES (2026-11-18, Zac: "give the users the
+-- option to pick or do something custom"; "i personally like 2 as
+-- default"). What the zone name, clock, coordinates, friends and guild
+-- sit on is drawn by Blz_Minimap from nine values of this table
+-- (BACKING_KEYS). A preset is nothing but values for those nine: picking
+-- one writes them, changing any of them by hand is "your own", and the
+-- page names the preset the nine match (BackingNow).
+--   box      the flat box the pieces always had (nothing but the darkness)
+--   shadow   a soft dark shadow that fades to nothing
+--   outline  no backing; the text outlined
+--   glass    a see-through box with a thin light edge
+--   fade     no backing; the map's top and bottom edges darken
+-- A minimap that was already in use keeps what it had: the nine as saved
+-- are the box (or its owner's own colours). A first install starts on the
+-- soft shadow.
+local BACKING_KEYS = { "pillShape", "pillColor", "pillAlpha", "pillBorder", "pillBorderColor",
+    "pillOutline", "pillFade", "pillFadeAlpha", "pillCorners" }
+local BACKINGS = {
+    { id = "box", label = "Solid box", set = { pillAlpha = 0.82 } },
+    { id = "shadow", label = "Soft shadow",
+      set = { pillShape = "glow", pillColor = { r = 0, g = 0, b = 0, a = 1 }, pillAlpha = 0.8, pillCorners = true } },
+    { id = "outline", label = "Outline only",
+      set = { pillShape = "none", pillAlpha = 0.82, pillOutline = true, pillCorners = true } },
+    { id = "glass", label = "Glass plate",
+      set = { pillColor = { r = 0.078, g = 0.078, b = 0.078, a = 1 }, pillAlpha = 0.55, pillBorder = true,
+              pillBorderColor = { r = 1, g = 1, b = 1, a = 0.16 }, pillCorners = true } },
+    { id = "fade", label = "Edge fade",
+      set = { pillShape = "none", pillAlpha = 0.82, pillFade = true, pillCorners = true } },
+}
+local BACKING_DEFAULT = "shadow"
+local FADE_ALPHA = 0.82
+
+local function CopyValue(v)
+    if type(v) ~= "table" then return v end
+    local t = {}
+    for k, x in pairs(v) do t[k] = x end
+    return t
+end
+
+-- the nine, written as a preset has them (what it leaves out is unset)
+local function WriteBacking(d, id)
+    for _, b in ipairs(BACKINGS) do
+        if b.id == id then
+            for _, key in ipairs(BACKING_KEYS) do d[key] = CopyValue(b.set[key]) end
+            return true
+        end
+    end
+    return false
+end
+
 local function DB()
+    local fresh = ZacUIDB.minimap == nil
     ZacUIDB.minimap = ZacUIDB.minimap or {}
     local d = ZacUIDB.minimap
 
@@ -97,9 +148,57 @@ local function DB()
     if d.clockHover == nil then d.clockHover = false end
     if d.hoverEdge == nil then d.hoverEdge = true end
     if d.zoneColor ~= "pvp" and d.zoneColor ~= "accent" then d.zoneColor = "pvp" end
+    -- (a first install, or the page's Reset: the default backing)
+    if fresh then WriteBacking(d, BACKING_DEFAULT) end
 
     return d
 end
+
+-- ============================================================
+-- THE BACKING: WHICH PRESET, AND PICKING ONE
+-- ============================================================
+local function SameNumber(a, b) return math.abs((tonumber(a) or 0) - (tonumber(b) or 0)) < 0.005 end
+local function SameColour(a, b)
+    if type(a) ~= "table" or type(b) ~= "table" then return a == nil and b == nil end
+    local ar, ag, ab, aa = ns.ColorOf(a)
+    local br, bg, bb, ba = ns.ColorOf(b)
+    return SameNumber(ar, br) and SameNumber(ag, bg) and SameNumber(ab, bb) and SameNumber(aa or 1, ba or 1)
+end
+local function Shape(v) return (v == "glow" or v == "none") and v or "box" end
+
+-- do a table's nine read as this preset's? Only what the shape draws is
+-- compared: a colour means nothing without a backing, an edge only on a box.
+local function Reads(d, set)
+    local shape = Shape(d.pillShape)
+    if shape ~= Shape(set.pillShape) then return false end
+    if (d.pillOutline and true or false) ~= (set.pillOutline and true or false) then return false end
+    if (d.pillFade and true or false) ~= (set.pillFade and true or false) then return false end
+    if (d.pillCorners and true or false) ~= (set.pillCorners and true or false) then return false end
+    if d.pillFade and not SameNumber(d.pillFadeAlpha or FADE_ALPHA, set.pillFadeAlpha or FADE_ALPHA) then return false end
+    if shape == "none" then return true end
+    if not SameNumber(d.pillAlpha or 0.82, set.pillAlpha or 0.82) then return false end
+    if not SameColour(d.pillColor, set.pillColor) then return false end
+    if shape ~= "box" then return true end
+    if (d.pillBorder and true or false) ~= (set.pillBorder and true or false) then return false end
+    if d.pillBorder and not SameColour(d.pillBorderColor, set.pillBorderColor) then return false end
+    return true
+end
+
+-- the preset the saved values read as: its id and label, or "custom"
+function MM.BackingNow(d)
+    d = d or DB()
+    for _, b in ipairs(BACKINGS) do
+        if Reads(d, b.set) then return b.id, b.label end
+    end
+    return "custom", "Custom"
+end
+
+-- pick a preset: its values are written over the nine
+function MM.SetBacking(id)
+    return WriteBacking(DB(), id)
+end
+
+MM.BACKINGS, MM.BACKING_KEYS, MM.BACKING_DEFAULT, MM.FADE_ALPHA = BACKINGS, BACKING_KEYS, BACKING_DEFAULT, FADE_ALPHA
 
 local function On(key)
     local v = DB()[key]

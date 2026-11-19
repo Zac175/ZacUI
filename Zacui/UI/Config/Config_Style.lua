@@ -519,25 +519,140 @@ local function StylePage(L)
         L:EndCard()
     end
 
-    -- the surface finish (Core_Finish): how much of the soft depth ZacUI's
-    -- windows wear (the grain is off since 2026-11-16). Live, no reload; 100% saves as
-    -- nothing. Only where the finish loaded (a client restarted since the
-    -- update that brought it).
+    -- THE FINISH, THE BUTTONS AND THE WHEEL (Core_Finish, UIF_Controls).
+    -- (2026-11-18, Zac: a look he picked is the default, not the only one.)
+    -- Every look that was mocked is a preset here and every part of it a
+    -- setting of its own; nothing saved is what ships. Live, no reload.
+    -- Only where the finish loaded (a client restarted since the update
+    -- that brought it).
     if ns.Finish then
-        L:Card("Surface finish")
-        local function Shown()
-            return math.floor(ns.Finish.Strength() * 100 + 0.5)
+        local Fin = ns.Finish
+        local function Rebuild() if ns.RefreshConfig then ns.RefreshConfig() end end
+        local function Pct(v) return v .. "%" end
+        local function Pick(label, width, items, get, set)
+            local function TextOf(v)
+                for _, it in ipairs(items) do if it.value == v then return it.text end end
+                return items[1] and items[1].text or tostring(v)
+            end
+            local f = UI.Field(L.current, label, function(h)
+                return UI.Dropdown(h, { width = width,
+                    items = function() return items end,
+                    selectedValue = get,
+                    selected = function() return TextOf(get()) end,
+                    onSelect = set })
+            end, { width = width })
+            L:Add(f, 6)
+            return f
         end
-        local fs = UI.Slider(L.current, { width = 220, min = 0, max = 100, step = 5, value = math.min(100, Shown()), label = "Surface finish",
-            format = function(v) return v .. "%" end,
+        local function Tick(label, on, set, desc)
+            local cb = UI.Checkbox(L.current, label, on and true or false, set)
+            L:Row(cb, 17)
+            if desc then L:Desc(desc) end
+            return cb
+        end
+
+        L:Card("Window finish")
+        local presetDD
+        local function PresetText()
+            local id, label = Fin.PresetNow()
+            return id == "custom" and "Custom (your own settings)" or label
+        end
+        -- (after one of the settings below changed: the windows, and the preset's name)
+        local function Changed(outlines)
+            Fin.Changed(outlines)
+            if presetDD then presetDD:SetText(PresetText()) end
+        end
+        local presets = {}
+        for _, p in ipairs(Fin.PRESETS) do presets[#presets + 1] = { text = p.label, value = p.id } end
+        L:Row(UI.Font(L.current, F.LABEL, { text = "How ZacUI's windows are drawn" }), 16)
+        presetDD = UI.Dropdown(L.current, {
+            width = 260,
+            items = function() return presets end,
+            selectedValue = function() return (Fin.PresetNow()) end,
+            selected = PresetText,
+            onSelect = function(v)
+                Fin.SetPreset(v)
+                Rebuild()
+            end,
+        })
+        L:Row(presetDD, M.DROPDOWN_H + 6)
+        L:Desc("Soft depth is how it ships. Pick another, or change anything below to make your own. "
+            .. "Readycheck's windows follow this.")
+        Pick("Surfaces", 260, {
+            { text = "Shaded, with raised title bars", value = "depth" },
+            { text = "Flat, with darker bars and cards", value = "bands" },
+            { text = "Flat, bars a step lighter", value = "plain" },
+        }, Fin.Kind, function(v)
+            ZacUIDB.finishKind = (v ~= "depth") and v or nil
+            Changed()
+        end)
+        local fs = UI.Slider(L.current, { width = 220, min = 0, max = 100, step = 5,
+            value = math.min(100, math.floor(Fin.Strength() * 100 + 0.5)), label = "Depth", format = Pct,
             onChange = function(v)
                 ZacUIDB.finish = (v ~= 100) and (v / 100) or nil
-                ns.Finish.Refresh()
+                Changed()
             end })
         L:Row(fs, 40)
-        L:Desc("ZacUI's windows have a little shading, lit edges and raised title bars instead of one flat "
-            .. "colour. 100% is how it ships; 0% turns it off and brings the flat windows back. "
-            .. "Readycheck's windows follow this.")
+        L:Desc("How strongly the shading, lit edges and bars are drawn. 0% is one flat colour, as before 3.0.13.")
+        Tick("Accent line under title bars", Fin.Rule(), function(v)
+            ZacUIDB.finishRule = v and true or nil
+            Changed()
+        end)
+        Tick("Soft grey outlines", Fin.SoftEdge(), function(v)
+            ZacUIDB.finishEdge = v and "soft" or nil
+            Changed(true)
+        end, "Outlines are soft grey in place of black. A border colour picked on the Colours page still wins.")
+        local ts = UI.Slider(L.current, { width = 220, min = 0, max = 200, step = 10,
+            value = math.floor(Fin.Grain() * 100 + 0.5), label = "Texture", format = Pct,
+            onChange = function(v)
+                local had = Fin.Grain() > 0
+                ZacUIDB.finishGrain = (v > 0) and (v / 100) or nil
+                Changed()
+                -- (the texture menu comes and goes with it)
+                if had ~= (v > 0) then Rebuild() end
+            end })
+        L:Row(ts, 40)
+        L:Desc("A faint texture on window and card grounds. 0% is none, as it ships.")
+        if Fin.Grain() > 0 then
+            local texes = {}
+            for _, t in ipairs(Fin.TEXTURES) do texes[#texes + 1] = { text = t.label, value = t.id } end
+            Pick("Which texture", 220, texes, Fin.Texture, function(v)
+                ZacUIDB.finishTex = (v ~= "brushed") and v or nil
+                Changed()
+            end)
+        end
+        L:EndCard()
+
+        L:Card("Buttons")
+        local bs = UI.Slider(L.current, { width = 220, min = 0, max = 150, step = 5,
+            value = math.floor(UI.ButtonDepth() * 100 + 0.5), label = "Button depth", format = Pct,
+            onChange = function(v) UI.SetButtonDepth(v / 100) end })
+        L:Row(bs, 40)
+        L:Desc("How far buttons and the sidebar's rows stand out: their shading, edge, top line and shadow. "
+            .. "100% is how it ships; 0% is a flat button.")
+        Pick("A window's main button", 260, {
+            { text = "Its face is the accent colour", value = "accent" },
+            { text = "Like the other buttons, accent edge", value = "plain" },
+        }, function() return UI.MainPlain() and "plain" or "accent" end, function(v)
+            UI.SetMainPlain(v == "plain")
+        end)
+        L:Desc("The button a window wants pressed: a popup's Accept, the window's Close. "
+            .. "A delete button is the same in red.")
+        L:EndCard()
+
+        L:Card("Scrolling")
+        local ws = UI.Slider(L.current, { width = 220, min = 50, max = 300, step = 10,
+            value = math.floor(UI.WheelSpeed() * 100 + 0.5), label = "Wheel speed", format = Pct,
+            onChange = function(v)
+                ZacUIDB.wheelSpeed = (v ~= 100) and (v / 100) or nil
+                if ns.StyleChanged then ns.StyleChanged() end
+            end })
+        L:Row(ws, 40)
+        L:Desc("How far one notch of the mouse wheel scrolls ZacUI's windows.")
+        Tick("Smooth scrolling", UI.WheelSmooth(), function(v)
+            if v then ZacUIDB.wheelSmooth = nil else ZacUIDB.wheelSmooth = false end
+            if ns.StyleChanged then ns.StyleChanged() end
+        end, "Off, a notch jumps straight to its place.")
         L:EndCard()
     end
 end

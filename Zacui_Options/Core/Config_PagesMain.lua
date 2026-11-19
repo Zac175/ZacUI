@@ -1562,7 +1562,9 @@ end)
 -- The tray itself is UI/Tray (ZacUIDB.tray); its colours and the way it
 -- opens are drawn by Blz_Minimap (ns.MinimapLook.Tray). The preview is a
 -- bar and a tray of fake minimap buttons, the buttons dressed by the
--- tray's own StyleButton.
+-- tray's own StyleButton; docked to the minimap (ZacUIDB.tray.dock) it is
+-- a plate the size of the map with the strip and its tick on that edge,
+-- placed by the tray's own DockCells / DockPoint.
 local TRAY_FAKE = {
     "Interface\\Icons\\INV_Misc_Map_01", "Interface\\Icons\\INV_Misc_Bag_08",
     "Interface\\Icons\\Spell_Nature_Lightning", "Interface\\Icons\\INV_Misc_Note_01",
@@ -1571,7 +1573,13 @@ local TRAY_FAKE = {
 }
 local TRAY_PAD, TRAY_GAP, TRAY_NATIVE = 6, 4, 31    -- the tray's own grid
 
-local function TrayDB() ZacUIDB.tray = ZacUIDB.tray or {} return ZacUIDB.tray end
+-- (the tray's own table, through its own defaults: a tray nobody has used
+-- yet starts docked to the map's side, and that is decided there)
+local function TrayDB()
+    if ns.Tray and ns.Tray.DB then return ns.Tray.DB() end
+    ZacUIDB.tray = ZacUIDB.tray or {}
+    return ZacUIDB.tray
+end
 
 -- A minimap button the way LibDBIcon draws one: backing, icon, ring.
 local function FakeMinimapButton(parent, icon)
@@ -1600,15 +1608,28 @@ local function BuildTrayPreview(canvas, P)
     fill:SetAllPoints()
     fill:SetTexture(ns.FLAT)
     bar._zFill = fill
-    bar:SetPoint("TOP", canvas, "TOP", 0, -10)
     local tray = CreateFrame("Frame", nil, canvas)
     local bg = tray:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetTexture(ns.FLAT)
     tray._zFill = bg
     if ns.AddPixelBorder then ns.AddPixelBorder(tray) end
-    tray:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 0, -4)
-    st.bar, st.tray = bar, tray
+    -- docked: the minimap the strip hangs on, as a plain plate
+    local map = CreateFrame("Frame", nil, canvas)
+    local mfill = map:CreateTexture(nil, "BACKGROUND")
+    mfill:SetAllPoints()
+    mfill:SetTexture(ns.FLAT)
+    map._zFill = mfill
+    if ns.AddPixelBorder then ns.AddPixelBorder(map) end
+    local mlabel = UI.Font(map, F.SMALL, { text = "Minimap", cat = "text", key = "gray" })
+    mlabel:SetPoint("CENTER")
+    map:Hide()
+    -- "tab": the bar as the small tab with the number of buttons on it
+    local tabText = UI.Font(bar, F.SMALL, { text = "", cat = "ui", key = "accent" })
+    tabText:SetPoint("CENTER", bar, "CENTER", 3, 0)
+    tabText:Hide()
+    st.tabText = tabText
+    st.bar, st.tray, st.map = bar, tray, map
     st.cells, st.plain, st.uniform = {}, {}, {}
     for i, icon in ipairs(TRAY_FAKE) do
         local cell = CreateFrame("Frame", nil, tray)
@@ -1624,21 +1645,21 @@ local function UpdateTrayPreview(canvas, P)
     local st, db = P.store, TrayDB()
     local TL = ns.MinimapLook and ns.MinimapLook.Tray
     local T = ns.Tray
-    local size = db.size or 28
+    -- docked to the minimap: the strip's own size and spaces, along the map's edge
+    local side = T and T.DockSide and T.DockSide(db)
+    local size, gap, pad = db.size or 28, tonumber(db.gap) or TRAY_GAP, tonumber(db.pad) or TRAY_PAD
+    if side then size, gap, pad = T.Metrics(db) end
     local cols = math.max(1, db.columns or 6)
     if ns.Motion then ns.Motion.Stop(st.tray) end
-    st.bar:SetSize(db.barWidth or 90, db.barHeight or 6)
     local uniform = db.uniform ~= false
     -- every sample button, in the tray's real rows and columns
     local n = #TRAY_FAKE
-    for i = n + 1, #TRAY_FAKE do st.cells[i]:Hide() end
     for i = 1, n do
         st.cells[i]:Show()
         local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
         local cell = st.cells[i]
         cell:SetSize(size, size)
         cell:ClearAllPoints()
-        local pad, gap = tonumber(db.pad) or TRAY_PAD, tonumber(db.gap) or TRAY_GAP
         cell:SetPoint("TOPLEFT", st.tray, "TOPLEFT", pad + col * (size + gap),
             -(pad + row * (size + gap)))
         local u, pl = st.uniform[i], st.plain[i]
@@ -1649,11 +1670,29 @@ local function UpdateTrayPreview(canvas, P)
         pl:SetScale(size / TRAY_NATIVE)
     end
     local rows = math.max(1, math.ceil(n / cols))
-    local tpad, tgap = tonumber(db.pad) or TRAY_PAD, tonumber(db.gap) or TRAY_GAP
-    local w = tpad * 2 + math.min(n, cols) * size + (math.min(n, cols) - 1) * tgap
-    local h = tpad * 2 + rows * size + (rows - 1) * tgap
-    -- the saved layout (grow / wrap / per line / gaps), by the tray's own code
-    if T and T.LayoutCells then
+    local w = pad * 2 + math.min(n, cols) * size + (math.min(n, cols) - 1) * gap
+    local h = pad * 2 + rows * size + (rows - 1) * gap
+    local hostW, hostH
+    st.tabText:Hide()
+    if side == "tab" then
+        -- (the grid: Columns wide, placed above with the tray's own numbers)
+        local host = T.DockHost()
+        hostW, hostH = host:GetWidth() or 0, host:GetHeight() or 0
+        cols = math.max(1, tonumber(db.dockColumns) or 3)
+        for i = 1, n do
+            local col, row = (i - 1) % cols, math.floor((i - 1) / cols)
+            st.cells[i]:ClearAllPoints()
+            st.cells[i]:SetPoint("TOPLEFT", st.tray, "TOPLEFT", pad + col * (size + gap), -(pad + row * (size + gap)))
+        end
+        rows = math.max(1, math.ceil(n / cols))
+        w = pad * 2 + math.min(n, cols) * size + (math.min(n, cols) - 1) * gap
+        h = pad * 2 + rows * size + (rows - 1) * gap
+    elseif side then
+        local host = T.DockHost()
+        hostW, hostH = host:GetWidth() or 0, host:GetHeight() or 0
+        w, h = T.DockCells(st.cells, n, st.tray, side, hostW, hostH, size, gap, pad)
+    elseif T and T.LayoutCells then
+        -- the saved layout (grow / wrap / per line / gaps), by the tray's own code
         local lw, lh = T.LayoutCells(st.cells, n, st.tray, db)
         if lw then w, h = lw, lh end
     end
@@ -1663,6 +1702,74 @@ local function UpdateTrayPreview(canvas, P)
         TL.PaintBar(st.bar)
     end
     local open = (P.mode or "open") == "open"
+    if side == "tab" or side == "inside" then
+        -- the map; under its corner the tab or the grid it opens ("tab"),
+        -- or on it the band along its bottom edge ("inside")
+        local out = open or (side == "inside" and db.dockAlways == true)
+        local e = ns.GetColor("ui", "elementBg")
+        st.map._zFill:SetVertexColor(e.r, e.g, e.b, 1)
+        st.map:SetSize(hostW, hostH)
+        st.map:ClearAllPoints()
+        st.map:SetPoint("TOPLEFT", canvas, "TOPLEFT", 6, -6)
+        st.map:Show()
+        st.tray:SetFrameLevel((st.map:GetFrameLevel() or 1) + 2)
+        T.DockPoint(st.tray, st.map, side, false)
+        st.tray:SetShown(out)
+        local below = 0
+        if side == "tab" then
+            st.bar:SetSize(T.TAB_W, T.TAB_H)
+            T.DockPoint(st.bar, st.map, side, true)
+            st.bar:SetAlpha(1)
+            st.bar:SetShown(not out)
+            -- (the sample tab: the window colour, the count in the accent)
+            local wc = ns.GetColor("ui", "windowBg")
+            st.bar._zFill:SetVertexColor(wc.r, wc.g, wc.b, 0.95)
+            st.tabText:SetText(tostring(n))
+            st.tabText:Show()
+            below = (out and h or T.TAB_H) + 3
+        else
+            st.bar:Hide()
+        end
+        if P.Resize then P.Resize(hostW + 12, hostH + below + 12) end
+        return
+    end
+    if side then
+        -- the map, the strip on its edge (always out, when that is ticked)
+        -- and, with the strip away, the tick
+        local upright = side == "left" or side == "right"
+        local out = open or db.dockAlways == true
+        local e = ns.GetColor("ui", "elementBg")
+        st.map._zFill:SetVertexColor(e.r, e.g, e.b, 1)
+        st.map:SetSize(hostW, hostH)
+        st.map:ClearAllPoints()
+        if side == "left" then
+            st.map:SetPoint("TOPRIGHT", canvas, "TOPRIGHT", -6, -6)
+        elseif side == "top" then
+            st.map:SetPoint("BOTTOMLEFT", canvas, "BOTTOMLEFT", 6, 6)
+        else
+            st.map:SetPoint("TOPLEFT", canvas, "TOPLEFT", 6, -6)
+        end
+        st.map:Show()
+        T.DockPoint(st.tray, st.map, side, false)
+        st.tray:SetShown(out)
+        st.bar:SetSize(upright and T.TICK_THICK or T.TICK_LONG, upright and T.TICK_LONG or T.TICK_THICK)
+        T.DockPoint(st.bar, st.map, side, true)
+        st.bar:SetAlpha(db.barAlpha or 0.5)
+        st.bar:SetShown(not out and db.dockTick ~= false)
+        -- the canvas is the map and the room its strip takes; the strip scales it
+        if P.Resize then
+            local room = (upright and w or h) + 3
+            P.Resize(hostW + (upright and room or 0) + 12, hostH + (upright and 0 or room) + 12)
+        end
+        return
+    end
+    st.map:Hide()
+    st.bar:SetSize(db.barWidth or 90, db.barHeight or 6)
+    st.bar:ClearAllPoints()
+    st.bar:SetPoint("TOP", canvas, "TOP", 0, -10)
+    st.bar:Show()
+    st.tray:ClearAllPoints()
+    st.tray:SetPoint("TOPLEFT", st.bar, "BOTTOMLEFT", 0, -4)
     st.tray:SetShown(open)
     st.bar:SetAlpha(open and 1 or (db.barAlpha or 0.5))
     -- the canvas is the bar and the open tray; the strip scales it
@@ -1697,6 +1804,12 @@ RegisterPage("Tray", function(L)
 
     local db = TrayDB()
     local Tray = ns.Tray
+    -- on an edge of the minimap (ZacUIDB.tray.dock) rather than its own bar:
+    -- the rows below are the strip's, and the bar's own are left out
+    local side = Tray ~= nil and Tray.DockSide ~= nil and Tray.DockSide(db) or nil
+    local docked = side ~= nil
+    -- a strip on one of the map's four edges; the band on the map; the tab
+    local strip = docked and side ~= "inside" and side ~= "tab"
     L:Preview({
         key = "screen.tray", title = "Button tray",
         width = 230, height = 60,
@@ -1732,18 +1845,76 @@ RegisterPage("Tray", function(L)
     stat:SetPoint("TOPLEFT", L.current, "TOPLEFT", M.DESC_X, L.current._y)
     L.current._y = L.current._y - math.max(16, math.ceil(stat:GetStringHeight() or 12) + 4)
     Kit.Check(L, "Open on hover", TrayDB, "openOnHover",
-        "Off means the tray only opens when you click the bar.", { defaultOn = true })
+        (side == "tab" and "Off means the grid only opens when you click the tab.")
+        or (side == "inside" and "On, the buttons come out while the mouse is on the minimap.")
+        or (docked and "On, the buttons come out while the mouse is on the minimap. Off, they only come out "
+            .. "when you click the tick on the minimap's edge.")
+        or "Off means the tray only opens when you click the bar.", { defaultOn = true })
     L:EndCard()
 
-    -- Look
+    -- Where the buttons go: the bar with its flyout, or a strip on one edge
+    -- of the minimap
+    local function Redock()
+        if Tray and Tray.ApplyDock then Tray.ApplyDock() end
+    end
+    L:Card("Where it sits")
+    Kit.Choice(L, "Where", TrayDB, "dock", {
+        { text = "Its own bar", value = "bar" },
+        { text = "Left of the minimap", value = "left" },
+        { text = "Right of the minimap", value = "right" },
+        { text = "Above the minimap", value = "top" },
+        { text = "Under the minimap", value = "bottom" },
+        { text = "On the minimap, along its bottom edge", value = "inside" },
+        { text = "A tab under the minimap's corner", value = "tab" },
+    }, "Its own bar is a thin bar anywhere on the screen that opens a tray. Left, right, above or under: "
+        .. "a strip along that edge of the map. On the minimap: smaller buttons in a band on the map itself. "
+        .. "A tab: a small tab with the number of buttons that opens a grid. All of them move and scale with the map.",
+        { after = function()
+            Redock()
+            RefreshConfig()     -- (the rows below are the bar's or the strip's)
+        end })
+    if strip or side == "inside" then
+        Kit.Check(L, "Always shown", TrayDB, "dockAlways",
+            "Off, the strip comes out while the mouse is on the minimap and goes back after it leaves.",
+            { after = Redock })
+        if strip then
+            Kit.Check(L, "A tick on the minimap's edge while the strip is away", TrayDB, "dockTick",
+                "A short line where the strip comes out. Click it to bring the strip out.",
+                { defaultOn = true, after = Redock })
+        end
+    elseif side == "tab" then
+        Kit.Slider(L, "Columns in the grid", TrayDB, "dockColumns", { min = 1, max = 8, step = 1,
+            get = function(v) return v or 3 end, after = Relayout })
+    else
+        Kit.Check(L, "Lock the bar in place", TrayDB, "locked",
+            "Drag the bar with the left mouse button to move it. Right-click "
+            .. "it at any time to come back to this page.")
+        Kit.Buttons(L, { { "Reset position", 120, function()
+            db.point, db.x, db.y = nil, nil, nil
+            local b = Tray and Tray.GetBar()
+            if b then
+                b:ClearAllPoints()
+                b:SetPoint("TOP", UIParent, "TOP", 0, -2)
+            end
+            Print("tray bar reset to the top of the screen.")
+        end, "Puts the bar back at the top centre of the screen." } })
+    end
+    L:EndCard()
+
+    -- Look (docked, the strip keeps its own size and spaces)
     L:Card("Look")
-    Kit.Slider(L, "Button size", TrayDB, "size", { min = 16, max = 44, step = 1, after = Relayout,
+    Kit.Slider(L, "Button size", TrayDB, docked and "dockSize" or "size", { min = 16, max = 44, step = 1,
+        after = Relayout, get = function(v) return v or (docked and Tray.DockSizeDefault(side) or 28) end,
         format = function(v) return v .. " px" end })
-    Kit.Slider(L, "Columns", TrayDB, "columns", { min = 1, max = 12, step = 1, after = Relayout })
-    Kit.Slider(L, "Space between buttons", TrayDB, "gap", { min = 0, max = 12, step = 1, after = Relayout,
-        get = function(v) return v or 4 end, format = function(v) return v .. " px" end })
-    Kit.Slider(L, "Space around the edge", TrayDB, "pad", { min = 0, max = 16, step = 1, after = Relayout,
-        get = function(v) return v or 6 end, format = function(v) return v .. " px" end })
+    if not docked then
+        Kit.Slider(L, "Columns", TrayDB, "columns", { min = 1, max = 12, step = 1, after = Relayout })
+    end
+    Kit.Slider(L, "Space between buttons", TrayDB, docked and "dockGap" or "gap", { min = 0, max = 12, step = 1,
+        after = Relayout, get = function(v) return v or (docked and 2 or 4) end,
+        format = function(v) return v .. " px" end })
+    Kit.Slider(L, "Space around the edge", TrayDB, docked and "dockPad" or "pad", { min = 0, max = 16, step = 1,
+        after = Relayout, get = function(v) return v or (docked and 4 or 6) end,
+        format = function(v) return v .. " px" end })
     Kit.Check(L, "Uniform square icons", TrayDB, "uniform",
         "Crops each addon's icon out of its own ring and puts it on a "
         .. "ZacUI plate, so the tray reads as one row rather than a jumble. "
@@ -1762,7 +1933,7 @@ RegisterPage("Tray", function(L)
 
     -- the buttons' layout on the standard shape (ZacUIDB.tray.layout); its
     -- defaults are Columns and the two spaces on Look
-    if Tray and Tray.LayoutDefaults and UI.LayoutPicker then
+    if not docked and Tray and Tray.LayoutDefaults and UI.LayoutPicker then
         L:Card("Button layout")
         local lg, ls = ns.CustomAccess(TrayDB, "layout", nil, Relayout)
         L:Add(UI.LayoutPicker(L.current, { label = "Buttons in the tray", width = UI.CardInnerWidth(L),
@@ -1774,21 +1945,29 @@ RegisterPage("Tray", function(L)
         L:EndCard()
     end
 
-    L:Card("The bar")
-    Kit.Color(L, "Bar colour", TrayDB, "barColor", Kit.Palette("ui", "accent"), { after = RepaintTray })
-    Kit.Slider(L, "Bar width", TrayDB, "barWidth", { min = 30, max = 300, step = 5,
-        format = function(v) return v .. " px" end,
-        after = function(v)
-            local b = Tray and Tray.GetBar()
-            if b then b:SetWidth(v) end
-        end })
-    Kit.Slider(L, "Bar height", TrayDB, "barHeight", { min = 2, max = 24, step = 1,
-        format = function(v) return v .. " px" end,
-        after = function(v)
-            local b = Tray and Tray.GetBar()
-            if b then b:SetHeight(v) end
-        end })
-    Kit.Slider(L, "Bar opacity at rest", TrayDB, "barAlpha", { min = 0, max = 100, step = 5,
+    -- (the band on the map has no tick and the tab is not the accent sliver:
+    -- the card is the bar's or a strip's tick's)
+    if side ~= "inside" then
+    L:Card((side == "tab" and "The tab") or (docked and "The tick") or "The bar")
+    if side ~= "tab" then
+        Kit.Color(L, docked and "Tick colour" or "Bar colour", TrayDB, "barColor", Kit.Palette("ui", "accent"),
+            { after = RepaintTray })
+    end
+    if not docked then
+        Kit.Slider(L, "Bar width", TrayDB, "barWidth", { min = 30, max = 300, step = 5,
+            format = function(v) return v .. " px" end,
+            after = function(v)
+                local b = Tray and Tray.GetBar()
+                if b then b:SetWidth(v) end
+            end })
+        Kit.Slider(L, "Bar height", TrayDB, "barHeight", { min = 2, max = 24, step = 1,
+            format = function(v) return v .. " px" end,
+            after = function(v)
+                local b = Tray and Tray.GetBar()
+                if b then b:SetHeight(v) end
+            end })
+    end
+    Kit.Slider(L, (side == "tab" and "Tab opacity at rest") or (docked and "Tick opacity") or "Bar opacity at rest", TrayDB, "barAlpha", { min = 0, max = 100, step = 5,
         get = function(v) return math.floor((v or 0.5) * 100 + 0.5) end,
         set = function(v) return v / 100 end,
         format = function(v) return v .. "%" end,
@@ -1796,38 +1975,29 @@ RegisterPage("Tray", function(L)
             local b = Tray and Tray.GetBar()
             if b and not (Tray.GetTray() and Tray.GetTray():IsShown()) then b:SetAlpha(TrayDB().barAlpha) end
         end },
-        "The bar goes fully opaque on hover regardless, so it can sit "
+        (side == "tab" and "The tab goes fully opaque under the mouse regardless.")
+        or (docked and "The tick goes fully opaque under the mouse regardless.")
+        or "The bar goes fully opaque on hover regardless, so it can sit "
         .. "almost invisible until you reach for it.")
     L:EndCard()
+    end
 
     -- Animation
     L:Card("Opening and closing")
+    -- (docked with nothing picked, the strip slides out of the map's edge
+    -- and back: the pickers show what the tray plays)
     Kit.Anim(L, "When the tray opens", TrayDB, "openAnim", { "none", "fade", "slide", "pop" },
-        "None opens it at once, as it always has.",
-        { default = { style = "none", duration = 0.15, dir = "down", distance = 8 },
+        docked and "None brings it out at once." or "None opens it at once, as it always has.",
+        { default = docked and Tray.AnimDefault("openAnim", db)
+              or { style = "none", duration = 0.15, dir = "down", distance = 8 },
           after = RepaintTray })
     Kit.Anim(L, "When the tray closes", TrayDB, "closeAnim", { "none", "fade", "slide", "pop" },
-        "None puts it away at once, as it always has.",
-        { default = { style = "none", duration = 0.12, dir = "up", distance = 8 } })
+        docked and "None puts it away at once." or "None puts it away at once, as it always has.",
+        { default = docked and Tray.AnimDefault("closeAnim", db)
+              or { style = "none", duration = 0.12, dir = "up", distance = 8 } })
     Kit.Slider(L, "Close after", TrayDB, "autoClose", { min = 0, max = 5, step = 0.5,
         format = function(v) return string.format("%.1fs", v) end },
         "How long the tray waits once the mouse leaves it.")
-    L:EndCard()
-
-    -- Position
-    L:Card("Where it sits")
-    Kit.Check(L, "Lock the bar in place", TrayDB, "locked",
-        "Drag the bar with the left mouse button to move it. Right-click "
-        .. "it at any time to come back to this page.")
-    Kit.Buttons(L, { { "Reset position", 120, function()
-        db.point, db.x, db.y = nil, nil, nil
-        local b = Tray and Tray.GetBar()
-        if b then
-            b:ClearAllPoints()
-            b:SetPoint("TOP", UIParent, "TOP", 0, -2)
-        end
-        Print("tray bar reset to the top of the screen.")
-    end, "Puts the bar back at the top centre of the screen." } })
     L:EndCard()
 
     -- Advanced
@@ -2582,6 +2752,27 @@ RegisterPage("Chat", function(L)
         L:Desc("While the raid frames hold the chat box: a clock from the first pull, and each boss kill "
             .. "against the same kill on your best full clear with the same Readycheck raid config. "
             .. "Hover it for every split.")
+        -- when a run starts (chat.raidTimerStart; nothing saved = the first
+        -- fight with a kill, or a boss pull). Only where the game lets an
+        -- addon see a kill: elsewhere the clock starts at the first combat.
+        local RT = C.RaidMode and C.RaidMode.Timer
+        if RT and RT.SeesKills and RT.SeesKills() then
+            local items = {
+                { text = "The first fight with a kill, or a boss pull", value = "kill" },
+                { text = "The first time I enter combat in the raid", value = "combat" },
+            }
+            local function Now() return d.raidTimerStart == "combat" and "combat" or "kill" end
+            local f = UI.Field(L.current, "The clock starts at", function(h)
+                return UI.Dropdown(h, { width = 300,
+                    items = function() return items end,
+                    selectedValue = Now,
+                    selected = function() return Now() == "combat" and items[2].text or items[1].text end,
+                    onSelect = function(v) d.raidTimerStart = (v == "combat") and "combat" or nil end })
+            end, { width = 300 })
+            L:Add(f, 6)
+            L:Desc("A fight that ends with nothing killed - running past trash to get into position - does not "
+                .. "start the clock. The other choice starts it the moment you are first in combat.")
+        end
         -- how its clock reads (chat.formats.raidClock; nothing saved = 23:45)
         local T = C.RaidMode and C.RaidMode.Timer
         if T and T.CLOCK_DEFAULTS then

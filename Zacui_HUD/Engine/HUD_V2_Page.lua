@@ -53,6 +53,7 @@ local function RowPick(L, eng, memKey, items)
     end)
     return cur
 end
+V2.RowPick = RowPick
 
 -- after a v2 setting changed: the save tidied, the HUD redrawn
 local function After(eng, cfg)

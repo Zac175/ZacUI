@@ -28,6 +28,43 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.15",
+        date = "2026-11-19",
+        title = "Looks you can pick: window finish, buttons, the minimap's pieces and the button tray",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "Style page: the window finish is a choice. Pick a preset (soft depth, flat, dark bands, an accent line under title bars, textured) or set the depth, outlines and one of nine textures yourself.",
+                    "Style page: button depth from flat to deeper, and a plain look for a window's main button.",
+                    "Style page: mouse wheel speed, and smooth scrolling on or off.",
+                    { "Minimap: the backing behind the clock, zone name and the other pieces is a choice: solid box, soft shadow, outline only, glass plate, edge fade, or your own.", feature = "minimap" },
+                    { "Button tray: it can sit on any edge of the minimap, as a band on the map, or as a tab that opens a grid. It can come out while the mouse is on the map or stay out.", feature = "minimap" },
+                    { "Class HUDs: totem timers for Shamans, your own spell, item, buff and debuff icons, marks and the cast's cost on the power bar, a cast bar, and icons that show only with a talent or in a stance or form. All off until you switch them on.", feature = "hud_classes" },
+                    { "Class HUDs: the game's rotation helper can light the next spell.", only = { "forever", "retail" } },
+                    { "A class resource bar: Holy Power, combo points, Chi, Soul Shards, Essence, Arcane Charges, runes, Stagger and soul fragments. Ironfur and Ignore Pain can show as a time-left bar. Spells with charges show their count.", only = "retail" },
+                    { "Raid timer: \"The clock starts at\" picks between the first fight with a kill and the first time you enter combat.", only = { "era", "tbc" } },
+                    { "Readycheck raid configs can hide the damage meter's windows while you are in that raid. The meter keeps counting.", feature = "meter_parser" },
+                    { "Warrior HUD: a cooldown linked to a Readycheck boss reminder reads WAIT until that reminder goes off.", feature = "hud_warrior" },
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    { "Consumables bar: the Horde mode option is gone. One \"Weapon stones\" switch turns the bar's weapon buttons on or off, and \"Weapons shown\" picks which ones. The main hand button starts hidden only for Horde on Classic Era.", feature = "consbars" },
+                    { "New installs start with a soft shadow behind the minimap's pieces and the button tray on the minimap's left edge. A setup already in use is unchanged.", feature = "minimap" },
+                    { "Raid timer: a boss pull starts the clock even when you are not in combat yet, and it starts when you arrive in the middle of a fight.", feature = "raid_clear_timer" },
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    { "Raid timer: a trash skip before the first pull started the clock. A fight with no kill no longer counts as the start.", only = { "era", "tbc" } },
+                },
+            },
+        },
+    },
+    {
         version = "3.0.14",
         date = "2026-11-16",
         title = "WoW Forever: game styles that fit, and the game's own micro menu and bags",

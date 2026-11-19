@@ -542,6 +542,57 @@ local function EnsureBuffAnchor(V)
     return V.Buffs
 end
 
+-- The cast bar (HUD.CastBar, Shared\HUD_CastBar.lua; 2026-11-18): off
+-- until turned on. Its anchor exists only once it is on - the live one a
+-- named holder with its own mover, a sample's a plain frame on the canvas.
+-- Settings: cfg.castbar (the bar's own table, nil while nothing is set).
+local CAST_POS = { x = 0, y = -370 }       -- where its mover starts (never written)
+local function CastCfg(cfg, create)
+    local c = cfg and cfg.castbar
+    if type(c) ~= "table" then
+        if not (create and cfg) then return nil end
+        c = {}
+        cfg.castbar = c
+    end
+    return c
+end
+local function CastBarOn(cfg)
+    local c = CastCfg(cfg)
+    return (c and c.enabled) and true or false
+end
+local function RegisterCastMover()
+    if not holders.CastBar or holders.CastBar._prMover then return end
+    holders.CastBar._prMover = true
+    HUD.RegisterMover("prCastBar", "Priest HUD Cast Bar", holders.CastBar, CAST_POS)
+    groupMembers[#groupMembers + 1] = { key = "prCastBar", holder = holders.CastBar }
+end
+local function EnsureCastBar(V)
+    if V.castBar then return V.castBar end
+    local CB = HUD.CastBar
+    if not CB then return nil end
+    local w, h = CB.Size(CastCfg(PR.Store()))
+    if V.sample then
+        V.CastBar = HUD.SampleAnchor(V.canvas, w, h)
+    elseif V == LIVE and LIVE.Main then
+        V.CastBar = MakeAnchor("CastBar", w, h)
+        HUD.PlaceAnchor("prCastBar", holders.CastBar, CAST_POS)
+        if moversDone then RegisterCastMover() end
+    else
+        return nil
+    end
+    V.castBar = CB.New({
+        anchor = V.CastBar,
+        settings = function() return CastCfg(PR.Store()) end,
+        sample = V.sample,
+        -- the preview's made-up cast: Mind Blast
+        sampleSpell = function()
+            local sp = V.S.spells.mindBlast
+            if sp then return sp.name, sp.icon end
+        end,
+    })
+    return V.castBar
+end
+
 local function RegisterMovers()
     -- No priest mover entries cluttering move mode on other classes.
     local _, playerClass = UnitClass("player")
@@ -572,6 +623,7 @@ local function RegisterMovers()
     HUD.RegisterGroup("prGroup", "Priest HUD: move all", holders.GroupHandle, cfg.group, groupMembers)
     moversDone = true
     RegisterBuffMover(cfg)
+    RegisterCastMover()
     HUD.Debug("PriestHUD anchors registered with the mover registry")
 end
 C_Timer.After(2, function()
@@ -1441,6 +1493,24 @@ local function RefreshResources(V, cfg)
     V.wandBar:SetShown(wandShow or false)
 end
 
+-- the cast bar: made when first on, then told "the HUD is up" each pass
+-- (its anchor follows the size on the page)
+local function RefreshCastBar(V, cfg)
+    local on = CastBarOn(cfg)
+    if not (on or V.castBar) then return end
+    local bar = EnsureCastBar(V)
+    if not bar then return end
+    if on then
+        local w, h = HUD.CastBar.Size(CastCfg(cfg))
+        if bar._w ~= w or bar._h ~= h then
+            bar._w, bar._h = w, h
+            V.CastBar:SetSize(w, h)
+            if V == LIVE then holders.CastBar:SetSize(w, h) end
+        end
+    end
+    bar:Update(On(V, cfg) and on, V.preview)
+end
+
 -- Builds a view the first time, then redraws it from its state.
 local function RefreshView(V)
     if not V.Main then return end         -- non-priest: no anchors exist
@@ -1466,6 +1536,7 @@ local function RefreshView(V)
     RefreshBuffRow(V, cfg)
     RefreshReminders(V, cfg)
     RefreshResources(V, cfg)
+    RefreshCastBar(V, cfg)
 end
 
 local function ApplyViewSizes(V, cfg)
@@ -1502,6 +1573,7 @@ function PR.Display:HideAll()
     if V.manaBar then V.manaBar:Hide() end
     if V.fsrBar then V.fsrBar:Hide() end
     if V.wandBar then V.wandBar:Hide() end
+    if V.castBar then V.castBar:Update(false) end
 end
 
 function PR.Display:ApplySizes()
@@ -1683,6 +1755,10 @@ local function LayoutSample(V, cfg)
     if V.Buffs then
         pieces[#pieces + 1] = { a = V.Buffs, mover = "prAuraRow", store = cfg.auraRow,
             on = cfg.auraRow.enabled ~= false and #V.buffActive > 0 }
+    end
+    -- (the cast bar, once this sample has one)
+    if V.CastBar then
+        pieces[#pieces + 1] = { a = V.CastBar, mover = "prCastBar", store = CAST_POS, on = CastBarOn(cfg) }
     end
     HUD.RealSample(V.canvas, pieces)
 end
@@ -2043,6 +2119,25 @@ local function Tab_General(L, cfg)
     Check(L, "Five-second rule / tick bar", r.fsrBar, function(v) r.fsrBar = v Refresh() end)
     Check(L, "Wand swing bar (while wanding)", r.wandBar, function(v) r.wandBar = v Refresh() end)
     L:EndCard()
+
+    if HUD.CastBar then
+        -- (an emptied table goes, so a bar switched off again leaves the save as it was)
+        local function Tidy()
+            if type(cfg.castbar) == "table" and next(cfg.castbar) == nil then cfg.castbar = nil end
+        end
+        HUD.CastBar.Card(L, {
+            get = function(create) return CastCfg(cfg, create) end,
+            changed = function(structure)
+                Tidy()
+                Refresh()
+                if structure then HUD.RefreshPage() end
+            end,
+            sizes = function()
+                Tidy()
+                Refresh()
+            end,
+        })
+    end
 end
 
 local COLOR_LABELS = {

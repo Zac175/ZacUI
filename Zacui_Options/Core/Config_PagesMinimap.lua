@@ -327,6 +327,11 @@ local function UpdateMapPreview(canvas, P)
     st.icons.battlefield:SetShown(pickedIcon == "battlefield" or placed.battlefield ~= nil)
     st.icons.lfg:SetShown(pickedIcon == "lfg" or placed.lfg ~= nil)
     if ML.PlaceIcons then ML.PlaceIcons(st.parts) end
+    -- the pieces' backing on the corner icons, and the edge fade
+    for _, f in pairs(st.icons) do
+        if f._zRing then f._zRing:_zPaint() end
+    end
+    if ML.PaintFade then ML.PaintFade(map, st) end
     if overlay then
         -- a corner icon that is up pushes its corner's pills along, as on the map
         local corner = { TOPLEFT = "mail", BOTTOMLEFT = "tracking", BOTTOMRIGHT = "battlefield", TOPRIGHT = "lfg" }
@@ -577,22 +582,86 @@ RegisterPage("Minimap", function(L)
         L:EndCard()
 
         L:Card("Pills (map only)")
-        Bind(L, "slider", "pillAlpha", "Pill darkness", nil, {
-            min = 0, max = 100, step = 5,
-            get = function(v) return math.floor((v or 0.82) * 100 + 0.5) end,
-            set = function(v) return v / 100 end,
-            format = function(v) return v .. "%" end,
+        -- WHAT EACH PIECE SITS ON: a ready-made backing, or your own. A
+        -- preset writes the settings under it; change any of them and the
+        -- box above reads "Custom".
+        local presetDD
+        local function PresetText()
+            local id, label = MM.BackingNow()
+            return id == "custom" and "Custom (your own settings)" or label
+        end
+        -- (after one of the settings below changed: the map, and the preset's name)
+        local function Changed()
+            Refresh()
+            if presetDD then presetDD:SetText(PresetText()) end
+        end
+        local function Rebuilt()
+            Refresh()
+            RefreshConfig()
+        end
+        local presets = {}
+        for _, bk in ipairs(MM.BACKINGS or {}) do presets[#presets + 1] = { text = bk.label, value = bk.id } end
+        L:Row(UI.Font(L.current, F.LABEL, { text = "What each piece sits on" }), 16)
+        presetDD = UI.Dropdown(L.current, {
+            width = 260,
+            items = function() return presets end,
+            selectedValue = function() return (MM.BackingNow()) end,
+            selected = PresetText,
+            onSelect = function(v)
+                MM.SetBacking(v)
+                Rebuilt()
+            end,
         })
-        L:Desc("How dark the backing behind each piece of text is. "
-            .. "Lower lets more of the map show through.")
+        L:Row(presetDD, M.DROPDOWN_H + 6)
+        L:Desc("The backing behind the zone name, clock, coordinates, friends and guild. Pick one, "
+            .. "or change anything below to make your own.")
         if Kit then
-            Kit.Color(L, "Pill colour", DB, "pillColor", Kit.Palette("ui", "windowBg"), { after = Refresh })
-            Kit.Check(L, "Border round each pill", DB, "pillBorder", nil,
-                { after = function() Refresh() RefreshConfig() end })
-            if DB().pillBorder then
-                Kit.Color(L, "Pill border colour", DB, "pillBorderColor", Kit.Palette("ui", "border"),
-                    { alpha = true, after = Refresh })
+            Kit.Choice(L, "Shape", DB, "pillShape", {
+                { text = "A flat box", value = "box" },
+                { text = "A soft shadow", value = "glow" },
+                { text = "Nothing", value = "none" },
+            }, nil, { width = 260, after = Rebuilt })
+        end
+        local shape = ns.MinimapLook and ns.MinimapLook.PillShape and ns.MinimapLook.PillShape() or "box"
+        if shape ~= "none" then
+            local sl = UI.Slider(L.current, {
+                width = 200, min = 0, max = 100, step = 5, label = "Pill darkness",
+                value = math.floor((DB().pillAlpha or 0.82) * 100 + 0.5),
+                format = function(v) return v .. "%" end,
+                onChange = function(v)
+                    DB().pillAlpha = v / 100
+                    Changed()
+                end,
+            })
+            L:Row(sl, 40)
+            L:Desc("How dark the backing behind each piece of text is. "
+                .. "Lower lets more of the map show through.")
+        end
+        if Kit then
+            if shape ~= "none" then
+                Kit.Color(L, "Pill colour", DB, "pillColor", Kit.Palette("ui", "windowBg"), { after = Changed })
             end
+            if shape == "box" then
+                Kit.Check(L, "Border round each pill", DB, "pillBorder", nil, { after = Rebuilt })
+                if DB().pillBorder then
+                    Kit.Color(L, "Pill border colour", DB, "pillBorderColor", Kit.Palette("ui", "border"),
+                        { alpha = true, after = Changed })
+                end
+            end
+            Kit.Check(L, "Outline the text", DB, "pillOutline",
+                "A dark edge on the pieces' text whatever the font is set to: for text with no box behind it.",
+                { after = Rebuilt })
+            Kit.Check(L, "Darken the map's top and bottom edges", DB, "pillFade",
+                "A soft dark band along the top and the bottom of the map for the pieces to sit on.",
+                { after = Rebuilt })
+            if DB().pillFade then
+                Kit.Slider(L, "Edge darkness", DB, "pillFadeAlpha", { min = 0, max = 100, step = 5,
+                    get = function(v) return math.floor((v or MM.FADE_ALPHA or 0.82) * 100 + 0.5) end,
+                    set = function(v) return v / 100 end,
+                    format = function(v) return v .. "%" end, after = Changed })
+            end
+            Kit.Check(L, "The mail and tracking icons wear it too", DB, "pillCorners",
+                "Off, the two corner icons keep their own dark box and edge.", { after = Rebuilt })
         end
         L:EndCard()
 

@@ -10,8 +10,13 @@
 --                   or three defensives), the rest one tick away
 --   buff row        its "Tracked buffs" (your own buffs while they are up)
 --   buff bars       its "Tracked bars", as bars
+--   charges         a spell with charges shows how many it holds
 --   power bar       your power, handed to the bar exactly as the game
---                   gives it (no pips, no maths: it may be hidden)
+--                   gives it (no maths: it may be hidden)
+--   class resource  Holy Power, combo points, Chi, Soul Shards, Essence,
+--                   Arcane Charges as a bar cut into its points; a death
+--                   knight's six runes; a Brewmaster's stagger (THE CLASS
+--                   RESOURCE, below)
 --   trinkets/racial the aux row, off until turned on
 --
 -- A spec swap replaces the lists (PLAYER_SPECIALIZATION_CHANGED, and
@@ -432,6 +437,476 @@ function Engine:HideAll()
 end
 
 -- ------------------------------------------------------------
+-- THE CLASS RESOURCE (2026-11-18, Zac: "make sure zui has everything
+-- needed for all classes"): what a spec spends besides its power.
+--   one bar cut into as many pieces as the resource has points
+--       Holy Power (Paladin), combo points (Rogue; Druid in cat form),
+--       Chi (Windwalker), Soul Shards (Warlock), Essence (Evoker),
+--       Arcane Charges (Arcane Mage)
+--   six bars, each filling as its rune recharges (Death Knight)
+--   one plain bar: stagger against your health (Brewmaster)
+--   soul fragments (Vengeance): the game's own count of them
+--       (C_Spell.GetSpellCastCount of Soul Cleave) on a bar cut in six
+--   off until ticked: the time your own Ironfur (Guardian) or Ignore
+--       Pain (Protection) has left, as one plain bar that drains - the
+--       buff asked for by its spell (C_UnitAuras.GetPlayerAuraBySpellID);
+--       a time the game hides runs on the game's own clock
+-- A spec with none shows none (Astral Power, Maelstrom, Insanity, Focus
+-- and Fury are those specs' power and sit on the power bar already;
+-- Icicles, Maelstrom Weapon and the like are buffs the game lists, on the
+-- buff row).
+-- The count is never read by this file: it goes onto the bar as the game
+-- hands it over, hidden or not, and the cuts over the bar are what make
+-- it read as points. Only the number of pieces is compared, and only
+-- when the game gives it plainly (else the resource's usual count). A
+-- rune's recharge is plain numbers (GetRuneCooldown); one the game hides
+-- shows as an empty rune.
+-- One driver frame per HUD, ten passes a second while the bar may show
+-- and none otherwise. Settings: cfg.v2.classres { enabled (false = off),
+-- x, y, w, h, color }.
+-- ------------------------------------------------------------
+local PT = (type(Enum) == "table" and Enum.PowerType) or {}
+local RES = {
+    holy    = { power = PT.HolyPower or 9, token = "HOLY_POWER", max = 5, label = "Holy Power" },
+    combo   = { power = PT.ComboPoints or 4, token = "COMBO_POINTS", max = 5, label = "combo points" },
+    chi     = { power = PT.Chi or 12, token = "CHI", max = 5, label = "Chi" },
+    shards  = { power = PT.SoulShards or 7, token = "SOUL_SHARDS", max = 5, label = "Soul Shards" },
+    essence = { power = PT.Essence or 19, token = "ESSENCE", max = 5, label = "Essence" },
+    arcane  = { power = PT.ArcaneCharges or 16, token = "ARCANE_CHARGES", max = 4, label = "Arcane Charges" },
+    runes   = { runes = true, max = 6, label = "runes" },
+    stagger = { stagger = true, max = 1, label = "stagger" },
+    fragments = { castCount = 228477, max = 6, label = "soul fragments" },      -- (Soul Cleave)
+    ironfur = { aura = 192081, max = 1, opt = true, label = "Ironfur" },
+    ignorepain = { aura = 190456, max = 1, opt = true, label = "Ignore Pain" },
+}
+-- what a class has: all = every spec; [spec id] = that spec; cat = in cat
+-- form (the form that runs on energy); sample = what the page's preview
+-- draws; text = the page's own words; timed = the switch for a spec's
+-- timed buff (an "opt" resource: off until ticked); desc = the card's
+-- words where "cut into its points" would not fit
+local CLASS_RES = {
+    PALADIN = { all = "holy", sample = "holy", text = "Holy Power" },
+    ROGUE = { all = "combo", sample = "combo", text = "Combo points" },
+    WARLOCK = { all = "shards", sample = "shards", text = "Soul Shards" },
+    DEATHKNIGHT = { all = "runes", sample = "runes", text = "Your six runes, each filling as it recharges" },
+    EVOKER = { all = "essence", sample = "essence", text = "Essence" },
+    MONK = { [269] = "chi", [268] = "stagger", sample = "chi",
+        text = "Chi as a Windwalker; as a Brewmaster, your stagger against your health" },
+    MAGE = { [62] = "arcane", sample = "arcane", text = "Arcane Charges, as an Arcane mage" },
+    DRUID = { cat = "combo", [104] = "ironfur", sample = "combo", text = "Combo points, in cat form",
+        timed = "Ironfur's time left as a bar (Guardian)" },
+    DEMONHUNTER = { [581] = "fragments", sample = "fragments", text = "Soul fragments, as a Vengeance demon hunter" },
+    WARRIOR = { [73] = "ignorepain", sample = "ignorepain", text = "Ignore Pain, as a Protection warrior",
+        timed = "Ignore Pain's time left as a bar (Protection)",
+        desc = "The time your Ignore Pain has left, as a bar of its own that drains. Off until ticked below. Its spot is under Position." },
+}
+V2.RETAIL_RESOURCES = { RES = RES, CLASSES = CLASS_RES }
+
+local CR_POS = { x = 0, y = -177, w = 234, h = 6 }
+local CR_ABOVE = 11       -- how far over the power bar's spot it starts (the bar's default: -188)
+local CR_STRATA = "MEDIUM"
+local CUT_W, RUNE_GAP = 2, 2
+
+local function ResCfg(cfg, create) return V2.Sub(cfg, "classres", create) end
+V2.ClassResCfg = ResCfg
+
+-- the resource in play: by spec, or by form; nil = none
+function Engine:RetailResource()
+    local map = CLASS_RES[self.def.class]
+    if not map then return nil end
+    local res
+    if self.sample then
+        res = RES[map.sample]
+    elseif map.all then
+        res = RES[map.all]
+    else
+        if map.cat then
+            local ok, ptype = pcall(UnitPowerType, "player")
+            if ok and Plain(ptype) == 3 then res = RES[map.cat] end
+        end
+        if not res then
+            local id = V2.RetailSpecID and V2.RetailSpecID()
+            res = id and map[id] and RES[map[id]] or nil
+        end
+    end
+    -- a timed buff as a bar is yours to switch on
+    if res and res.opt then
+        local c = ResCfg(self:Store())
+        if not (c and c.timed) then return nil end
+    end
+    return res
+end
+
+-- its colour: yours, else the game's own for the resource, else your class's
+local function ResColor(eng, res, c)
+    local col = c and c.color
+    if type(col) == "table" and type(col.r) == "number" then return col.r, col.g, col.b end
+    local pc = PowerBarColor
+    local g = res.token and type(pc) == "table" and pc[res.token] or nil
+    if type(g) == "table" and type(g.r) == "number" then return g.r, g.g, g.b end
+    local cc = RAID_CLASS_COLORS and RAID_CLASS_COLORS[eng.def.class]
+    if type(cc) == "table" and type(cc.r) == "number" then return cc.r, cc.g, cc.b end
+    return 1, 0.82, 0
+end
+V2.ClassResColor = ResColor
+
+local function ResSize(cfg)
+    local c = ResCfg(cfg)
+    return (c and tonumber(c.w)) or CR_POS.w, (c and tonumber(c.h)) or CR_POS.h
+end
+
+-- the cuts between the points: n pieces, n - 1 cuts
+local function ResCuts(f, n)
+    local w = f:GetWidth() or CR_POS.w
+    for i = 1, math.max(n - 1, #f.cuts) do
+        local t = f.cuts[i]
+        if i <= n - 1 then
+            if not t then
+                t = f.over:CreateTexture(nil, "OVERLAY")
+                t:SetTexture("Interface\\Buttons\\WHITE8X8")
+                t:SetVertexColor(0, 0, 0, 1)
+                f.cuts[i] = t
+            end
+            t:ClearAllPoints()
+            t:SetPoint("TOP", f, "TOPLEFT", math.floor(i * w / n + 0.5), 0)
+            t:SetPoint("BOTTOM", f, "BOTTOMLEFT", math.floor(i * w / n + 0.5), 0)
+            t:SetWidth(CUT_W)
+            t:Show()
+        elseif t then
+            t:Hide()
+        end
+    end
+end
+
+-- the six rune bars across the width
+local function ResRunes(f)
+    local w, h = f:GetWidth() or CR_POS.w, f:GetHeight() or CR_POS.h
+    local each = (w - 5 * RUNE_GAP) / 6
+    for i = 1, 6 do
+        local rb = f.runes[i]
+        rb:SetSize(each, h)
+        rb:ClearAllPoints()
+        rb:SetPoint("LEFT", f, "LEFT", (i - 1) * (each + RUNE_GAP), 0)
+    end
+end
+
+-- the bars for a resource: shown, laid out and coloured (res nil = none)
+local function ResSet(eng, f, res)
+    f.res = res
+    f._n = nil
+    if f.bar._zTimed then HUD.UntimedSwing(f.bar) end
+    local runes = res ~= nil and res.runes == true
+    f.bar:SetShown(res ~= nil and not runes)
+    for i = 1, 6 do f.runes[i]:SetShown(runes) end
+    if runes then ResRunes(f) end
+    if not res then return end
+    local r, g, b = ResColor(eng, res, ResCfg(eng:Store()))
+    f.bar:SetBarColor(r, g, b, 1)
+    for i = 1, 6 do f.runes[i]:SetBarColor(r, g, b, 1) end
+    if res.stagger or res.aura then ResCuts(f, 1) end
+    -- (a timed buff fills by its share left: the bar's range is 0 to 1)
+    if res.aura then f.bar.bar:SetMinMaxValues(0, 1) end
+end
+
+local function PlayerAura(id)
+    local get = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+    if not get then return nil end
+    local ok, a = pcall(get, id)
+    return (ok and type(a) == "table") and a or nil
+end
+
+-- the time a buff of yours has left, as the share of the bar that is
+-- filled: empty while it is down; a time the game hides on the game's
+-- own clock (full when even that is not to be had)
+local function ResAura(f, res)
+    local b = f.bar
+    local a = PlayerAura(res.aura)
+    if not a then
+        if b._zTimed then HUD.UntimedSwing(b) end
+        b.bar:SetValue(0)
+        return
+    end
+    if ns.AuraFieldsHidden(a) then
+        local dur = ns.AuraDuration("player", a)
+        if not (dur and HUD.TimedSwing(b, dur)) then
+            if b._zTimed then HUD.UntimedSwing(b) end
+            b.bar:SetValue(1)
+        end
+        return
+    end
+    if b._zTimed then HUD.UntimedSwing(b) end
+    local d, e = a.duration, a.expirationTime
+    if type(d) == "number" and type(e) == "number" and d > 0 then
+        local v = (e - GetTime()) / d
+        b.bar:SetValue(v < 0 and 0 or (v > 1 and 1 or v))
+    else
+        b.bar:SetValue(1)      -- up, with no end
+    end
+end
+
+local function Fill(bar, max, cur)
+    if not (pcall(bar.SetMinMaxValues, bar, 0, max) and pcall(bar.SetValue, bar, cur)) then
+        pcall(bar.SetMinMaxValues, bar, 0, 1)
+        pcall(bar.SetValue, bar, 0)
+    end
+end
+
+local function ResUpdate(eng, f)
+    local res = f.res
+    if not res then return end
+    if res.runes then
+        local now = GetTime()
+        for i = 1, 6 do
+            local v = 0
+            if eng.sample then
+                v = (i <= 4) and 1 or (i == 5 and 0.6 or 0.25)
+            elseif GetRuneCooldown then
+                local ok, start, duration, ready = pcall(GetRuneCooldown, i)
+                if ok then
+                    start, duration, ready = Plain(start), Plain(duration), Plain(ready)
+                    if ready == true then
+                        v = 1
+                    elseif type(start) == "number" and type(duration) == "number" and duration > 0 then
+                        v = (now - start) / duration
+                        if v < 0 then v = 0 elseif v > 1 then v = 1 end
+                    end
+                end
+            end
+            local rb = f.runes[i]
+            rb.bar:SetValue(v)
+            -- a rune still recharging is dimmer than a ready one
+            local a = (v >= 1) and 1 or 0.55
+            if rb._a ~= a then
+                rb._a = a
+                rb.bar:SetAlpha(a)
+            end
+        end
+        return
+    end
+    if res.aura then
+        if eng.sample then
+            f.bar.bar:SetValue(0.6)
+        else
+            ResAura(f, res)
+        end
+        return
+    end
+    local cur, max
+    if eng.sample then
+        cur, max = (res.max >= 5) and 3 or 2, res.max
+    elseif res.castCount then
+        -- (the count may be hidden: it goes onto the bar as it comes)
+        local get = C_Spell and C_Spell.GetSpellCastCount
+        local ok, n = false, nil
+        if get then ok, n = pcall(get, res.castCount) end
+        cur, max = (ok and n ~= nil) and n or 0, res.max
+    elseif res.stagger then
+        cur = UnitStagger and UnitStagger("player") or 0
+        max = UnitHealthMax("player")
+    else
+        cur, max = UnitPower("player", res.power), UnitPowerMax("player", res.power)
+    end
+    if not res.stagger then
+        -- how many pieces: the game's count when it is plain, else the usual one
+        local n = Plain(max)
+        if type(n) ~= "number" or n < 1 or n > 10 then n = res.max end
+        if n ~= f._n then
+            f._n = n
+            ResCuts(f, n)
+        end
+        max = n
+    end
+    Fill(f.bar.bar, max, cur)
+end
+
+local function ResTick(driver, dt)
+    driver.t = (driver.t or 0) + dt
+    if driver.t < 0.1 then return end
+    driver.t = 0
+    local eng, f = driver.eng, driver.f
+    -- the spec or the form may have changed: looked at twice a second
+    driver.n = (driver.n or 0) + 1
+    if driver.n >= 5 then
+        driver.n = 0
+        local res = eng:RetailResource()
+        if res ~= f.res then ResSet(eng, f, res) end
+        f:SetShown(res ~= nil)
+    end
+    ResUpdate(eng, f)
+end
+
+local BaseCreateAnchorsR = Engine.CreateAnchors
+function Engine:CreateAnchors()
+    if CLASS_RES[self.def.class] and not self.anchors.ClassRes then
+        self:MakeAnchor("ClassRes", CR_POS.w, CR_POS.h)
+    end
+    return BaseCreateAnchorsR(self)
+end
+
+local BaseElementsR = Engine.Elements
+function Engine:Elements()
+    local list = BaseElementsR(self)
+    if CLASS_RES[self.def.class] then
+        list[#list + 1] = { key = "ClassRes", mover = self.def.prefix .. "ClassRes", label = "Class Resource",
+            cfg = function(c)
+                -- its spot is its own from the first look (the mover saves
+                -- into it): just over the power bar, wherever that was moved
+                local t = ResCfg(c, true)
+                if t.x == nil and t.y == nil then
+                    local pp = c.resources and c.resources.pos and c.resources.pos.power
+                    t.x = (pp and tonumber(pp.x)) or CR_POS.x
+                    t.y = ((pp and tonumber(pp.y)) or (CR_POS.y - CR_ABOVE)) + CR_ABOVE
+                end
+                return t
+            end }
+    end
+    return list
+end
+
+local BaseBuildBarsR = Engine.BuildBars
+function Engine:BuildBars()
+    BaseBuildBarsR(self)
+    local anchor = self.anchors.ClassRes
+    if not (anchor and CLASS_RES[self.def.class]) or self.classBar then return end
+    local W = self.W
+    local w, h = ResSize(self:Store())
+    local f = CreateFrame("Frame", nil, anchor)
+    f:SetSize(w, h)
+    f:SetPoint("CENTER", anchor, "CENTER", 0, 0)
+    f:SetFrameStrata(CR_STRATA)
+    local b = W.CreateBar(f, { width = w, height = h })
+    b:SetAllPoints(f)
+    b:SetFrameStrata(CR_STRATA)
+    f.bar = b
+    -- the cuts sit over the fill
+    local over = CreateFrame("Frame", nil, b)
+    over:SetAllPoints(b)
+    over:SetFrameStrata(CR_STRATA)
+    over:SetFrameLevel((b.bar:GetFrameLevel() or 1) + 3)
+    f.over, f.cuts, f.runes = over, {}, {}
+    for i = 1, 6 do
+        local rb = W.CreateBar(f, { width = 30, height = h })
+        rb:SetFrameStrata(CR_STRATA)
+        rb:Hide()
+        f.runes[i] = rb
+    end
+    f:Hide()
+    self.classBar = f
+    -- (the anchor's child, not the bar's: it runs while the bar is hidden
+    -- for a spec without a resource, to see the next spec come)
+    local driver = CreateFrame("Frame", nil, anchor)
+    driver.eng, driver.f = self, f
+    self.classDriver = driver
+end
+
+local BaseResourcesR = Engine.RefreshResources
+function Engine:RefreshResources(cfg)
+    BaseResourcesR(self, cfg)
+    local f = self.classBar
+    if not f then return end
+    local c = ResCfg(cfg)
+    local want = (self:On(cfg) and not (c and c.enabled == false)) and true or false
+    if want then
+        local res = self:RetailResource()
+        if res ~= f.res then ResSet(self, f, res) end
+        f:SetShown(res ~= nil)
+        ResUpdate(self, f)
+    else
+        f:Hide()
+    end
+    if want ~= f.want then
+        f.want = want
+        self.classDriver:SetScript("OnUpdate", want and ResTick or nil)
+    end
+end
+
+local BaseHideAllR = Engine.HideAll
+function Engine:HideAll()
+    BaseHideAllR(self)
+    local f = self.classBar
+    if not f then return end
+    f:Hide()
+    if f.want then
+        f.want = false
+        self.classDriver:SetScript("OnUpdate", nil)
+    end
+end
+
+local BaseApplySizesR = Engine.ApplySizes
+function Engine:ApplySizes()
+    local f = self.built and self.classBar
+    local cfg = f and self:Store()
+    if cfg then
+        local w, h = ResSize(cfg)
+        f:SetSize(w, h)
+        self.anchors.ClassRes:SetSize(w, h)
+        self.holders.ClassRes:SetSize(w, h)
+        -- the cuts and the runes are laid out for the new width
+        local res = f.res
+        f.res = nil
+        ResSet(self, f, res)
+    end
+    return BaseApplySizesR(self)
+end
+
+-- the page's preview lays it out with the rest
+local BaseSampleOnR = Engine.V2SampleOn
+function Engine:V2SampleOn(on, scale, cfg)
+    if BaseSampleOnR then BaseSampleOnR(self, on, scale, cfg) end
+    local c = ResCfg(cfg)
+    on.ClassRes = CLASS_RES[self.def.class] ~= nil and not (c and c.enabled == false)
+        and self:RetailResource() ~= nil
+end
+
+local BaseApplyColorsR = Engine.ApplyColors
+function Engine:ApplyColors()
+    if BaseApplyColorsR then BaseApplyColorsR(self) end
+    local f = self.classBar
+    if f and f.res then ResSet(self, f, f.res) end
+end
+
+-- its card on the page (General)
+local BaseTabGeneralR = Engine.V2Tab_General
+function Engine:V2Tab_General(L, cfg)
+    if BaseTabGeneralR then BaseTabGeneralR(self, L, cfg) end
+    local map = CLASS_RES[self.def.class]
+    if not map then return end
+    local eng = self
+    local function Px(v) return v .. " px" end
+    local c = ResCfg(cfg)
+    L:Card("Class resource")
+    L:Desc(map.desc or (map.text .. ": a bar of its own, cut into its points. Its spot is under Position."))
+    HUD.CheckIndent(L, "Show the class resource", not (c and c.enabled == false), function(v)
+        ResCfg(cfg, true).enabled = (not v) and false or nil
+        V2.Tidy(cfg)
+        eng:Refresh()
+    end)
+    if map.timed then
+        HUD.CheckIndent(L, map.timed, (c and c.timed) and true or false, function(v)
+            ResCfg(cfg, true).timed = v or nil
+            V2.Tidy(cfg)
+            eng:Refresh()
+        end, nil, "One plain bar that drains with the buff's time; empty while it is down.")
+    end
+    local w, h = ResSize(cfg)
+    HUD.SliderPair(L,
+        { "Class resource width", 100, 500, w, function(v) ResCfg(cfg, true).w = v eng:ApplySizes() end, Px },
+        { "Class resource height", 2, 16, h, function(v) ResCfg(cfg, true).h = v eng:ApplySizes() end, Px })
+    HUD.ColorGrid(L, { { "Class resource",
+        get = function()
+            local res = eng:RetailResource() or RES[map.sample]
+            local r, g, b = ResColor(eng, res, ResCfg(cfg))
+            return r, g, b, 1
+        end,
+        set = function(r, g, b)
+            ResCfg(cfg, true).color = { r = r, g = g, b = b }
+            eng:ApplyColors()
+            eng:Refresh()
+        end } })
+    L:EndCard()
+end
+
+-- ------------------------------------------------------------
 -- your buffs: one the game will not name in a fight is asked for by the
 -- entry's spell ids, and shown as the game hands it over
 -- ------------------------------------------------------------
@@ -520,6 +995,7 @@ end
 -- timers the game hides: the text takes them as they are
 -- ------------------------------------------------------------
 local function Remaining(obj) return obj:GetRemainingDuration() end
+local CHARGE_COL = { 1, 0.82, 0, 1 }      -- (the HUDs' count colour)
 
 local BaseTextTick = Engine.TextTick
 function Engine:TextTick()
@@ -549,6 +1025,30 @@ function Engine:TextTick()
             local left = ns.AuraTimeLeft("player", b.hidden)
             if left ~= nil then icon:SetHiddenText("p", "%.0f", left) else icon:SetText("p", "") end
             icon:SetHiddenCount("s", "player", b.hidden)
+        end
+    end
+    -- CHARGES (2026-11-18): a spell the game's list marks as having
+    -- charges shows how many it holds in the icon's corner, as the game
+    -- hands the count over (it is hidden in a fight: never compared here)
+    local getCharges = C_Spell and C_Spell.GetSpellCharges
+    if getCharges then
+        for li = 1, 2 do
+            local list = (li == 1) and self.mainActive or self.utilActive
+            for _, icon in ipairs(list or {}) do
+                local def = icon.def
+                if def and def.charges and def.kind == "spell" then
+                    local sp = S.spells[def.spell]
+                    local id = sp and (sp.id or sp.name)
+                    if id then
+                        if not icon.texts.count then
+                            icon:AddText("count", "INNER_BOTTOMRIGHT", 12, CHARGE_COL, 0, 0)
+                        end
+                        local ok, info = pcall(getCharges, id)
+                        local n = (ok and type(info) == "table") and info.currentCharges or nil
+                        if n ~= nil then icon:SetHiddenText("count", "%d", n) else icon:SetText("count", "") end
+                    end
+                end
+            end
         end
     end
 end
@@ -589,9 +1089,10 @@ local eng = HUD.DefineClass({
     prefix = C.prefix, frameName = "Retail" .. C.name:gsub("%s", ""),
     retail = true,
     blurb = "Your spec's cooldowns from the game's own Cooldown Manager list, a utility row with the interrupt "
-        .. "and defensives, your tracked buffs and a power bar.",
+        .. "and defensives, your tracked buffs, a power bar and your class resource.",
     keywords = C.name:lower() .. " hud class cooldown manager cooldown grid utility interrupt defensive buffs "
-        .. "buff bars power bar spec trinkets racial retail",
+        .. "buff bars power bar spec trinkets racial retail class resource holy power combo points chi "
+        .. "soul shards runes essence arcane charges stagger soul fragments ironfur ignore pain",
     powerLabel = "Power",
     spells = {}, grid = {}, utility = {}, buffRow = {},
     roles = roles,

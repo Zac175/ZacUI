@@ -936,6 +936,8 @@ function winMeta:SetDisplay(key)
         if Meter.Threat then Meter.Threat.Detach(self) end
         Meter.RefreshWindow(self, true)
     end
+    -- (a hold on every window but threat: this one may have changed sides)
+    if not self.preview and not self.parkedAt then self.frame:SetShown(not Win.Hidden(self)) end
     Meter.UpdateTitle(self)
     Meter.FlashLabel(self, key == "threat" and "Threat" or Meter.DISPLAYS[key].label)
 end
@@ -1406,6 +1408,50 @@ function Win.OpenGameMeterOptions()
     return false
 end
 
+-- ============================================================
+-- HELD OUT OF SIGHT (2026-11-18, Zac: "for certain ready check raid
+-- configs i want to be able to disable the damage meter in zui
+-- automatically"). Another addon asks, under its own name, for the
+-- windows to be gone for a while:
+--   ZacUI.Meter.Hold("Readycheck", "meter")   every window but threat
+--   ZacUI.Meter.Hold("Readycheck", "all")     the threat window too
+--   ZacUI.Meter.Hold("Readycheck", nil)       let go
+-- A flag for this session, never saved, like the Toggle key's (below);
+-- the two are separate, and a window shows only when neither hides it.
+-- The meter keeps counting all the while. Several askers: the widest ask
+-- wins. Meter.Held() says what is in force and who asks.
+-- ============================================================
+local holds = {}
+Win.holds = holds
+local function HeldMode()
+    local mode
+    for _, m in pairs(holds) do
+        if m == "all" then return "all" end
+        mode = m
+    end
+    return mode
+end
+function Meter.Held() return HeldMode(), holds end
+-- is this window out of sight right now (the key, or a hold that covers it)
+function Win.Hidden(win)
+    if Win.keyHidden then return true end
+    local mode = HeldMode()
+    if not mode then return false end
+    return mode == "all" or win.settings.display ~= "threat"
+end
+function Win.ApplyShown()
+    for _, win in ipairs(windows) do win.frame:SetShown(not Win.Hidden(win)) end
+end
+function Meter.Hold(who, mode)
+    if type(who) ~= "string" or who == "" then return false end
+    if mode == true then mode = "all" end
+    if mode ~= "meter" and mode ~= "all" then mode = nil end
+    if holds[who] == mode then return true end
+    holds[who] = mode
+    Win.ApplyShown()
+    return true
+end
+
 -- a window slot ZacUI does not build while the game's meter is in use
 local function GameOwns(settings)
     return settings.display ~= "threat" and Meter.UsesGameMeter()
@@ -1439,7 +1485,7 @@ function Win.Create(id)
         WireWindow(win)
     end
     Alias(win)
-    if Win.keyHidden then win.frame:Hide() end
+    if Win.Hidden(win) then win.frame:Hide() end
     Meter.StyleWindow(win)
     for _, row in ipairs(win.rows) do Meter.StyleRow(row) end
     Meter.LayoutRows(win)
@@ -1678,10 +1724,18 @@ _G.BINDING_NAME_ZACUI_METER_TOGGLE = "Meter: show / hide the windows"
 _G.BINDING_NAME_ZACUI_METER_RESET = "Meter: reset the data"
 function Win.ToggleShown()
     Win.keyHidden = not Win.keyHidden
-    for _, win in ipairs(windows) do win.frame:SetShown(not Win.keyHidden) end
+    Win.ApplyShown()
     if Win.keyHidden and not Win.saidKey then
         Win.saidKey = true
         Print("Meter: windows hidden until you press the Toggle meter windows key again.")
+    end
+    -- (the key shows them again, and something else still holds them)
+    local mode, who = Meter.Held()
+    if not Win.keyHidden and mode then
+        local names = {}
+        for name in pairs(who) do names[#names + 1] = name end
+        table.sort(names)
+        Print("Meter: the windows stay hidden - " .. table.concat(names, ", ") .. " asked for it.")
     end
 end
 _G.ZacUI_MeterToggle = function() Win.ToggleShown() end

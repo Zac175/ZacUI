@@ -313,6 +313,12 @@ local function GetColor(cat, key)
             end
         end
     end
+    -- (the finish's soft outlines, Core_Finish: where no border colour was
+    -- picked the outline is soft grey in place of the shipped black)
+    if cat == "ui" and key == "border" then
+        local F = ns.Finish
+        if F and F.SoftEdge and F.SoftEdge() then return F.SOFT_EDGE end
+    end
     return Default(cat, key) or PALETTE.text.normal
 end
 

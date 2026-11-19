@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Class HUDs|r
 ## Notes: ZacUI class HUDs for every class, and the Drink Ticker. Native ports of the class-pack WeakAuras.
 ## Author: Zac
-## Version: 3.0.14
+## Version: 3.0.15
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -16,6 +16,7 @@
 # Load order within this file is the same as it was inside ZacUI.
 
 Shared\HUD_Shared.lua
+Shared\HUD_CastBar.lua
 Warrior\HUD_Warrior_Core.lua
 Warrior\HUD_Warrior_Widgets.lua
 Warrior\HUD_Warrior_Display.lua
@@ -32,6 +33,12 @@ Engine\HUD_V2_Glows.lua
 Engine\HUD_V2_Page.lua
 Engine\HUD_V2_BuffBars.lua
 Engine\HUD_V2_Resources.lua
+Engine\HUD_V2_Totems.lua
+Engine\HUD_V2_Custom.lua
+Engine\HUD_V2_Assist.lua
+Engine\HUD_V2_PowerMarks.lua
+Engine\HUD_V2_CastBar.lua
+Engine\HUD_V2_Conditions.lua
 # Retail (Mainline 12.x): one class HUD for every class, from the game's
 # own Cooldown Manager list. Returns on its first lines everywhere else.
 Engine\HUD_Retail.lua

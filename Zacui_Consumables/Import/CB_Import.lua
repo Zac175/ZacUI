@@ -27,7 +27,7 @@ local SAME = { "enabled", "locked", "hideInCombat", "buttonSize", "buttonsPerRow
     "showBackground", "showCount", "showItemNames", "showTooltips", "showExpiryTimer", "showBeforeExpiry",
     "visibilityMode", "visibilityRaids", "mouseoverFade", "mouseoverFadeAlpha", "scale",
     "showOnlyAvailable", "hideWhenActive", "hideConflictingBuffs", "groupConflictButtons", "selfCastJujus",
-    "petrificationCampMode", "hideUsedInCombat", "showBagWeapons", "showEquippedWeapons", "hordeByFaction",
+    "petrificationCampMode", "hideUsedInCombat", "weaponStones", "showBagWeapons", "showEquippedWeapons", "hordeByFaction",
     "hiddenItems", "hiddenWeapons", "itemOrder", "customItems", "conflictGroupPreferences",
     "conflictGroupQuickUse", "clickActions", "style", "anchors", "formats", "visibility", "chrome" }
 CB.IMPORT_SAME = SAME

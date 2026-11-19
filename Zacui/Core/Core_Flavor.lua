@@ -434,7 +434,8 @@ ns.FEATURE_FLAVORS = {
     -- the game's own Cooldown Manager list for the spec you play
     { id = "hud", part = "Zacui_HUD", whole = true, name = "Class HUDs, Drink Ticker and Hesitation alerts (the part)",
       changed = { retail = "one HUD for every class, built from the game's own Cooldown Manager list for the spec you play: "
-                  .. "its cooldowns, a utility row, your tracked buffs and a plain power bar. No swing timers, "
+                  .. "its cooldowns, a utility row, your tracked buffs, a plain power bar and your class resource "
+                  .. "(Holy Power, combo points, Chi, Soul Shards, runes, Essence, Arcane Charges). No swing timers, "
                   .. "five-second rule or mana ticks, and nothing is read off the target's debuffs in a fight" } },
     { id = "hud_warrior", part = "Zacui_HUD", name = "Warrior HUD",
       changed = { forever = "swing timers come from the game's own swing event; the Overpower window comes from the game's "

@@ -705,8 +705,18 @@ local function SkipTrinket(name, db)
     end
     return false
 end
+-- every cooldown spell you know, by its name -> Readycheck's key for it
+-- (watched or not: the WAIT on the HUD asks through it)
+function H:RebuildCdKeys()
+    self.cdKeyByName = {}
+    for _, c in ipairs(CD_SPELLS) do
+        local known = GetSpellInfo(c.name)
+        if known then self.cdKeyByName[known] = c.key end
+    end
+end
 local carryCd = {}
 function H:RebuildCds()
+    self:RebuildCdKeys()
     wipe(carryCd)
     for k, e in pairs(self.cdByName) do carryCd[k] = e end
     wipe(self.cds)
@@ -1616,17 +1626,43 @@ function H.HudMobs()
     return nil, false
 end
 
+-- WAIT (2026-11-16, Zac: "can the huds read this as well and show the
+-- waits and stuff on my zui huds"). Readycheck's smart keys say, for the
+-- boss in force, whether a cooldown its raid config has switched on
+-- there is still waiting for its reminder (RC:SmartKeyAbilityState, in
+-- Readycheck_Testing for now: without it nothing here changes). The
+-- cooldown's HUD icon reads WAIT until the reminder has gone off - before
+-- the pull as well as in the fight, the same as the mark on the bars.
+local function RcWait(name)
+    local RC = _G.Readycheck
+    if not (RC and RC.SmartKeyAbilityState) then return false end
+    local c = H.cdByName[name]
+    local key, itemId = c and c.rcKey, c and c.itemId
+    if not key then
+        -- (a cooldown Hesitation is not watching: by its spell)
+        if not H.cdKeyByName then H:RebuildCdKeys() end
+        key = H.cdKeyByName[name]
+    end
+    if not key then return false end
+    local st = RC:SmartKeyAbilityState(key)
+    if not st and itemId then st = RC:SmartKeyAbilityState(itemId) end
+    return st == "wait"
+end
+
 function H.HudState(name)
+    if not name then return nil end
+    local wait = RcWait(name)
     -- in a fight, or before one with the Whirlwind opener up
-    if not (name and (H.ticker or H._opener)) then return nil end
+    if not (H.ticker or H._opener) then return wait and "wait" or nil end
     -- a cooldown or trinket: red when sat on, gold and a size up when
     -- wanted (and Readycheck's popup is not already saying it)
     local c = H.ticker and H.cdByName[name]
     if c then
         if c.ignored then return "noob", true end
         if c.want and not c.rcShown then return "ready", true, nil, true end
-        return nil
+        return wait and "wait" or nil
     end
+    if wait then return "wait" end
     local e = H.byName[name]
     if not e and H.execEntry and H.execEntry.name == name then e = H.execEntry end
     if not e then return nil end

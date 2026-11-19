@@ -139,6 +139,16 @@ local function PaintDestructive(self)
     if self._zFill then self._zFill:SetVertexColor(0, 0, 0, 0) end
     if self._zBorder then for _, e in ipairs(self._zBorder) do e:SetVertexColor(0, 0, 0, 0) end end
     local pl = UI.Plate(self, 0, 0, 0, 0)
+    if UI.PlateSync then UI.PlateSync() end
+    if UI.MainPlain and UI.MainPlain() then
+        -- (ZacUIDB.mainButton = "plain") a plate like the others, the red
+        -- on its edge and label
+        local function Mix(x, y) return { r = x.r + (y.r - x.r) * t, g = x.g + (y.g - x.g) * t, b = x.b + (y.b - x.b) * t, a = k } end
+        pl:Paint(Mix(PL.TOP, PL.TOP_H), Mix(PL.BOT, PL.BOT_H), { r = c.r, g = c.g, b = c.b, a = (0.85 + 0.15 * t) * k },
+            (PL.SHEEN + (PL.SHEEN_H - PL.SHEEN) * t) * k, PL.DROP * k)
+        if self._zText then self._zText:SetTextColor(c.r, c.g, c.b, k) end
+        return
+    end
     pl:Paint({ r = c.r * ft, g = c.g * ft, b = c.b * ft, a = k }, { r = c.r * fb, g = c.g * fb, b = c.b * fb, a = k },
         { r = c.r, g = c.g, b = c.b, a = (0.85 + 0.15 * t) * k }, (PL.SHEEN + (PL.SHEEN_H - PL.SHEEN) * t) * k, PL.DROP * k)
     if self._zText then self._zText:SetTextColor(1, 1, 1, (0.94 + 0.06 * t) * k) end

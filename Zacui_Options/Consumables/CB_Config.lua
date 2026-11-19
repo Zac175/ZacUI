@@ -341,16 +341,9 @@ local function Tab_general(L)
         Opt(L, "groupConflictButtons", "One button for items that clash", "Right click it to pick which one it uses.", true)
         Opt(L, "hideUsedInCombat", "Hide an item once used in combat", "Back when the fight ends.", true)
         Opt(L, "selfCastJujus", "Jujus on yourself", "A click never throws a juju at your target.", true)
-        Opt(L, "showBagWeapons", "Buttons for weapons in your bags")
-    end
-    if key == "weapons" then
-        Opt(L, "showEquippedWeapons", "Your main and off hand", nil, true)
-        Opt(L, "showBagWeapons", "Weapons in your bags", nil, true)
-    end
-    -- (2026-11-09, Zac: hide on TBC - both factions have shamans there)
-    if key ~= "potions" and not (ns.Flavor and ns.Flavor() == "tbc") then
-        Check(L, "Horde mode: no main hand button", CB.HordeMode(c), function(v) CB.SetHordeMode(c, v) end,
-            "For Windfury Totem on the main hand. Kept for this faction only.")
+        Opt(L, "weaponStones", "Weapon stones",
+            "Buttons that put your stone or oil on your main hand, your off hand and the weapons in your bags. "
+            .. "The Weapons tab picks which of them.", true)
     end
     if key ~= "weapons" then
         Opt(L, "petrificationCampMode", "Flask of Petrification also logs out (/camp)")
@@ -439,7 +432,6 @@ local function Tab_items(L)
     L:Card("Shown items")
     local all = UI.Button(L.current, "Show all", { width = 110, onClick = function()
         for _, e in ipairs(list) do CB.SetHidden(key, c, e.id, false) end
-        if key == "main" then CB.SetHidden(key, c, CB.MH, false) CB.SetHidden(key, c, CB.OH, false) end
         Changed() Rebuild()
     end })
     local none = UI.Button(L.current, "Hide all", { width = 110, onClick = function()
@@ -451,12 +443,6 @@ local function Tab_items(L)
     local boxes = {}
     local function Flush()
         if #boxes > 0 then L:Grid(boxes, 2, M.ROW) boxes = {} end
-    end
-    if key == "main" then
-        boxes[#boxes + 1] = UI.Checkbox(L.current, "Main hand stone", not CB.Hidden(key, c, CB.MH),
-            function(v) CB.SetHidden(key, c, CB.MH, not v) end)
-        boxes[#boxes + 1] = UI.Checkbox(L.current, "Off hand stone", not CB.Hidden(key, c, CB.OH),
-            function(v) CB.SetHidden(key, c, CB.OH, not v) end)
     end
     for _, e in ipairs(list) do
         if e.category ~= cat then
@@ -656,7 +642,34 @@ local function Tab_weapons(L)
         "Off: the stone's icon. Both bars.")
     L:EndCard()
 
+    -- THE FILTER: which weapon buttons this bar has. The main hand starts
+    -- off for a Horde character on Classic Era (Windfury Totem), on for
+    -- everyone else; the tick is kept for this faction.
     L:Card("Weapons shown")
+    if key == "main" and c.weaponStones == false then
+        L:Desc("Weapon stones are switched off for this bar (General tab).")
+    end
+    local hands = {}
+    local mainShown = not CB.MainHandHidden(c) and not (key == "main" and CB.Hidden(key, c, CB.MH))
+    hands[#hands + 1] = UI.Checkbox(L.current, "Main hand", mainShown, function(v)
+        CB.SetMainHandShown(c, v)
+        -- (an old tick in the item list that hid it: this tick is the one that counts now)
+        if key == "main" and CB.Hidden(key, c, CB.MH) then CB.SetHidden(key, c, CB.MH, false) end
+    end, { tooltip = "Starts off for Horde on Classic Era: Windfury Totem is on the main hand there." })
+    if key == "main" then
+        hands[#hands + 1] = UI.Checkbox(L.current, "Off hand", not CB.Hidden(key, c, CB.OH),
+            function(v) CB.SetHidden(key, c, CB.OH, not v) end)
+    else
+        hands[#hands + 1] = UI.Checkbox(L.current, "Main and off hand buttons", c.showEquippedWeapons ~= false,
+            function(v) c.showEquippedWeapons = v and true or false end)
+    end
+    local bagDefault = (key == "weapons")
+    local bagOn = c.showBagWeapons
+    if bagOn == nil then bagOn = bagDefault end
+    hands[#hands + 1] = UI.Checkbox(L.current, "Weapons in your bags", bagOn and true or false,
+        function(v) c.showBagWeapons = v and true or false end)
+    L:Grid(hands, 2, M.ROW)
+    L:Desc("Each weapon:")
     local list = {}
     for _, inv in ipairs({ 16, 17 }) do
         local eq = CB.World.Equipped(inv)
