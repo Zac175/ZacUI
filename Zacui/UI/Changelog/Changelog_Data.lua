@@ -28,6 +28,36 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.16",
+        date = "2026-11-19",
+        title = "Chat that keeps its place and its font, and icon sizes on nameplates",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    { "Nameplates: each debuff group has its own icon size, and icon rows have a setting for the space between icons. Raid mod icons have a size as well.", feature = "nameplates" },
+                    { "Warrior HUD: the second trinket slot can be added to the buff row.", feature = "hud_warrior" },
+                    { "Hunter HUD: the Auto Shot bar has its own width and height.", feature = "hud_classes" },
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    { "Class HUDs: a new setup starts with trinket slot 1 only, and slot 2 is a tick on the page. A HUD already set up keeps what it shows.", feature = "hud_classes" },
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "The chat window could jump back to the game's Edit Mode position after a portal, a summon or closing Edit Mode. It stays where you put it, and moving it in Edit Mode is kept.",
+                    "The font picked on Fonts & Textures did not always reach the game's chat windows, or was gone after a reload.",
+                    "A font, size or outline picked for chat messages on the Chat page could be lost after a loading screen.",
+                    "An error at login when another addon's copy of a shared library was broken. The minimap button loads anyway.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.15",
         date = "2026-11-19",
         title = "Looks you can pick: window finish, buttons, the minimap's pieces and the button tray",

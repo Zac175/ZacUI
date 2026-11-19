@@ -1380,6 +1380,14 @@ local AURA_DEFS = {
     { key = "salv",       kind = "salvMissing" },
     { key = "salvDef",    kind = "salvActive" },
     { key = "trinket1",   kind = "trinket" },
+    -- the second trinket slot (2026-11-19, Zac: "for the hud it needs to
+    -- show trinket 1 and 2 ... i want slot 2 off by default and only slot
+    -- 1 showing but some people want it the other way around"): its icon
+    -- with its cooldown, beside the first. Off until ticked (`add`); either
+    -- slot can be the one shown, or both. A trinket's buff that is up
+    -- still shows through Trinket 1's icon while that one is on, whichever
+    -- slot it came from (the buff list is by name, not by slot).
+    { key = "trinket2",   kind = "trinket", slot = 14, add = true, label = "Trinket 2" },
     { key = "hs",         kind = "queued", queued = "hsQueued", icon = HS_ICON },
     { key = "cleave",     kind = "queued", queued = "cleaveQueued", icon = CLEAVE_ICON },
     { key = "opProc",     kind = "opProc" },
@@ -1444,7 +1452,7 @@ function D.AuraDefPreviewTex(def)
     if k == "buff" then return S.buffIcons and S.buffIcons[def.buff]
     elseif k == "salvMissing" or k == "salvActive" then return SALV_ICON
     elseif k == "shoutRem" then return BS_REM_ICON
-    elseif k == "trinket" then return S.trinket13.texture
+    elseif k == "trinket" then return ((def.slot == 14) and S.trinket14 or S.trinket13).texture
     elseif k == "queued" then return def.icon
     elseif k == "opProc" then return OP_ICON
     elseif k == "hamstring" then return hamstringIcon
@@ -1751,7 +1759,7 @@ local function UpdateAuraIcon(icon, def)
     elseif def.kind == "trinket" then
         -- No-buff case only: slot 13 icon + cd swipe/desat. Active buffs
         -- are handled as clones in RefreshAuraRow.
-        local t = S.trinket13
+        local t = (def.slot == 14) and S.trinket14 or S.trinket13
         if not t.texture then return false end
         icon:SetIconTexture(t.texture)
         icon.buffRef = nil
@@ -1769,7 +1777,7 @@ local function UpdateAuraIcon(icon, def)
         local Hs = ns.Hesitation
         local tname = "-"
         if Hs and Hs.cds then
-            for _, e in ipairs(Hs.cds) do if e.slot == 13 then tname = e.name break end end
+            for _, e in ipairs(Hs.cds) do if e.slot == (def.slot or 13) then tname = e.name break end end
         end
         ApplyHesitation(icon, tname, icon.trinketCd)
         return true
@@ -1809,7 +1817,7 @@ local function UpdateAuraIconText(icon, def)
         return
     end
     if def.kind == "trinket" then
-        local t = S.trinket13
+        local t = (def.slot == 14) and S.trinket14 or S.trinket13
         if icon.buffRef then
             local rem = math.max(0, (icon.buffRef.expirationTime or 0) - now)
             icon:SetText("p", W.FormatTime(rem, 1))
@@ -1909,7 +1917,7 @@ local function AuraHandle(def, cfg)
         end
         if off then
             icon:Hide()
-            if def.kind == "trinket" then HideTrinketClones(1) end
+            if def.kind == "trinket" and def.slot ~= 14 then HideTrinketClones(1) end
             return
         end
         icon:SetIconTexture(D.AuraDefPreviewTex(def) or QUESTION_ICON)
@@ -1919,7 +1927,16 @@ local function AuraHandle(def, cfg)
         icon:SetText("p", "")
         icon:SetText("s", "")
         placeIcon(icon, def.key)
-        if def.kind == "trinket" then HideTrinketClones(1) end
+        if def.kind == "trinket" and def.slot ~= 14 then HideTrinketClones(1) end
+        return
+    end
+    -- the second slot: its own icon and cooldown, nothing else
+    if def.kind == "trinket" and def.slot == 14 then
+        if not off and UpdateAuraIcon(icon, def) then
+            placeIcon(icon, def.key)
+        else
+            W.SetShownAnimated(icon, false, true)
+        end
         return
     end
     if def.kind == "trinket" then

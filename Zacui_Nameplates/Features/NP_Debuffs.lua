@@ -218,6 +218,22 @@ end
 D.MemberEnabled = MemberEnabled
 
 local function GSize(group) return (group and group.fontSize) or 11 end
+-- THE ICON'S OWN SIZE (2026-11-19, Zac: "i need to be able to resize the
+-- debuffs and stuff on the nameplates"): group.iconSize, in pixels. Not
+-- set, an icon is the count's size + 2 as it always was, so a setup from
+-- before looks the same and the count's size still moves it. group.iconGap
+-- is the space between a row's icons (not set: 2).
+local function ISize(group)
+    local own = group and tonumber(group.iconSize)
+    if own and own >= 1 then return own end
+    return GSize(group) + 2
+end
+local function IGap(group)
+    local own = group and tonumber(group.iconGap)
+    if own and own >= 0 then return own end
+    return 2
+end
+D.IconSize, D.IconGap = ISize, IGap
 -- the timer defaults to 60% of the group font, floored at 7pt: below
 -- that the outline eats the glyphs
 local function TSize(group)
@@ -277,7 +293,7 @@ end
 -- sizes; restyled only when the size, the spec or the plate font moved.
 local function StyleElem(elem, group)
     local fSize, smallSize = GSize(group), TSize(group)
-    local sz = fSize + 2
+    local sz = ISize(group)
     elem.icon:SetSize(sz, sz)
     local face = NP.FontPath and NP.FontPath() or ""
     local cf, tf = group.countFont, group.timerFont
@@ -359,7 +375,7 @@ function D.UnderReach(f)
             if g.enabled and HangsUnder(g) then
                 local e = f.dbGroups[g.id]
                 if e and (e.shownN or 0) > 0 then
-                    local h = ((g.fontSize or 11) + 2) + math.abs(g.offsetY or 0)
+                    local h = ISize(g) + math.abs(g.offsetY or 0)
                     if h > reach then reach = h end
                 end
             end
@@ -394,8 +410,8 @@ function D.SideReach(f)
             local e = f.dbGroups[g.id]
             local fSize = GSize(g)
             -- only what crosses the middle of the bar, where the side lines run
-            if e and (e.shownN or 0) > 0 and math.abs(g.offsetY or 0) <= (fSize + 2) / 2 + barH / 2 then
-                local iconHalf = e.icon:IsShown() and (fSize + 2) / 2 or 0
+            if e and (e.shownN or 0) > 0 and math.abs(g.offsetY or 0) <= ISize(g) / 2 + barH / 2 then
+                local iconHalf = e.icon:IsShown() and ISize(g) / 2 or 0
                 local mainW = e.main:IsShown() and (e.main:GetStringWidth() or 0) or 0
                 local subW = e.sub:IsShown() and (e.sub:GetStringWidth() or 0) or 0
                 local right, left
@@ -575,7 +591,7 @@ local function RenderInto(elem, key, st, group, now)
     local tr, tg, tb = Col("text", "normal", 0.85, 0.85, 0.85)
     local beside = (group.timerPos ~= "under")
     local fSize, smallSize = GSize(group), TSize(group)
-    local compact = fSize + 2
+    local compact = ISize(group)
     local baseDrop = floor((fSize - smallSize) * 0.2 + 0.5)
 
     elem.icon:SetTexture(entry.icon)
@@ -654,8 +670,8 @@ local function RenderGroup(f, group, now)
             _ak[j + 1] = ak _as[j + 1] = as
         end
         if n > ROW_MAX then n = ROW_MAX end
-        local sz = GSize(group) + 2
-        local step = sz + 2
+        local sz = ISize(group)
+        local step = sz + IGap(group)
         local ep, rp = AnchorPoints(group)
         local dir = group.growDir or "right"
         local horiz = (dir == "left" or dir == "right")
@@ -687,7 +703,7 @@ local function RenderGroup(f, group, now)
         -- the raid-pack strip to follow on and the target name to check
         if group.attach == "bottomleft" and dir == "right" then
             local x = (group.offsetX or 0) + n * step
-            f.dbUnderW = n > 0 and (x - 2) or 0
+            f.dbUnderW = n > 0 and (x - IGap(group)) or 0
             local m = f.dbUnderEnd
             if not m then
                 m = CreateFrame("Frame", nil, f)

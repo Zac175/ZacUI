@@ -1315,8 +1315,33 @@ RegisterPage("Nameplates", function(L)
                     BindCheck(L, g, "showIcon", "Show the icon", nil, DApply)
                     BindCheck(L, g, "showCount", "Show the stack count", nil, DApply)
                     BindCheck(L, g, "showTimer", "Show the time left", nil, DApply)
+                    -- the icon's own size (2026-11-19, Zac: "i need to be
+                    -- able to resize the debuffs and stuff on the
+                    -- nameplates"). Not set, it is the count's size + 2 as
+                    -- before; the slider starts there.
+                    BindSlider(L, g, "iconSize", "Icon size", { min = 6, max = 48, format = PX, refresh = DApply,
+                        get = function(v) return math.floor((tonumber(v) or ((g.fontSize or 11) + 2)) + 0.5) end,
+                        desc = "The count and the timer keep their own sizes (Text tab)." })
+                    if (g.mode or "single") == "row" then
+                        BindSlider(L, g, "iconGap", "Space between icons", { min = 0, max = 12, format = PX, refresh = DApply,
+                            get = function(v) return tonumber(v) or 2 end })
+                    end
                     L:EndCard()
                 end
+            end
+            if dc.packStrip then
+                -- (the same setting as on the Position tab)
+                L:Card("Raid mod icons - size")
+                BindSlider(L, dc, "packScale", "Icon scale", { min = 0.3, max = 1.5, step = 0.05,
+                    refresh = function()
+                        local RM = ns.RaidMods
+                        if RM and RM.Layout and RM.Layout.Replace then RM.Layout.Replace() end
+                        if NPD.RefreshAll then NPD.RefreshAll() end
+                        if NP.Preview and NP.Preview.Refresh then NP.Preview.Refresh() end
+                    end,
+                    format = function(v) return math.floor(v * 100 + 0.5) .. "%" end,
+                    desc = "What the raid mods put on a mob's plate (Disarm, Enrage...)." })
+                L:EndCard()
             end
         end
 
@@ -1568,7 +1593,7 @@ RegisterPage("Nameplates", function(L)
             for _, g in ipairs(dc.groups) do
                 if g.enabled then
                     L:Card((g.name or g.id) .. " - text")
-                    BindFont(L, "Count / icon size", g, "fontSize", "countFont", 11,
+                    BindFont(L, tonumber(g.iconSize) and "Count" or "Count / icon size", g, "fontSize", "countFont", 11,
                         { min = 7, max = 40, refresh = DApply, sample = "5  3" })
                     BindFont(L, "Timer", g, "timerSize", "timerFont", math.max(7, math.floor((g.fontSize or 11) * 0.6)),
                         { min = 6, max = 30, refresh = DApply, sample = "25s  2m" })

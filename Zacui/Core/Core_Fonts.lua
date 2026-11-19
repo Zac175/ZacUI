@@ -149,6 +149,83 @@ local function HouseOrig(fs)
     return cur
 end
 
+-- ============================================================
+-- THE GAME'S CHAT WINDOWS (2026-11-19, Zac: "font for blizzard ingame chat
+-- is not sticking when i pick that in zui for other users").
+-- A chat window follows ChatFontNormal only until the game sets a font on
+-- the window itself - and it does, for every window, each time it reads
+-- its chat windows back (login, a reload) and from its own Font Size
+-- menu: the size goes on with SetFont, together with whatever face the
+-- window wore at that moment. Read back before ZacUI's font was on the
+-- font objects, a window kept the game's face from then on, and a font
+-- picked during play never reached a window that had been through that.
+-- With the ZacUI chat look or a message font picked on the Chat page the
+-- chat module dressed the windows itself, which is why it held there and
+-- for nobody else.
+-- So the face goes on the windows themselves: ZacUI's font when one is
+-- chosen (not under the Classic look, whose face is the game's); each
+-- window's size and outline are left as they are. "Blizzard default" puts
+-- the game's chat face back on a window still wearing the one put here.
+-- Done when the font is applied, a moment after a loading screen, when
+-- the game reads its chat windows back and when it opens a new one.
+-- Prat dresses the chat itself: with Prat loaded nothing is touched.
+-- ============================================================
+local lastChatFace
+local function SameFile(a, b)
+    if a == b then return true end
+    if type(a) ~= "string" or type(b) ~= "string" then return false end
+    return a:lower():gsub("/", "\\") == b:lower():gsub("/", "\\")
+end
+local function DressChatWindow(cf, want, stock)
+    if type(cf) ~= "table" or not (cf.GetFont and cf.SetFont) then return end
+    local cur, size, flags = cf:GetFont()
+    if not size then return end
+    if want then
+        if not SameFile(cur, want) then
+            local ok, set = pcall(cf.SetFont, cf, want, size, flags or "")
+            if not (ok and set) and cur then pcall(cf.SetFont, cf, cur, size, flags or "") end
+        end
+    elseif lastChatFace and SameFile(cur, lastChatFace) and stock and not SameFile(stock, cur) then
+        pcall(cf.SetFont, cf, stock, size, flags or "")
+    end
+end
+local function ChatFaces()
+    local cfg = ZacUIDB and ZacUIDB.font
+    if not cfg or _G.Prat ~= nil then return nil, nil, false end
+    local want = (not LookGameFont(nil)) and ResolveFontPath(cfg.name) or nil
+    local base = fontBase.ChatFontNormal
+    return want, base and base.path or nil, true
+end
+local function DressChatWindows()
+    local want, stock, on = ChatFaces()
+    if not on then return end
+    for _, name in ipairs(_G.CHAT_FRAMES or {}) do DressChatWindow(_G[name], want, stock) end
+    if want then lastChatFace = want end
+end
+-- one window (the chat module, after it has put a window's own font back)
+function ns.DressChatWindow(cf)
+    local want, stock, on = ChatFaces()
+    if on then DressChatWindow(cf, want, stock) end
+end
+ns.DressChatWindows = DressChatWindows
+
+do
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    pcall(ev.RegisterEvent, ev, "UPDATE_CHAT_WINDOWS")
+    pcall(ev.RegisterEvent, ev, "UPDATE_FLOATING_CHAT_WINDOWS")
+    ev:SetScript("OnEvent", function(_, event)
+        if not (C_Timer and C_Timer.After) then return end
+        -- (after the game has set the windows' sizes for this event)
+        C_Timer.After(event == "PLAYER_ENTERING_WORLD" and 1 or 0.1, DressChatWindows)
+    end)
+    if hooksecurefunc and type(_G.FCF_OpenTemporaryWindow) == "function" then
+        pcall(hooksecurefunc, "FCF_OpenTemporaryWindow", function()
+            if C_Timer and C_Timer.After then C_Timer.After(0, DressChatWindows) end
+        end)
+    end
+end
+
 local function ApplyFonts()
     local cfg = ZacUIDB and ZacUIDB.font
     if not cfg then return end
@@ -161,6 +238,7 @@ local function ApplyFonts()
     -- to defaults has to be able to walk the objects and put them back.
     if not path and delta == 0 and not cfg.outline and not next(fontBase) then
         houseEpoch = houseEpoch or FontEpoch()
+        DressChatWindows()
         return
     end
 
@@ -209,6 +287,8 @@ local function ApplyFonts()
         if ns.StyleChanged then ns.StyleChanged() end
     end
     houseEpoch = epoch
+    -- the game's chat windows wear the face themselves (above)
+    DressChatWindows()
 end
 
 

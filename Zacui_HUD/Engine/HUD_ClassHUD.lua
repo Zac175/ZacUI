@@ -160,7 +160,10 @@ local function DefaultsFor(def)
         aux = {
             enabled = false,
             x = 0, y = -400, iconSize = 30, spacing = 4,
-            trinket1 = true, trinket2 = true, racial = true,
+            -- (slot 2 starts off - 2026-11-19, Zac: "i want slot 2 off by
+            -- default and only slot 1 showing"; a HUD already set up keeps
+            -- what it has saved)
+            trinket1 = true, trinket2 = false, racial = true,
         },
         colors = ns.CopySetting and ns.CopySetting(COLOR_DEFAULTS) or COLOR_DEFAULTS,
     }
@@ -583,6 +586,16 @@ function Engine:Elements()
     return list
 end
 
+-- The Auto Shot bar's size (2026-11-19, Zac: "make sure all hud elements
+-- bars etc have proper sizing"): its own once it is set on the page
+-- (pos.ranged.own), until then the swing bar's, as it always was - a HUD
+-- already set up does not change.
+local function RangedSize(r)
+    local g, s = r.pos.ranged, r.pos.swing
+    if type(g) == "table" and g.own then return g.w or s.w or 316, g.h or s.h or 2 end
+    return s.w or 316, s.h or 2
+end
+
 function Engine:CreateAnchors()
     local sizes = {
         Main = { 36, 28 }, AuraRow = { 25, 25 }, DebuffRow = { 26, 26 }, Reminders = { 40, 40 },
@@ -743,7 +756,8 @@ function Engine:BuildBars()
         self.swingBar = b
     end
     if bars.ranged then
-        local b = W.CreateBar(self.anchors.Ranged, { width = r.pos.swing.w, height = r.pos.swing.h, spark = true,
+        local rw, rh = RangedSize(r)
+        local b = W.CreateBar(self.anchors.Ranged, { width = rw, height = rh, spark = true,
             barColor = self:Col("ranged") })
         b:SetFrameStrata(HUD_STRATA)
         b:SetPoint("CENTER", self.anchors.Ranged, "CENTER", 0, 0)
@@ -1278,7 +1292,7 @@ function Engine:ApplySizes()
         self.holders[anchorKey]:SetSize(w, h + (extra or 0))
     end
     size(self.swingBar, "Swing", r.pos.swing.w or 316, r.pos.swing.h or 2)
-    size(self.rangedBar, "Ranged", r.pos.swing.w or 316, r.pos.swing.h or 2)
+    size(self.rangedBar, "Ranged", RangedSize(r))
     size(self.manaBar, "Mana", r.pos.mana.w or 234, r.pos.mana.h or 4, 6)
     if self.fsrBar then self.fsrBar:SetSize(r.pos.mana.w or 234, 3) end
     size(self.powerBar, "Power", r.pos.power.w or 234, r.pos.power.h or 6, 4)
@@ -1874,10 +1888,22 @@ function Engine:Tab_Look(L, cfg)
             { "Power bar width", 100, 500, r.pos.power.w, function(v) r.pos.power.w = v eng:ApplySizes() end, Px },
             { "Power bar height", 2, 16, r.pos.power.h, function(v) r.pos.power.h = v eng:ApplySizes() end, Px })
     end
-    if bars.swing or bars.ranged then
+    if bars.swing then
         SliderPair(L,
             { "Swing bar width", 100, 500, r.pos.swing.w, function(v) r.pos.swing.w = v eng:ApplySizes() end, Px },
             { "Swing bar height", 1, 12, r.pos.swing.h, function(v) r.pos.swing.h = v eng:ApplySizes() end, Px })
+    end
+    if bars.ranged then
+        -- (its own size from the first time either slider moves; until then the swing bar's)
+        local rw, rh = RangedSize(r)
+        local function Own()
+            local g = r.pos.ranged
+            if not g.own then g.w, g.h = RangedSize(r) g.own = true end
+            return g
+        end
+        SliderPair(L,
+            { "Auto Shot bar width", 100, 500, rw, function(v) Own().w = v eng:ApplySizes() end, Px },
+            { "Auto Shot bar height", 1, 12, rh, function(v) Own().h = v eng:ApplySizes() end, Px })
     end
     if bars.wand then
         SliderPair(L,

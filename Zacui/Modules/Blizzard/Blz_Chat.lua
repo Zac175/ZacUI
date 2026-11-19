@@ -610,7 +610,8 @@ end
 -- A Blizzard string (tab label, edit box, a chat window's messages) in
 -- the chosen font, or back to what it had. `keepSize` leaves the size to
 -- Blizzard unless the spec names one (each chat window has its own).
-local function StyleBlizzText(fs, spec, keepSize)
+local stylingText = false     -- our own SetFont under way (HoldMessageFont below)
+local function StyleBlizzTextNow(fs, spec, keepSize)
     if not (fs and fs.GetFont and fs.SetFont) then return end
     if Empty(spec) then
         local s = fs._zStockFont
@@ -619,6 +620,9 @@ local function StyleBlizzText(fs, spec, keepSize)
             local _, size = fs:GetFont()
             pcall(fs.SetFont, fs, s[1], keepSize and (size or s[2]) or s[2], s[3])
             if fs.SetShadowOffset then fs:SetShadowOffset(s[4] or 0, s[5] or 0) end
+            -- a chat window put back to its own font: ZacUI's font, when
+            -- one is chosen, is on the windows themselves (Core_Fonts)
+            if fs.AddMessage and ns.DressChatWindow then ns.DressChatWindow(fs) end
         end
         return
     end
@@ -635,6 +639,47 @@ local function StyleBlizzText(fs, spec, keepSize)
         size = (keepSize and curSize) or s[2] or 12,
         outline = (s[3] and s[3] ~= "") and s[3] or "none",
         shadow = (s[4] or 0) ~= 0 or (s[5] or 0) ~= 0, shadowX = s[4], shadowY = s[5] })
+end
+local function StyleBlizzText(fs, spec, keepSize)
+    local was = stylingText
+    stylingText = true
+    local ok, err = pcall(StyleBlizzTextNow, fs, spec, keepSize)
+    stylingText = was
+    if not ok then error(err, 0) end
+end
+
+-- THE MESSAGE FONT, HELD (2026-11-19, Zac: "font for blizzard ingame chat
+-- is not sticking when i pick that in zui for other users"). The game
+-- sets a chat window's font again by itself - when its chat windows are
+-- read back from the server (a loading screen can bring that on), when a
+-- size is picked in its own chat menu - and that wiped the font, size and
+-- outline picked on the Chat page until something else happened to
+-- refresh the chat. A window whose font is set by anything but ZacUI is
+-- dressed again on the next frame (once, however many times it was set);
+-- the size the game just gave it becomes the window's own size, which a
+-- size picked on the Chat page still goes over. Nothing picked and no
+-- ZacUI look: the window is left exactly as the game set it.
+local fontAgain = {}
+local function HoldMessageFont(cf)
+    if not cf or cf._zFontHeld or type(cf.SetFont) ~= "function" or not hooksecurefunc then return end
+    cf._zFontHeld = true
+    pcall(hooksecurefunc, cf, "SetFont", function(self, path, size)
+        if stylingText then return end
+        local stock = self._zStockFont
+        if stock then
+            -- (what the game hands it is its own font from here on)
+            if tonumber(size) then stock[2] = size end
+        end
+        if fontAgain[self] then return end
+        fontAgain[self] = true
+        C_Timer.After(0, function()
+            fontAgain[self] = nil
+            if not dock.built then return end
+            local spec = Chat.FontSpec("messages", DB())
+            if Empty(spec) and not self._zStockFont then return end
+            StyleBlizzText(self, spec, true)
+        end)
+    end)
 end
 
 -- WHICH FONT A BLIZZARD STRING WEARS: the one picked on the Chat page, or
@@ -2419,6 +2464,7 @@ function Chat.Refresh()
         if cf.SetFading then cf:SetFading(d.fade and true or false) end
         ApplyFadeTimes(cf, d)
         StyleBlizzText(cf, Chat.FontSpec("messages", d), true)
+        HoldMessageFont(cf)
         Chat.ApplyIndent(cf, d)
         Chat.StyleGrip(cf)
         SkinTab(cf)
@@ -2536,16 +2582,157 @@ function Chat.ApplyWidth()
     RefreshSoon()
 end
 
+-- ============================================================
+-- HELD AGAINST THE GAME'S OWN EDIT MODE (2026-11-19, Zac: "the unit
+-- frames in chat sometimes reposition when taking a portal or summon
+-- without zlayout enabled ... its getting moved because of edit mode in
+-- wow").
+-- Where the game has an Edit Mode (1.15.9 on) the chat window is one of
+-- its systems, and it puts the window back at ITS layout's place and size
+-- every time it applies its layouts again: when the server sends them
+-- (EDIT_MODE_LAYOUTS_UPDATED - a portal or a summon can bring that on)
+-- and every time Edit Mode is closed. The spot and the width used to be
+-- applied once, a second after login, so that undid them. Now:
+--   * whenever the window is placed or sized by anything (SetPoint /
+--     SetSize / SetWidth / SetHeight on it, seen after the fact), on a
+--     loading screen and on the layouts' own event, the spot and width
+--     are looked at again a moment later and put back where they differ;
+--   * nothing is put back while the game's Edit Mode is open or a mouse
+--     button is held (a drag is never pulled back). When Edit Mode closes
+--     and the chat window's entry in the saved layout is not what it was
+--     when it opened, the player moved or sized it there: where it stands
+--     now is the new spot;
+--   * whatever moved the window, the frames fitted to the chat box (the
+--     raid chat's, the raid lined up with the chat) are fitted again;
+--   * at most HOLD_MAX times in HOLD_WINDOW seconds, so two things that
+--     both insist never chase each other.
+-- With neither "same spot" nor "same width" on, the window is the game's
+-- to place and only the fitting-again happens.
+-- ============================================================
+local HOLD_MAX, HOLD_WINDOW = 6, 10
+local holdTimes, holdAsked = {}, false
+local emOpen, emSaved = false, nil
+local lastRect
+local AskHold
+
+local function RectKey(cf)
+    local sp = ReadSpot(cf)
+    return sp and (sp.x .. "|" .. sp.y .. "|" .. sp.w .. "|" .. sp.h) or nil
+end
+
+-- the chat window's entry in the game's saved Edit Mode layout, as one
+-- string (nil where there is no Edit Mode)
+local function SavedKey(cf)
+    local info = cf and cf.savedSystemInfo
+    if type(info) ~= "table" then return nil end
+    local a = type(info.anchorInfo) == "table" and info.anchorInfo or {}
+    local rel = a.relativeTo
+    if type(rel) == "table" then rel = rel.GetName and rel:GetName() or "frame" end
+    local parts = { tostring(a.point), tostring(rel), tostring(a.relativePoint),
+                    tostring(a.offsetX), tostring(a.offsetY), tostring(info.isInDefaultPosition) }
+    if type(info.settings) == "table" then
+        for _, s in ipairs(info.settings) do
+            if type(s) == "table" then parts[#parts + 1] = tostring(s.setting) .. "=" .. tostring(s.value) end
+        end
+    end
+    return table.concat(parts, "|")
+end
+
+local function Hold()
+    holdAsked = false
+    local cf = _G.ChatFrame1
+    if not (cf and spotReady) or emOpen then return end
+    -- a drag in progress: look again once the button is up
+    if IsMouseButtonDown and IsMouseButtonDown("LeftButton") then AskHold(0.3) return end
+    local d = DB()
+    if d.sameSpot or d.sameWidth then
+        local now = GetTime()
+        for i = #holdTimes, 1, -1 do
+            if now - holdTimes[i] > HOLD_WINDOW then table.remove(holdTimes, i) end
+        end
+        if #holdTimes < HOLD_MAX then
+            local before = RectKey(cf)
+            if d.sameSpot then ApplySpot(d, cf) end
+            Chat.ApplyWidth()
+            if RectKey(cf) ~= before then holdTimes[#holdTimes + 1] = now end
+        end
+    end
+    local rect = RectKey(cf)
+    if rect ~= lastRect then
+        local first = lastRect == nil
+        lastRect = rect
+        if not first then
+            RefreshSoon()
+            local Z = _G.ZacUF
+            if Z and Z.FitRaidToChat then C_Timer.After(0, function() pcall(Z.FitRaidToChat) end) end
+        end
+    end
+end
+
+AskHold = function(delay)
+    if holdAsked then return end
+    holdAsked = true
+    C_Timer.After(delay or 0.1, Hold)
+end
+Chat.HoldSpot = AskHold
+
 do
+    local cf = _G.ChatFrame1
+    if cf and hooksecurefunc then
+        local function Placed() if spotReady then AskHold(0.1) end end
+        for _, m in ipairs({ "SetPoint", "SetSize", "SetWidth", "SetHeight" }) do
+            if type(cf[m]) == "function" then pcall(hooksecurefunc, cf, m, Placed) end
+        end
+    end
+
     local wev = CreateFrame("Frame")
     wev:RegisterEvent("PLAYER_ENTERING_WORLD")
-    -- after Blizzard has put the window back where this character had it
-    wev:SetScript("OnEvent", function()
+    pcall(wev.RegisterEvent, wev, "EDIT_MODE_LAYOUTS_UPDATED")
+    wev:SetScript("OnEvent", function(_, event)
+        if event == "EDIT_MODE_LAYOUTS_UPDATED" then
+            if spotReady then AskHold(0.2) end
+            return
+        end
+        -- after Blizzard has put the window back where this character had it
         C_Timer.After(1, function()
+            local first = not spotReady
             spotReady = true
-            Chat.ApplyWidth()
+            if first then
+                Chat.ApplyWidth()
+                lastRect = _G.ChatFrame1 and RectKey(_G.ChatFrame1) or nil
+            else
+                AskHold(0)
+            end
         end)
+        -- and once more when a slow load has settled
+        C_Timer.After(3.5, function() AskHold(0) end)
     end)
+
+    -- the game's Edit Mode opening and closing (EventRegistry is the
+    -- game's own notice board; the owner table is ours alone)
+    if EventRegistry and EventRegistry.RegisterCallback then
+        pcall(EventRegistry.RegisterCallback, EventRegistry, "EditMode.Enter", function()
+            emOpen = true
+            emSaved = SavedKey(_G.ChatFrame1)
+        end, { zacui = "chat.spot.enter" })
+        pcall(EventRegistry.RegisterCallback, EventRegistry, "EditMode.Exit", function()
+            local was = emSaved
+            emOpen, emSaved = false, nil
+            local cf = _G.ChatFrame1
+            if not cf then return end
+            local d = DB()
+            local now = SavedKey(cf)
+            if spotReady and was ~= nil and now ~= nil and now ~= was and (d.sameSpot or d.sameWidth) then
+                -- moved or sized in Edit Mode: that is the spot now
+                local sp = ReadSpot(cf)
+                if sp then
+                    if d.sameSpot then d.spot = sp end
+                    if d.sameWidth then d.width = math.floor(sp.w + 0.5) end
+                end
+            end
+            AskHold(0.2)
+        end, { zacui = "chat.spot.exit" })
+    end
 end
 
 function Chat.Diagnose()

@@ -713,47 +713,50 @@ end
 --   Word: Death and Devouring Plague for every race (Shadow). Binding Heal
 --   has no cooldown and Litany of Light is passive: nothing to draw.
 -- ------------------------------------------------------------
+-- (2026-11-19, Zac: "for the trinket stuff on the huds i want slot 2 off by
+-- default and only slot 1 showing but some people want it the other way
+-- around": a spec shows Trinket slot 1; slot 2 is a tick on the page.)
 local ROLE_DEFS = {
     { key = "discipline", label = "Discipline", tab = 1, show = {
           main = { "pws", "innerFocus", "powerInfusion", "fade", "desperate", "fearWard", "psychicScream",
-                   "racial", "trinket1", "trinket2", "potion" },
+                   "racial", "trinket1", "potion" },
           buffs = { "innerFocus", "powerInfusion", "weakenedSoul", "zhc" },
           debuffs = {} },
       tbc = { show = {
           main = { "painSuppression", "powerInfusion", "innerFocus", "shadowfiend", "pws", "prayerOfMending",
                    "fade", "desperate", "fearWard", "psychicScream", "symbolOfHope",
-                   "racial", "trinket1", "trinket2", "potion" },
+                   "racial", "trinket1", "potion" },
           buffs = { "innerFocus", "powerInfusion", "painSuppression", "weakenedSoul" } } },
       forever = { show = {
           main = { "penance", "powerInfusion", "innerFocus", "pws", "desperate", "fearWard", "fade",
-                   "psychicScream", "racial", "trinket1", "trinket2", "potion" } } } },
+                   "psychicScream", "racial", "trinket1", "potion" } } } },
     { key = "holy", label = "Holy", tab = 2, show = {
           main = { "pws", "innerFocus", "fade", "desperate", "fearWard", "lightwell", "psychicScream",
-                   "racial", "trinket1", "trinket2", "potion" },
+                   "racial", "trinket1", "potion" },
           buffs = { "innerFocus", "weakenedSoul", "zhc" },
           debuffs = {} },
       tbc = { show = {
           main = { "prayerOfMending", "circleOfHealing", "shadowfiend", "innerFocus", "pws", "fade",
                    "desperate", "fearWard", "lightwell", "psychicScream", "symbolOfHope",
-                   "racial", "trinket1", "trinket2", "potion" },
+                   "racial", "trinket1", "potion" },
           buffs = { "innerFocus", "surgeOfLight", "clearcasting", "weakenedSoul" } } },
       forever = { show = {
           main = { "prayerOfMending", "innerFocus", "pws", "fade", "desperate", "fearWard", "lightwell",
-                   "psychicScream", "racial", "trinket1", "trinket2", "potion" } } } },
+                   "psychicScream", "racial", "trinket1", "potion" } } } },
     { key = "shadow", label = "Shadow", tab = 3, reminders = { shadowform = true }, show = {
           main = { "mindBlast", "pws", "innerFocus", "fade", "silence", "psychicScream", "desperate", "fearWard",
-                   "racial", "trinket1", "trinket2", "potion", "nade", "sapper" },
+                   "racial", "trinket1", "potion", "nade", "sapper" },
           buffs = { "innerFocus", "powerInfusion", "zhc" },
           debuffs = { "swp", "shadowWeaving" } },
       tbc = { show = {
           main = { "mindBlast", "swDeath", "shadowfiend", "innerFocus", "fade", "silence", "pws",
                    "psychicScream", "devouring", "desperate", "fearWard", "symbolOfHope",
-                   "racial", "trinket1", "trinket2", "potion" },
+                   "racial", "trinket1", "potion" },
           buffs = { "innerFocus", "powerInfusion" },
           debuffs = { "vampiricTouch", "swp", "vampiric", "shadowWeaving", "devouring" } } },
       forever = { show = {
           main = { "mindBlast", "swDeath", "devouring", "innerFocus", "pws", "fade", "silence", "psychicScream",
-                   "desperate", "fearWard", "racial", "trinket1", "trinket2", "potion", "nade", "sapper" },
+                   "desperate", "fearWard", "racial", "trinket1", "potion", "nade", "sapper" },
           debuffs = { "swp", "devouring", "vampiric", "shadowWeaving" } } } },
 }
 PR.RoleDefs = ROLE_DEFS
@@ -813,11 +816,18 @@ end
 -- An entry off its row: your tick (true = off, false = on) first, then the
 -- spec's preset for that row, then the entry's own default (the seventeen
 -- and the six debuffs on, everything newer off).
+-- (2026-11-19: the specs' lists no longer name Trinket slot 2. A save from
+-- before that day - cfg.presets = 1, see Storage below - keeps it where it
+-- was: on under a spec, until its own tick or "Reset to spec defaults".)
+local slot2WithSpec = false
 local function Off(role, row, hidden, def)
     local v = hidden and hidden[def.key]
     if v ~= nil then return v and true or false end
     local set = role and role.show[row]
-    if set then return not set[def.key] end
+    if set then
+        if slot2WithSpec and row == "main" and def.key == "trinket2" then return false end
+        return not set[def.key]
+    end
     return def.new and true or false
 end
 
@@ -835,7 +845,8 @@ end
 -- ones that showed on, everything that came with the presets off) and the
 -- Shadowform reminder its old "off", so no spec moves anything until
 -- "Reset to spec defaults". cfg.presets marks a save as done, frozen or
--- fresh.
+-- fresh: 1 = from before 2026-11-19 (Trinket slot 2 was on every spec's
+-- list: such a save keeps it on under a spec), 2 = from then on.
 --   In use = the HUD is switched on, or it carries a tick of your own.
 --   A save the HUD never read (ZacLayout writes spots into it) or one
 --   that is off with nothing ticked has nothing on screen to keep: it
@@ -872,13 +883,17 @@ end
 function PR.Store()
     local root = type(ZacUIDB) == "table" and ZacUIDB.hud or nil
     local raw = type(root) == "table" and root.priest or nil
-    if type(raw) == "table" and raw.presets then return HUD.Store("priest", DEFAULTS) end
+    if type(raw) == "table" and raw.presets then
+        slot2WithSpec = raw.presets == 1
+        return HUD.Store("priest", DEFAULTS)
+    end
     local inUse = InUse(raw)
     local cfg = HUD.Store("priest", DEFAULTS)
     if cfg and not cfg.presets then
         if inUse then Freeze(cfg) end
-        cfg.presets = 1
+        cfg.presets = 2
     end
+    slot2WithSpec = false
     return cfg
 end
 
@@ -892,6 +907,8 @@ function PR:ResetToSpec()
     wipe(cfg.debuffRow.hidden)
     wipe(cfg.auraRow.hidden)
     cfg.reminders.shadowform = nil
+    cfg.presets = 2   -- (the lists as they ship now: Trinket slot 2 is a tick)
+    slot2WithSpec = false
     for _, m in pairs(PR.LIVE.memo) do HUD.ForgetLayout(m) end
     if ns.SettingsChanged then ns.SettingsChanged("hud.role") end
     PR.Display:Refresh()

@@ -87,7 +87,8 @@ local DEFAULTS = {
     aux = {
         enabled = false,             -- WA "Paladin Aux" is use_never
         x = 0, y = -400, iconSize = 30, spacing = 4,
-        trinket1 = true, trinket2 = true, racial = true,
+        -- (slot 2 starts off, 2026-11-19; a HUD already set up keeps its own)
+        trinket1 = true, trinket2 = false, racial = true,
     },
     colors = COLOR_DEFAULTS,
 }
@@ -349,6 +350,7 @@ local function PalStore()
     local raw = type(root) == "table" and root.paladin or nil
     if raw ~= nil and raw == checked then return raw end
     local existed = type(raw) == "table" and next(raw) ~= nil
+    local slot2Saved = existed and type(raw.aux) == "table" and raw.aux.trinket2 ~= nil
     local db = HUD.Store("paladin", DEFAULTS)
     if not db then return nil end
     checked = db
@@ -369,6 +371,9 @@ local function PalStore()
         if existed and type(db.v2) ~= "table" then
             Keep(db)
             db._specs = "kept"
+            -- (2026-11-19: Trinket slot 2 starts off. A save kept from
+            -- before that holds no word on it had it on: it stays on.)
+            if not slot2Saved and type(db.aux) == "table" then db.aux.trinket2 = true end
         else
             db._specs = "on"
         end

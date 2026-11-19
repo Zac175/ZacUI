@@ -436,6 +436,7 @@ WH.State = {
                     oh = { start = 0, duration = 0 }, hasOH = false },
     items       = {},         -- itemId -> { count, bag, slot }
     trinket13   = { texture = nil, start = 0, duration = 0, enable = 0 },
+    trinket14   = { texture = nil, start = 0, duration = 0, enable = 0 },
     plateCount  = 0,          -- attackable nameplates near the player (sapper)
 }
 local S = WH.State
@@ -1045,13 +1046,17 @@ local function UpdateMisc()
         S.ap = (base or 0) + (posBuff or 0) + (negBuff or 0)
     end
 
-    local t = S.trinket13
-    t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", 13) or nil
-    if GetInventoryItemCooldown then
-        local start, duration, enable = GetInventoryItemCooldown("player", 13)
-        -- (hidden on WoW Forever: read as ready)
-        if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 1 end
-        t.start, t.duration, t.enable = start or 0, duration or 0, enable or 0
+    -- both trinket slots (2026-11-19, Zac: the HUD "needs to show trinket 1
+    -- and 2")
+    for slot = 13, 14 do
+        local t = (slot == 13) and S.trinket13 or S.trinket14
+        t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", slot) or nil
+        if GetInventoryItemCooldown then
+            local start, duration, enable = GetInventoryItemCooldown("player", slot)
+            -- (hidden on WoW Forever: read as ready)
+            if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 1 end
+            t.start, t.duration, t.enable = start or 0, duration or 0, enable or 0
+        end
     end
     -- Offhand weapon present? (second return of UnitAttackSpeed)
     if UnitAttackSpeed then
