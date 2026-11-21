@@ -28,6 +28,19 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.18",
+        date = "2026-11-20",
+        title = "A chat window that stays put in raids",
+        sections = {
+            {
+                type = "fixed",
+                items = {
+                    "With \"Same chat size and spot on every character\" on, the chat window could jump to the game's default place and back over and over in a raid, and the raid or party frames in the chat box went with it or were left out of place until the fight ended. The window stays on its spot.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.17",
         date = "2026-11-20",
         title = "A size for every piece on screen, a macro cleaner, and boss loot",

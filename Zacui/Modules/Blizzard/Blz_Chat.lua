@@ -2608,6 +2608,31 @@ end
 --     both insist never chase each other.
 -- With neither "same spot" nor "same width" on, the window is the game's
 -- to place and only the fitting-again happens.
+--
+-- THE GAME'S OWN POSITION MANAGER, AT ONCE (2026-11-20, Zac: "zui chat
+-- and raid frames still jittering all over the place in raid").
+-- FACT (1.15.9, Blizzard_UIParentPanelManager's Classic overrides and
+-- EditModeManager): while the chat window is still at the Edit Mode
+-- layout's DEFAULT place - it is, unless the player moved it inside the
+-- game's own Edit Mode; ZacUI's spot does not count - every
+-- UIParent_ManageFramePositions() clears its points and anchors it to
+-- that default again (EditModeManagerFrame:SetToLayoutAnchor). The game
+-- runs that whenever one of its managed bars or boxes shows, hides or
+-- changes: a stance or pet bar, an experience or reputation bar, and
+-- more. In a raid that is all the time, in fights too.
+-- The hold above saw it a tenth of a second LATER, at most HOLD_MAX times
+-- in HOLD_WINDOW seconds, and not at all while the left mouse button was
+-- down (turning the camera). In between, the window sat on the game's
+-- default: the chat box jumped there and back, the frames fitted into it
+-- were fitted to the wrong place, and in a fight (they cannot be moved
+-- then) stayed there until it ended.
+-- Now that one call is answered IN THE SAME CALL: PutBackNow sets the
+-- spot's point again right behind the game's, before anything is drawn,
+-- so the window never shows anywhere else. It moves the point only (the
+-- game's manager does not touch the size), saves nothing and fits
+-- nothing again, because nothing has changed. Not while the game's Edit
+-- Mode is open, and only with "same spot" on and applied. Everything
+-- else that places the window still goes through the hold above.
 -- ============================================================
 local HOLD_MAX, HOLD_WINDOW = 6, 10
 local holdTimes, holdAsked = {}, false
@@ -2676,10 +2701,47 @@ AskHold = function(delay)
 end
 Chat.HoldSpot = AskHold
 
+-- (see THE GAME'S OWN POSITION MANAGER above) Returns true when the
+-- window was put back.
+local putting, putCount = false, 0
+local function PutBackNow()
+    if putting or emOpen or not (spotReady and spotApplied) then return false end
+    local cf = _G.ChatFrame1
+    if not cf then return false end
+    local d = DB()
+    if not d.sameSpot then return false end
+    local sp = type(d.spot) == "table" and d.spot or nil
+    if not (sp and tonumber(sp.x) and tonumber(sp.y)) then return false end
+    local l, b = cf:GetLeft(), cf:GetBottom()
+    if l and b and math.abs(l - sp.x) < 0.5 and math.abs(b - sp.y) < 0.5 then return false end
+    putting = true
+    cf:ClearAllPoints()
+    cf:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", sp.x, sp.y)
+    putting = false
+    putCount = putCount + 1
+    return true
+end
+Chat.PutBackNow = PutBackNow
+function Chat.PutBackCount() return putCount end
+
+-- the game's manager anchors a frame through this one call
+local managerHooked = false
+local function HookManager()
+    if managerHooked or not hooksecurefunc then return end
+    local em = _G.EditModeManagerFrame
+    if not (em and type(em.SetToLayoutAnchor) == "function") then return end
+    managerHooked = true
+    hooksecurefunc(em, "SetToLayoutAnchor", function(_, frame)
+        if frame == _G.ChatFrame1 then PutBackNow() end
+    end)
+end
+HookManager()
+
 do
     local cf = _G.ChatFrame1
     if cf and hooksecurefunc then
-        local function Placed() if spotReady then AskHold(0.1) end end
+        -- (our own put-back is not news)
+        local function Placed() if spotReady and not putting then AskHold(0.1) end end
         for _, m in ipairs({ "SetPoint", "SetSize", "SetWidth", "SetHeight" }) do
             if type(cf[m]) == "function" then pcall(hooksecurefunc, cf, m, Placed) end
         end
@@ -2689,6 +2751,7 @@ do
     wev:RegisterEvent("PLAYER_ENTERING_WORLD")
     pcall(wev.RegisterEvent, wev, "EDIT_MODE_LAYOUTS_UPDATED")
     wev:SetScript("OnEvent", function(_, event)
+        HookManager()       -- (in case the game's Edit Mode came up after this file)
         if event == "EDIT_MODE_LAYOUTS_UPDATED" then
             if spotReady then AskHold(0.2) end
             return
