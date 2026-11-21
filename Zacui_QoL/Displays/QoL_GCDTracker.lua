@@ -347,7 +347,13 @@ local function Live()
     holder:SetFrameStrata("MEDIUM")
     holder:SetPoint("BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -10, 215)
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "GCD tracker", function() return holder end, "BOTTOMRIGHT", -10, 215)
+        ns.RegisterMover(MOVER, "GCD tracker", function() return holder end, "BOTTOMRIGHT", -10, 215, nil, {
+            -- (its icon size in Edit Mode: the page's own setting)
+            sizes = function()
+                return { { label = "Icon size", unit = "px", min = 16, max = 48, step = 1, fine = 1, def = 26,
+                    get = function() return tonumber(DB().size) or 26 end,
+                    set = function(v) DB().size = v if QoL.Refresh then QoL.Refresh() end end } }
+            end })
         if ns.ApplyMover then ns.ApplyMover(MOVER) end
     end
     holder:Hide()

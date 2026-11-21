@@ -820,7 +820,15 @@ local function Build()
 
     if ns.RegisterMover then
         ns.RegisterMover(MOVER, "Snowball button", function() return holder end, "CENTER", 776, 254, nil,
-            { secure = true })
+            -- (scale = false: the button has a Size setting of its own,
+            -- and its secure button sits on the screen, not in this frame)
+            { secure = true, scale = false,
+              -- (its size in Edit Mode: the page's own Size, in pixels)
+              sizes = function()
+                  return { { label = "Size", unit = "px", min = 24, max = 200, step = 2, fine = 1, def = 45,
+                      get = function() return tonumber(SB.Cfg().size) or 45 end,
+                      set = function(v) SB.Cfg().size = v SB.Apply() end } }
+              end })
         local pos = ZacUIDB and ZacUIDB.movers and ZacUIDB.movers[MOVER]
         if pos then
             holder:ClearAllPoints()

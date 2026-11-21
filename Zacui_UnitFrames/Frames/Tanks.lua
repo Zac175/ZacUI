@@ -124,7 +124,7 @@ end
 local function EnsureHandle(c, cfg)
     if c.mover then return c.mover end
     local m = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    m:SetSize(math.max(cfg.width, 90), 22)
+    m:SetSize(math.max(cfg.width * (ns.ScreenK and ns.ScreenK() or 1), 90), 22)
     m:SetPoint("BOTTOMLEFT", c, "TOPLEFT", 0, 2)
     m:SetFrameStrata("HIGH")
     m:SetMovable(true)
@@ -145,9 +145,12 @@ local function EnsureHandle(c, cfg)
         local l, b = self:GetLeft(), self:GetBottom()
         if l and b and not InCombatLockdown() then
             local w, h = c:GetWidth() or cfg.width, c:GetHeight() or cfg.height
-            local cx, cy = l + w / 2, (b - 2) - h / 2
+            -- (the handle is in the screen's units; the holder's size and
+            -- its saved spot are in its own - the pieces' one scale)
+            local k = ns.ScreenK and ns.ScreenK() or 1
+            local cx, cy = l + w * k / 2, (b - 2) - h * k / 2
             local ux, uy = UIParent:GetCenter()
-            local nx, ny = cx - ux, cy - uy
+            local nx, ny = (cx - ux) / k, (cy - uy) / k
             if ns.SnapValue then nx, ny = ns.SnapValue(nx), ns.SnapValue(ny) end
             cfg.follow = false
             cfg.point, cfg.x, cfg.y = "CENTER", nx, ny
@@ -169,6 +172,7 @@ local function Spawn()
     local c = CreateFrame("Frame", "ZacUF_tanksHeader", UIParent)
     c.cfg = cfg
     c:SetMovable(true)
+    if ns.ScreenK and ns.ScreenK() ~= 1 then c:SetScale(ns.ScreenK()) end   -- (the pieces' one scale, Core.lua)
     local h = CreateFrame("Frame", "ZacUF_TanksGroup", c, "SecureGroupHeaderTemplate")
     c.header = h
     c.headers = { h }
@@ -217,7 +221,7 @@ local function Spawn()
             end
         end
         if self.mover then
-            self.mover:SetWidth(math.max(cfg.width, 90))
+            self.mover:SetWidth(math.max(cfg.width * (ns.ScreenK and ns.ScreenK() or 1), 90))
             self.mover.label:SetText(cfg.follow ~= false and "Tanks (beside the raid)" or "Tanks (drag)")
             self.mover:SetShown(unlocked and cfg.enabled and true or false)
         end

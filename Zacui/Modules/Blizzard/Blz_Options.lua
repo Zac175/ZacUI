@@ -58,7 +58,7 @@ local function FadeOptionsArt(frame)
                     local c = GetColor("ui", "border")
                     r:SetTexture(FLAT)
                     r:SetVertexColor(c.r, c.g, c.b, 1)
-                    r:SetHeight(1)
+                    r:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(r, "TOP") end
                 else
                     Fade(r)
                 end
@@ -99,11 +99,11 @@ local function EdgeAround(frame, region, layer, sub)
         if side == "TOP" or side == "BOTTOM" then
             t:SetPoint(side .. "LEFT", region, side .. "LEFT")
             t:SetPoint(side .. "RIGHT", region, side .. "RIGHT")
-            t:SetHeight(1)
+            t:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "TOP") end
         else
             t:SetPoint("TOP" .. side, region, "TOP" .. side)
             t:SetPoint("BOTTOM" .. side, region, "BOTTOM" .. side)
-            t:SetWidth(1)
+            t:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "LEFT") end
         end
         strips[#strips + 1] = t
     end
@@ -600,7 +600,7 @@ local function SkinCategory(btn)
             PaintText(self.Label, "text", "gold")
         end
         local rule = Tex(btn, "ARTWORK")
-        rule:SetHeight(1)
+        rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
         rule:SetPoint("BOTTOMLEFT", 0, 4)
         rule:SetPoint("BOTTOMRIGHT", 0, 4)
         local a = GetColor("ui", "accent")
@@ -697,16 +697,16 @@ local function Segment(f)
     s.fill = Tex(f, "BACKGROUND", -7)
     s.fill:SetVertexColor(0, 0, 0, UI.S.ROW_ODD)
     s.l, s.r, s.t, s.b = Tex(f, "BORDER", 1), Tex(f, "BORDER", 1), Tex(f, "BORDER", 1), Tex(f, "BORDER", 1)
-    s.l:SetWidth(1)
+    s.l:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(s.l, "LEFT") end
     s.l:SetPoint("TOPLEFT", s.fill, "TOPLEFT")
     s.l:SetPoint("BOTTOMLEFT", s.fill, "BOTTOMLEFT")
-    s.r:SetWidth(1)
+    s.r:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(s.r, "LEFT") end
     s.r:SetPoint("TOPRIGHT", s.fill, "TOPRIGHT")
     s.r:SetPoint("BOTTOMRIGHT", s.fill, "BOTTOMRIGHT")
-    s.t:SetHeight(1)
+    s.t:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(s.t, "TOP") end
     s.t:SetPoint("TOPLEFT", s.fill, "TOPLEFT")
     s.t:SetPoint("TOPRIGHT", s.fill, "TOPRIGHT")
-    s.b:SetHeight(1)
+    s.b:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(s.b, "TOP") end
     s.b:SetPoint("BOTTOMLEFT", s.fill, "BOTTOMLEFT")
     s.b:SetPoint("BOTTOMRIGHT", s.fill, "BOTTOMRIGHT")
     TintAll({ s.l, s.r, s.t, s.b }, WHITE, UI.S.BORDER_A)
@@ -798,7 +798,7 @@ local function BuildChrome(sp)
     bar._zPaint = function(self) self._zFill:SetVertexColor(0, 0, 0, 0) end
     do
         local rule = Tex(bar, "ARTWORK", 1)
-        rule:SetHeight(1)
+        rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
         rule:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
         rule:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
         rule:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
@@ -850,7 +850,7 @@ local function BuildChrome(sp)
         -- (the settings window's sidebar: the window, a fifth darker)
         side:SetVertexColor(0, 0, 0, UI.S.SIDEBAR_A)
         local edge = Tex(sp, "BACKGROUND", -5)
-        edge:SetWidth(1)
+        edge:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(edge, "LEFT") end
         edge:SetPoint("TOPLEFT", side, "TOPRIGHT")
         edge:SetPoint("BOTTOMLEFT", side, "BOTTOMRIGHT")
         edge:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
@@ -864,7 +864,7 @@ local function BuildChrome(sp)
     foot:SetHeight(FOOT_H)
     foot:SetVertexColor(0, 0, 0, UI.S.HEAD_BAND_A)
     local frule = Tex(sp, "BACKGROUND", -5)
-    frule:SetHeight(1)
+    frule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(frule, "TOP") end
     frule:SetPoint("BOTTOMLEFT", foot, "TOPLEFT")
     frule:SetPoint("BOTTOMRIGHT", foot, "TOPRIGHT")
     frule:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)
@@ -915,7 +915,7 @@ local function SkinPageHeader(hd)
             r._zui_own = true
             r:SetTexture(FLAT)
             r:ClearAllPoints()
-            r:SetHeight(1)
+            r:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(r, "TOP") end
             r:SetPoint("BOTTOMLEFT", hd, "BOTTOMLEFT", 7, 6)
             r:SetPoint("BOTTOMRIGHT", hd, "BOTTOMRIGHT", -8, 6)
             r:SetVertexColor(1, 1, 1, UI.S.HEAD_DIV_A)

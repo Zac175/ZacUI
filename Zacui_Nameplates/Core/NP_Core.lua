@@ -652,7 +652,27 @@ local function PriorityWarnFrame()
     if ns.HUD and ns.HUD.PlaceAnchor then ns.HUD.PlaceAnchor("prioWarn", prioWarnHolder, { x = 0, y = 170 })
     else prioWarnHolder:SetPoint("CENTER", UIParent, "CENTER", 0, 170) end
     if ns.HUD and ns.HUD.RegisterMover then
-        ns.HUD.RegisterMover("prioWarn", "Priority mob count", prioWarnHolder, { x = 0, y = 170 })
+        -- (scale = true: its own size in Edit Mode, kept by the mover registry)
+        ns.HUD.RegisterMover("prioWarn", "Priority mob count", prioWarnHolder, { x = 0, y = 170 }, { scale = true,
+            -- (2026-11-20) its text size on its box: the count font's own
+            -- (priority.countFont.size, 22 with nothing saved)
+            sizes = function()
+                return { { label = "Text size", unit = "px", min = 10, max = 48, step = 1, fine = 1, def = 22,
+                    get = function()
+                        local p = DB().priority or {}
+                        return (type(p.countFont) == "table" and tonumber(p.countFont.size)) or 22
+                    end,
+                    set = function(v)
+                        local d = DB()
+                        d.priority = d.priority or {}
+                        local spec = {}
+                        for k, val in pairs(type(d.priority.countFont) == "table" and d.priority.countFont or {}) do spec[k] = val end
+                        spec.size = v
+                        d.priority.countFont = spec
+                        if prioWarn then NP.StylePrioWarn(prioWarn) end
+                        if ns.SettingsChanged then ns.SettingsChanged("nameplates.prio") end
+                    end } }
+            end })
     end
     -- the line rides a box of its own, so its entrance animation never
     -- touches the holder the mover places
@@ -1423,6 +1443,13 @@ function NP.ApplyTargetState(f, isTarget, anyTarget, cue, instant)
     -- SetScale(0) is a hard error; a hand-edited saved value is the
     -- only way to get one, but the plates must never die to it
     if type(scale) ~= "number" or scale <= 0 then scale = 1 end
+    -- (2026-11-20) the pieces' one scale (ns.Screen, "Size of the pieces
+    -- on screen") is on every plate: 1 until its owner moves that slider
+    do
+        local S = ns.Screen
+        local k = S and S.Scale and S.Scale() or 1
+        if type(k) == "number" and k > 0 and k ~= 1 then scale = scale * k end
+    end
     PlateScale(f, scale, instant)
     -- the target marks' entrance (Nameplates > Animation) as a plate
     -- becomes the target
@@ -1756,6 +1783,15 @@ if ns.Media and ns.Media.RegisterTarget then
             NP.RefreshAll()
         end,
     })
+end
+
+-- (2026-11-20) the pieces' one scale changed: every plate up now takes it
+-- (a plate that shows later reads it in NP.ApplyTargetState)
+if ns.Screen and ns.Screen.OnChange then
+    ns.Screen.OnChange(function()
+        if not NP.enabled then return end
+        for _, f in pairs(active) do NP.UpdateTarget(f, true) end
+    end)
 end
 
 -- shared with later ZacUI files

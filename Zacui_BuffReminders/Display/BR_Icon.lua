@@ -354,7 +354,37 @@ local function Holder()
     holder:SetFrameStrata("MEDIUM")
     holder:SetFrameLevel(50)
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Buff reminder", function() return holder end, "CENTER", 200, 0)
+        ns.RegisterMover(MOVER, "Buff reminder", function() return holder end, "CENTER", 200, 0, nil, {
+            -- (its own size in Edit Mode: the reminder's Scale under
+            -- "Layer and scale" on its page - icon.framePos.scale; the
+            -- scale sits on this frame, so its saved spot is rewritten to
+            -- stay put)
+            scale = { min = 0.5, max = 2, keep = true,
+                get = function()
+                    local fp = BR.Icon().framePos
+                    return (type(fp) == "table" and tonumber(fp.scale)) or 1
+                end,
+                set = function(v)
+                    -- (never onto the shared defaults)
+                    local c = BR.Cfg()
+                    local ic = c and c.icon
+                    if type(ic) ~= "table" then return end
+                    if type(ic.framePos) ~= "table" then
+                        if math.abs(v - 1) < 0.0005 then return end
+                        ic.framePos = {}
+                    end
+                    ic.framePos.scale = v
+                    Icon.ApplyLayer()
+                end },
+            -- (and its icon size: the page's own setting)
+            sizes = function()
+                return { { label = "Icon size", unit = "px", min = 20, max = 80, step = 1, fine = 1, def = 40,
+                    get = function() return tonumber(BR.Icon().iconSize) or 40 end,
+                    set = function(v)
+                        local c = BR.Cfg()
+                        if c and type(c.icon) == "table" then c.icon.iconSize = v end
+                    end } }
+            end })
         if ns.ApplyMover then ns.ApplyMover(MOVER) end
     end
     -- when it shows (icon.visibility, ZacUI's shape: fade rules on top of

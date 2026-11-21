@@ -758,7 +758,7 @@ function CT.NewTreeView(parent, geo)
     local rule = header:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("BOTTOMLEFT")
     rule:SetPoint("BOTTOMRIGHT")
     header._zPaint = function(self)

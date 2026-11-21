@@ -189,6 +189,8 @@ local function Edges(frame, layer)
         else
             e:SetPoint("TOP" .. side); e:SetPoint("BOTTOM" .. side); e:SetWidth(1)
         end
+        -- (2026-11-19: one screen pixel under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+        if ns.Pixel and ns.Pixel.Edge then ns.Pixel.Edge(e, side, frame) end
         list[#list + 1] = e
     end
     return list
@@ -693,6 +695,36 @@ local function Build()
             end,
             reset = function() Bar.Place() end,
             secure = true, own = true,
+            -- (its own size in Edit Mode: the bar's Scale setting, the
+            -- same number the Blessings page shows; the scale sits on this
+            -- frame, so its saved spot is rewritten to stay put)
+            scale = { min = 0.6, max = 1.6, keep = true,
+                get = function()
+                    local c = BL.Cfg()
+                    return (c and c.bar and tonumber(c.bar.scale)) or 1
+                end,
+                set = function(v)
+                    local c = BL.Cfg()
+                    if not c then return end
+                    c.bar = c.bar or {}
+                    c.bar.scale = v
+                    root:SetScale(v)
+                end },
+            -- (and its other sizes: the Blessings page's own four)
+            sizes = function()
+                local function E(label, field, lo, hi, def)
+                    return { label = label, unit = "px", min = lo, max = hi, step = 1, fine = 1, def = def,
+                        get = function() return tonumber(BarCfg()[field]) or def end,
+                        set = function(v)
+                            local c = BL.Cfg()
+                            if not c then return end
+                            c.bar = c.bar or {}
+                            c.bar[field] = v
+                        end }
+                end
+                return { E("Button height", "rowHeight", 14, 40, 24), E("Class column", "classWidth", 80, 260, 140),
+                    E("Player button", "playerWidth", 40, 160, 76), E("Space between", "gap", 0, 10, 2) }
+            end,
         })
     end
     Need(view, "aura")

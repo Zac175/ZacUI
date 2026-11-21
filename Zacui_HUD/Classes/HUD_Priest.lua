@@ -512,6 +512,79 @@ local function ApplyAnchorPositions()
     if holders.AuraRow then HUD.PlaceAnchor("prAuraRow", holders.AuraRow, cfg.auraRow) end
     if cfg.group then HUD.PlaceAnchor("prGroup", holders.GroupHandle, cfg.group) end
     LIVE.Main:SetScale(cfg.mainRow.scale or 1)
+    -- (2026-11-19: every piece has a scale now; nothing saved = 100 %)
+    LIVE.Debuffs:SetScale(tonumber(cfg.debuffRow.scale) or 1)
+    LIVE.Reminders:SetScale(tonumber(cfg.reminders.scale) or 1)
+    LIVE.Mana:SetScale(tonumber(cfg.resources.mana.scale) or 1)
+    LIVE.Wand:SetScale(tonumber(cfg.resources.wand.scale) or 1)
+    if LIVE.Buffs and holders.AuraRow then LIVE.Buffs:SetScale(tonumber(cfg.auraRow.scale) or 1) end
+end
+-- a piece's scale setting as its mover's own size (Edit Mode)
+-- (and its other sizes - the Look tab's own settings, ranges and call
+-- after a change - as rows under the picked box)
+local function PieceEntry(label, lo, hi, step, def, get, key, sizesOnly)
+    return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+        get = function()
+            local c = PR.Store()
+            local t = c and get(c)
+            return (type(t) == "table" and tonumber(t[key])) or def
+        end,
+        set = function(v)
+            local c = PR.Store()
+            local t = c and get(c)
+            if type(t) ~= "table" then return end
+            t[key] = v
+            local D = PR.Display
+            if not D then return end
+            if sizesOnly and D.ApplySizes then D:ApplySizes() elseif D.Refresh then D:Refresh() end
+        end }
+end
+local PIECE_SIZES = {
+    Main = function()
+        local function Rows(c) return c.mainRow.rows end
+        return {
+            { label = "Row 1 icons", unit = "px", min = 16, max = 48, step = 1, fine = 1, def = 30,
+              get = function() local c = PR.Store() return (c and Rows(c)[1].w) or 30 end,
+              set = function(v)
+                  local c = PR.Store()
+                  if not c then return end
+                  local r = Rows(c)[1]
+                  r.w, r.h = v, v
+                  if PR.Display and PR.Display.Refresh then PR.Display:Refresh() end
+              end },
+            { label = "Row 2+ icons", unit = "px", min = 16, max = 48, step = 1, fine = 1, def = 25,
+              get = function() local c = PR.Store() return (c and Rows(c)[2] and Rows(c)[2].w) or 25 end,
+              set = function(v)
+                  local c = PR.Store()
+                  if not c then return end
+                  for ri = 2, 3 do
+                      local r = Rows(c)[ri]
+                      if r then r.w, r.h = v, v end
+                  end
+                  if PR.Display and PR.Display.Refresh then PR.Display:Refresh() end
+              end },
+            PieceEntry("Spacing", 0, 12, 1, 4, function(c) return c.mainRow end, "spacing"),
+        }
+    end,
+    Debuffs = function() return {
+        PieceEntry("Icon size", 16, 48, 1, 26, function(c) return c.debuffRow end, "iconSize"),
+        PieceEntry("Spacing", 0, 12, 1, 4, function(c) return c.debuffRow end, "spacing") } end,
+    AuraRow = function() return {
+        PieceEntry("Icon size", 14, 48, 1, 25, function(c) return c.auraRow end, "iconSize"),
+        PieceEntry("Spacing", 0, 12, 1, 4, function(c) return c.auraRow end, "spacing") } end,
+    Reminders = function() return {
+        PieceEntry("Icon size", 20, 64, 1, 40, function(c) return c.reminders end, "iconSize"),
+        PieceEntry("Spacing", 0, 16, 1, 6, function(c) return c.reminders end, "spacing") } end,
+    Mana = function() return {
+        PieceEntry("Width", 100, 500, 10, 300, function(c) return c.resources.mana end, "w", true),
+        PieceEntry("Height", 4, 20, 1, 8, function(c) return c.resources.mana end, "h", true) } end,
+    Wand = function() return {
+        PieceEntry("Width", 100, 500, 10, 300, function(c) return c.resources.wand end, "w", true),
+        PieceEntry("Height", 4, 20, 1, 8, function(c) return c.resources.wand end, "h", true) } end,
+}
+local function PieceScaleOpt(get, piece)
+    return { scale = HUD.ScaleOpt(function() local c = PR.Store() return c and get(c) end, "scale",
+        function() ApplyAnchorPositions() end), sizes = piece and PIECE_SIZES[piece] or nil }
 end
 
 -- The "move all" handle's members; the buff row joins when it is made.
@@ -520,7 +593,8 @@ local moversDone = false
 local function RegisterBuffMover(cfg)
     if not holders.AuraRow or holders.AuraRow._prMover then return end
     holders.AuraRow._prMover = true
-    HUD.RegisterMover("prAuraRow", "Priest HUD Active Buffs", holders.AuraRow, cfg.auraRow)
+    HUD.RegisterMover("prAuraRow", "Priest HUD Active Buffs", holders.AuraRow, cfg.auraRow,
+        PieceScaleOpt(function(c) return c.auraRow end, "AuraRow"))
     groupMembers[#groupMembers + 1] = { key = "prAuraRow", holder = holders.AuraRow }
 end
 
@@ -536,6 +610,7 @@ local function EnsureBuffAnchor(V)
         local cfg = PR.Store()
         if cfg then
             HUD.PlaceAnchor("prAuraRow", holders.AuraRow, cfg.auraRow)
+            V.Buffs:SetScale(tonumber(cfg.auraRow.scale) or 1)
             if moversDone then RegisterBuffMover(cfg) end
         end
     end
@@ -602,11 +677,16 @@ local function RegisterMovers()
         C_Timer.After(1, RegisterMovers)   -- saved vars not ready yet
         return
     end
-    HUD.RegisterMover("prMainRow", "Priest HUD Cooldown Grid", holders.Main, cfg.mainRow)
-    HUD.RegisterMover("prDebuffs", "Priest HUD Target Debuffs", holders.Debuffs, cfg.debuffRow)
-    HUD.RegisterMover("prReminders", "Priest HUD Reminders", holders.Reminders, cfg.reminders)
-    HUD.RegisterMover("prMana", "Priest HUD Mana + FSR", holders.Mana, cfg.resources.mana)
-    HUD.RegisterMover("prWand", "Priest HUD Wand Bar", holders.Wand, cfg.resources.wand)
+    HUD.RegisterMover("prMainRow", "Priest HUD Cooldown Grid", holders.Main, cfg.mainRow,
+        PieceScaleOpt(function(c) return c.mainRow end, "Main"))
+    HUD.RegisterMover("prDebuffs", "Priest HUD Target Debuffs", holders.Debuffs, cfg.debuffRow,
+        PieceScaleOpt(function(c) return c.debuffRow end, "Debuffs"))
+    HUD.RegisterMover("prReminders", "Priest HUD Reminders", holders.Reminders, cfg.reminders,
+        PieceScaleOpt(function(c) return c.reminders end, "Reminders"))
+    HUD.RegisterMover("prMana", "Priest HUD Mana + FSR", holders.Mana, cfg.resources.mana,
+        PieceScaleOpt(function(c) return c.resources and c.resources.mana end, "Mana"))
+    HUD.RegisterMover("prWand", "Priest HUD Wand Bar", holders.Wand, cfg.resources.wand,
+        PieceScaleOpt(function(c) return c.resources and c.resources.wand end, "Wand"))
 
     -- Whole-HUD mover: dragging the handle shifts every member anchor by
     -- the same delta (HUD_Shared carries the delta to the members).
@@ -1092,7 +1172,8 @@ local function BuildBars(V)
     V.manaBar = manaBar
 
     -- FSR/tick bar: thin red drain directly under the mana bar
-    local fsrBar = W.CreateBar(V.Mana, { width = r.mana.w, height = 3,
+    -- (2026-11-19: the strip's height is resources.mana.fsrH; nothing saved = 3, as before)
+    local fsrBar = W.CreateBar(V.Mana, { width = r.mana.w, height = (tonumber(r.mana.fsrH) or 3),
         barColor = col.fsr })
     fsrBar:SetFrameStrata(HUD_STRATA)
     fsrBar:SetPoint("TOP", manaBar, "BOTTOM", 0, -1)
@@ -1561,9 +1642,11 @@ local function ApplyViewSizes(V, cfg)
     -- Holders follow the bar size too: the mover proxy is sized from them.
     if V.manaBar then
         V.manaBar:SetSize(r.mana.w or 300, r.mana.h or 8)
-        V.fsrBar:SetSize(r.mana.w or 300, 3)
-        V.Mana:SetSize(r.mana.w or 300, (r.mana.h or 8) + 4)
-        if V == LIVE then holders.Mana:SetSize(r.mana.w or 300, (r.mana.h or 8) + 4) end
+        -- (the piece's box takes in the strip under the bar: 3 + 1 as before)
+        local fsrH = tonumber(r.mana.fsrH) or 3
+        V.fsrBar:SetSize(r.mana.w or 300, fsrH)
+        V.Mana:SetSize(r.mana.w or 300, (r.mana.h or 8) + fsrH + 1)
+        if V == LIVE then holders.Mana:SetSize(r.mana.w or 300, (r.mana.h or 8) + fsrH + 1) end
     end
     if V.wandBar then
         V.wandBar:SetSize(r.wand.w or 300, r.wand.h or 8)
@@ -1763,14 +1846,15 @@ local function LayoutSample(V, cfg)
     local r = cfg.resources
     local pieces = {
         { a = V.Main, mover = "prMainRow", store = cfg.mainRow, scale = cfg.mainRow.scale or 1, on = true },
-        { a = V.Debuffs, mover = "prDebuffs", store = cfg.debuffRow, on = cfg.debuffRow.enabled },
-        { a = V.Reminders, mover = "prReminders", store = cfg.reminders, on = cfg.reminders.enabled },
-        { a = V.Mana, mover = "prMana", store = r.mana, on = r.manaBar or r.fsrBar },
-        { a = V.Wand, mover = "prWand", store = r.wand, on = r.wandBar },
+        { a = V.Debuffs, mover = "prDebuffs", store = cfg.debuffRow, scale = tonumber(cfg.debuffRow.scale) or 1, on = cfg.debuffRow.enabled },
+        { a = V.Reminders, mover = "prReminders", store = cfg.reminders, scale = tonumber(cfg.reminders.scale) or 1, on = cfg.reminders.enabled },
+        { a = V.Mana, mover = "prMana", store = r.mana, scale = tonumber(r.mana.scale) or 1, on = r.manaBar or r.fsrBar },
+        { a = V.Wand, mover = "prWand", store = r.wand, scale = tonumber(r.wand.scale) or 1, on = r.wandBar },
     }
     -- (the buff row, once this sample has one)
     if V.Buffs then
         pieces[#pieces + 1] = { a = V.Buffs, mover = "prAuraRow", store = cfg.auraRow,
+            scale = tonumber(cfg.auraRow.scale) or 1,
             on = cfg.auraRow.enabled ~= false and #V.buffActive > 0 }
     end
     -- (the cast bar, once this sample has one)
@@ -2193,6 +2277,11 @@ local function Tab_Look(L, cfg)
         { "Mana bar width", 100, 500, r.mana.w, function(v) r.mana.w = v PR.Display:ApplySizes() end, Px },
         { "Mana bar height", 4, 20, r.mana.h, function(v) r.mana.h = v PR.Display:ApplySizes() end, Px })
     SliderPair(L,
+        { "Five-second rule strip height", 1, 10, tonumber(r.mana.fsrH) or 3, function(v)
+            r.mana.fsrH = (v ~= 3) and v or nil
+            PR.Display:ApplySizes()
+        end, Px })
+    SliderPair(L,
         { "Wand bar width", 100, 500, r.wand.w, function(v) r.wand.w = v PR.Display:ApplySizes() end, Px },
         { "Wand bar height", 4, 20, r.wand.h, function(v) r.wand.h = v PR.Display:ApplySizes() end, Px })
     L:EndCard()
@@ -2221,6 +2310,12 @@ local function Tab_Position(L, cfg)
     HUD.UnlockButton(L, "pr")
     L:Gap(4)
     HUD.ScaleSlider(L, "Cooldown grid scale", cfg.mainRow, "scale", ApplyAnchorPositions)
+    -- (2026-11-19) every other piece's scale
+    HUD.ScaleSlider(L, "Active buffs scale", cfg.auraRow, "scale", ApplyAnchorPositions)
+    HUD.ScaleSlider(L, "Target debuffs scale", cfg.debuffRow, "scale", ApplyAnchorPositions)
+    HUD.ScaleSlider(L, "Reminders scale", cfg.reminders, "scale", ApplyAnchorPositions)
+    HUD.ScaleSlider(L, "Mana bar scale", cfg.resources.mana, "scale", ApplyAnchorPositions)
+    HUD.ScaleSlider(L, "Wand bar scale", cfg.resources.wand, "scale", ApplyAnchorPositions)
     L:EndCard()
 end
 

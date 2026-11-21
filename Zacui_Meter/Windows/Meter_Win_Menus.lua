@@ -123,7 +123,7 @@ local function Row(m, i)
     b.text:SetPoint("RIGHT", b.right, "LEFT", -4, 0)
     -- a separator: a hairline across the row
     b.sep = b:CreateTexture(nil, "ARTWORK")
-    b.sep:SetHeight(1)
+    b.sep:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(b.sep, "TOP") end
     b.sep:SetPoint("LEFT", 6, 0)
     b.sep:SetPoint("RIGHT", -6, 0)
     b.sep:SetColorTexture(1, 1, 1, 0.12)
@@ -396,7 +396,8 @@ function Menu.SettingsItems(win)
     for _, pct in ipairs(SCALES) do
         scale[#scale + 1] = { text = pct .. "%", active = math.abs(cur * 100 - pct) < 0.5,
             func = function()
-                s.scale = pct / 100
+                -- (2026-11-20) the window stays where it is (Meter.SetWindowScale)
+                if Meter.SetWindowScale then Meter.SetWindowScale(s, pct / 100) else s.scale = pct / 100 end
                 if Meter.RestyleAll then Meter.RestyleAll() end
                 if ns.SettingsChanged then ns.SettingsChanged("meter.menu") end
             end }

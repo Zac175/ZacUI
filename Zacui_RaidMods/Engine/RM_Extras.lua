@@ -92,8 +92,41 @@ end
 -- The alert's look on a frame: the big icon with its glow, the words and
 -- the pulse. The live alert and the settings page's sample are both made
 -- by this.
+-- (2026-11-20) THE ALERT'S OWN SIZES: its icon and its words are settings
+-- (extras.razIconSize / .razTextSize; nothing saved = 56 and 26, as always)
+X.RAZ_ICON, X.RAZ_TEXT = 56, 26
+X.RAZ_LIMITS = { icon = { 24, 96 }, text = { 12, 48 } }
+function X.IconSize()
+    local cfg = RM.DB() and RM.DB().extras
+    local v = tonumber(type(cfg) == "table" and cfg.razIconSize) or X.RAZ_ICON
+    return math.floor(math.max(24, math.min(96, v)) + 0.5)
+end
+function X.TextSize()
+    local cfg = RM.DB() and RM.DB().extras
+    local v = tonumber(type(cfg) == "table" and cfg.razTextSize) or X.RAZ_TEXT
+    return math.floor(math.max(12, math.min(48, v)) + 0.5)
+end
+-- the sizes as set, on a dressed frame (the live alert or the page's sample)
+local function Sizes(f)
+    local isz, tsz = X.IconSize(), X.TextSize()
+    if f._zIsz ~= isz then
+        f._zIsz = isz
+        f.icon:SetSize(isz, isz)
+    end
+    if f._zTsz ~= tsz then
+        f._zTsz = tsz
+        if ns.HUD and ns.HUD.ApplyFont then ns.HUD.ApplyFont(f.text, tsz, "THICKOUTLINE")
+        elseif ns.HouseFont then ns.HouseFont(f.text, tsz, "THICKOUTLINE")
+        else
+            local face = f.text:GetFont()
+            if face then f.text:SetFont(face, tsz, "THICKOUTLINE") end
+        end
+    end
+end
+X.ApplySizes = Sizes
+
 local function Dress(f, cfg)
-    local size = 56
+    local size = X.IconSize()
     local W = ns.WarriorHUD and ns.WarriorHUD.Widgets
     local icon
     if W and W.CreateIcon then
@@ -116,11 +149,12 @@ local function Dress(f, cfg)
     f.icon = icon
     icon:SetIconTexture(X.RazIcon())
 
-    local text = ns.HUD and ns.HUD.Text and ns.HUD.Text(f, 26, "THICKOUTLINE")
+    local text = ns.HUD and ns.HUD.Text and ns.HUD.Text(f, X.TextSize(), "THICKOUTLINE")
     if not text then
         text = f:CreateFontString(nil, "OVERLAY")
-        if ns.ApplyFont then ns.ApplyFont(text, 26, "THICKOUTLINE") else text:SetFontObject(GameFontNormalHuge) end
+        if ns.ApplyFont then ns.ApplyFont(text, X.TextSize(), "THICKOUTLINE") else text:SetFontObject(GameFontNormalHuge) end
     end
+    f._zIsz, f._zTsz = size, X.TextSize()
     text:SetPoint("LEFT", icon, "RIGHT", 12, 0)
     text:SetPoint("RIGHT", f, "RIGHT", -4, 0)
     text:SetJustifyH("LEFT")
@@ -152,7 +186,25 @@ local function Build()
     Dress(f, cfg)
     f:SetScale(cfg and cfg.razScale or 1)
     if ns.HUD and ns.HUD.RegisterMover then
-        ns.HUD.RegisterMover("rmRazTarget", "Boss on you", holder, { x = 0, y = 240 })
+        ns.HUD.RegisterMover("rmRazTarget", "Boss on you", holder, { x = 0, y = 240 },
+            -- (its own size in Edit Mode: the same number its corner grip sets)
+            { scale = { min = 0.6, max = 2,
+                get = function() return tonumber(DB().razScale) or 1 end,
+                set = function(v) DB().razScale = v f:SetScale(v) end },
+              -- (2026-11-20) its icon and its words, a row each
+              sizes = function()
+                  local function Row(label, key, def, lim, step, get)
+                      return { label = label, unit = "px", min = lim[1], max = lim[2], step = step, fine = 1, def = def,
+                          get = get,
+                          set = function(v)
+                              DB()[key] = (v ~= def) and v or nil
+                              X:ApplyAppearance()
+                              if ns.SettingsChanged then ns.SettingsChanged("raidmods.raz") end
+                          end }
+                  end
+                  return { Row("Icon size", "razIconSize", X.RAZ_ICON, X.RAZ_LIMITS.icon, 2, X.IconSize),
+                           Row("Text size", "razTextSize", X.RAZ_TEXT, X.RAZ_LIMITS.text, 1, X.TextSize) }
+              end })
     end
     if UI and UI.HudHandle then
         f.handle = UI.HudHandle(f, {
@@ -202,6 +254,7 @@ function X:ApplyAppearance()
     local cfg = DB()
     if alert and cfg then
         alert:SetScale(cfg.razScale or 1)
+        Sizes(alert)
         if ns.HUD and ns.HUD.PlaceAnchor then ns.HUD.PlaceAnchor("rmRazTarget", alert.holder, { x = 0, y = 240 }) end
         alert.text:SetText(cfg.razText or DEFAULTS.razText)
     end
@@ -225,6 +278,7 @@ function X.FillRazSample(f)
     local cfg = DB()
     f.text:SetText(cfg and cfg.razText or DEFAULTS.razText)
     f:SetScale(cfg and cfg.razScale or 1)
+    Sizes(f)
     Paint(f)
 end
 -- the "any boss" sample: the same alert with a boss's name and the skull
@@ -234,6 +288,7 @@ function X.FillBossSample(f)
     f.text:SetText(X.BossText(X.SAMPLE_BOSS))
     f.icon:SetIconTexture(SKULL)
     f:SetScale(cfg and cfg.razScale or 1)
+    Sizes(f)
     Paint(f)
 end
 function X.RazScale()
@@ -497,6 +552,13 @@ function X.BuildCard(L, Check, Button, Slider)
         Slider(L, { width = 200, min = 0.6, max = 2, step = 0.1, value = cfg.razScale or 1, label = "Size",
             format = function(v) return math.floor(v * 100 + 0.5) .. "%" end,
             onChange = function(v) cfg.razScale = v Show() X:ApplyAppearance() end })
+        -- (2026-11-20) the icon and the words, each its own size
+        Slider(L, { width = 200, min = X.RAZ_LIMITS.icon[1], max = X.RAZ_LIMITS.icon[2], step = 1, value = X.IconSize(),
+            label = "Icon size", format = function(v) return v .. " px" end,
+            onChange = function(v) cfg.razIconSize = (v ~= X.RAZ_ICON) and v or nil Show() X:ApplyAppearance() end })
+        Slider(L, { width = 200, min = X.RAZ_LIMITS.text[1], max = X.RAZ_LIMITS.text[2], step = 1, value = X.TextSize(),
+            label = "Text size", format = function(v) return v .. " px" end,
+            onChange = function(v) cfg.razTextSize = (v ~= X.RAZ_TEXT) and v or nil Show() X:ApplyAppearance() end })
     end
     Button(L, "Test", function() X:PreviewRaz() end, 100)
     local function ShowBoss()

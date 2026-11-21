@@ -452,7 +452,7 @@ end
 local PAGE_BY_KEY = {
     lootroll = "lootroll", buffs = "buffs", minimap = "minimap", tray = "minimap",
     tooltip = "tooltips", privacytag = "chat", flighttimer = "flighttimes",
-    raidtimers = "qol", gcdtracker = "qol", snowball = "qol", lootfeed = "qol",
+    raidtimers = "qol", gcdtracker = "qol", snowball = "qol", lootfeed = "qol", bossloot = "qol",
     talentreminder = "qol", unitframes = "unitframes", hesitation = "hesitation",
     qolalerts = "qol", qolstats = "qol", qoljunk = "qol", qolreminders = "qol", qoldistance = "qol",
     platePreview = "nameplates", prioWarn = "nameplates", rmRazTarget = "raidmods",

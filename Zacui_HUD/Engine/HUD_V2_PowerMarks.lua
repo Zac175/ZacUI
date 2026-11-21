@@ -175,7 +175,8 @@ local function PlaceMarks(bar, text, max, r, g, b, a)
                 -- own frame draws under the fill)
                 m = bar.bar:CreateTexture(nil, "OVERLAY", nil, 3)
                 m:SetTexture(WHITE)
-                m:SetWidth(1)
+                -- (2026-11-19: whole screen pixels under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+                m:SetWidth(ns.Snap and ns.Snap(1, bar.bar) or 1)
                 marks[i] = m
             end
             local x = math.floor(bw * frac + 0.5)

@@ -365,7 +365,21 @@ local function Live() if QoL.enabled then ST.Apply() end end
 ST.Live = Live
 if Allowed() then
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Character stats", function() return block end, "BOTTOMLEFT", 300, 220, nil, { own = true })
+        ns.RegisterMover(MOVER, "Character stats", function() return block end, "BOTTOMLEFT", 300, 220, nil, { own = true,
+            -- (its text size in Edit Mode: the size of the font its page picks)
+            sizes = function()
+                return { { label = "Text size", unit = "px", min = 8, max = 40, step = 1, fine = 1, def = ST.FONT_DEFAULTS.size,
+                    get = function()
+                        local f = DB().font
+                        return (type(f) == "table" and tonumber(f.size)) or ST.FONT_DEFAULTS.size
+                    end,
+                    set = function(v)
+                        local d = DB()
+                        if type(d.font) ~= "table" then d.font = {} end
+                        d.font.size = v
+                        ST.Apply()
+                    end } }
+            end })
     end
     if ns.OnSettingsChanged then ns.OnSettingsChanged(function() if QoL.enabled and block then Repaint() end end) end
     local base = QoL.EnableAutomation

@@ -743,6 +743,58 @@ end
 -- ============================================================
 local function MacrosTab(L, QoL)
     local MC = QoL.MacroCleanup
+    -- THE MACRO CLEANER (2026-11-20, QoL_MacroWindow.lua): its window and
+    -- its settings; the automatic part is all off as shipped.
+    if MC and MC.Open and MC.Opt then
+        L:Card("Macro cleaner")
+        L:Desc("Every macro in one list with a tick: delete many at once, see which ones nothing uses, "
+            .. "and bring one back from the bin. Also /zui macros, and the Clean up button on the macro window.")
+        local open = UI.Button(L.current, "Open the macro cleaner", { width = 200, onClick = function() MC.Open() end })
+        L:Row(open, 30)
+        local function Tick(key, label, tip, after)
+            local w = UI.Checkbox(L.current, label, MC.Opt(key) == true, function(v)
+                MC.SetOpt(key, v)
+                if after then after() end
+            end, tip and { tooltip = tip } or nil)
+            L:Row(w, 17)
+            return w
+        end
+        Tick("confirm", "Ask before deleting",
+            "One question for the whole batch. Off, Delete deletes at once (everything still goes to the bin first).")
+        Tick("button", "Clean up button on the macro window",
+            "ZacUI's macro window has it in its footer; the game's own macro window gets it over its top right corner.")
+        L:Gap(4)
+        L:Desc("|cffffd100By itself|r  (all off until ticked; whatever it deletes goes to the bin like the rest)")
+        local names = #MC.AlwaysNames()
+        Tick("autoNames", "Delete on sight the macros on my always-delete list (" .. names
+            .. (names == 1 and " name)" or " names)"),
+            "For the macros another addon keeps making. The list is in the cleaner (the Always delete tab); a name gets "
+            .. "there when you delete with \"...and delete them again whenever they come back\" ticked. Checked a few "
+            .. "seconds after login and whenever the macro list changes, never in a fight.", RefreshPage)
+        local mine = Tick("autoMine", "Delete this character's own macros once they have gone unused",
+            "Unused: on none of this character's action bars and no key bound to it. Counted in days from the first "
+            .. "login that saw it unused; checked a few seconds after each login.", RefreshPage)
+        local acct = Tick("autoAccount", "...and account macros that no character uses",
+            "Account macros are shared: one counts as unused only when no character seen so far has it on a bar or a "
+            .. "key. A character that has not logged in since ZacUI started keeping track is not known - log into "
+            .. "each one before ticking this.", RefreshPage)
+        local days = UI.Slider(L.current, { width = 220, min = MC.DAYS_MIN, max = MC.DAYS_MAX, step = 1,
+            value = MC.Opt("days"), label = "Unused for",
+            format = function(v) return v .. (v == 1 and " day" or " days") end,
+            onChange = function(v) MC.SetOpt("days", v) end })
+        L:Row(days, 40)
+        if UI.SetEnabled then
+            UI.SetEnabled(days, MC.Opt("autoMine") or MC.Opt("autoAccount"),
+                "Needs one of the two \"unused\" ticks above turned on")
+        end
+        local due = MC.Due(true)
+        local dm, da = 0, 0
+        for _, m in ipairs(due) do if m.account then da = da + 1 else dm = dm + 1 end end
+        L:Desc("Right now, unused for that long: " .. dm .. " of this character's, " .. da .. " account.")
+        Tick("announce", "Say in chat what was deleted by itself", nil)
+        if not QoL.enabled then L:Desc("The Quality of life part is not running, so nothing is deleted by itself.") end
+        L:EndCard()
+    end
     L:Card("Unused macros")
     if not MC then
         L:Desc("The macro cleanup did not load.")

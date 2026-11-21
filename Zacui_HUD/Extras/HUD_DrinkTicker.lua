@@ -169,7 +169,22 @@ local function BuildBar()
     DT.StyleBar(bar, cfg)
     bar:Hide()
 
-    HUD.RegisterMover("drinkTicker", "Drink Ticker", holder, cfg)
+    -- (scale = true: its own size in Edit Mode, kept by the mover registry)
+    HUD.RegisterMover("drinkTicker", "Drink Ticker", holder, cfg, { scale = true,
+        -- (its width and height in Edit Mode: the page's own two settings)
+        sizes = function()
+            local function E(label, field, lo, hi, step)
+                return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = DEFAULTS[field],
+                    get = function() local c = DT.Store() return (c and tonumber(c[field])) or DEFAULTS[field] end,
+                    set = function(v)
+                        local c = DT.Store()
+                        if not c then return end
+                        c[field] = v
+                        DT.ApplySizes()
+                    end }
+            end
+            return { E("Width", "w", 80, 400, 10), E("Height", "h", 4, 30, 1) }
+        end })
 end
 
 function DT.ApplySizes()

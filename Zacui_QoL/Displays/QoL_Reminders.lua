@@ -34,7 +34,11 @@ QoL.Reminders = R
 
 local OWN_ID = "qol_reminders"
 local MOVER = "qolreminders"
+-- what ships: 32 px icons 20 apart, their names at 11 (each a setting now:
+-- R.IconSize / R.Gap / R.TextSize below, nothing saved = these)
 local ICON, PITCH = 32, 52
+R.SIZE = { icon = ICON, iconMin = 16, iconMax = 64, gap = PITCH - ICON, gapMin = 0, gapMax = 60,
+           text = 11, textMin = 8, textMax = 20 }
 local DELAY = 0.2
 R.MANA_DEFAULT = 80
 
@@ -65,6 +69,19 @@ local function DB()
     return q.reminders
 end
 R.DB = DB
+-- (2026-11-20) THE STRIP'S SIZES, each a setting (qol.reminders.iconSize /
+-- iconGap / textSize; nil = what ships)
+local function Held(v, def, lo, hi)
+    v = tonumber(v)
+    if not v or v ~= v then return def end
+    if v < lo then return lo elseif v > hi then return hi end
+    return v
+end
+function R.IconSize() return Held(DB().iconSize, R.SIZE.icon, R.SIZE.iconMin, R.SIZE.iconMax) end
+function R.Gap() return Held(DB().iconGap, R.SIZE.gap, R.SIZE.gapMin, R.SIZE.gapMax) end
+function R.TextSize() return Held(DB().textSize, R.SIZE.text, R.SIZE.textMin, R.SIZE.textMax) end
+-- the room under an icon for its name (16 with the shipped 11 px text)
+local function LabelRoom() return R.TextSize() + 5 end
 local function Allowed() return not (ns.FeatureOn and not ns.FeatureOn(OWN_ID)) end
 function R.On(key) return Allowed() and QoL.enabled == true and DB()[key] == true end
 function R.AnyIcon() return R.On("pet") or R.On("passive") or R.On("tracking") end
@@ -154,7 +171,7 @@ end
 local function Strip()
     if strip then return strip end
     strip = CreateFrame("Frame", "ZacUIReminders", UIParent)
-    strip:SetSize(ICON, ICON + 16)
+    strip:SetSize(R.IconSize(), R.IconSize() + LabelRoom())
     strip:SetFrameStrata("MEDIUM")
     strip:EnableMouse(false)
     strip:Hide()
@@ -170,7 +187,7 @@ local function Icon(item)
     if icons[item.id] then return icons[item.id] end
     local UI = ns.UI
     local f = CreateFrame("Frame", nil, Strip())
-    f:SetSize(ICON, ICON)
+    f:SetSize(R.IconSize(), R.IconSize())
     local t = f:CreateTexture(nil, "ARTWORK")
     t:SetAllPoints()
     t:SetTexture(item.icon)
@@ -181,7 +198,7 @@ local function Icon(item)
         f:_zPaint()
     end
     local fs = f:CreateFontString(nil, "OVERLAY")
-    Font(fs, 11)
+    Font(fs, R.TextSize())
     fs:SetPoint("TOP", f, "BOTTOM", 0, -3)
     fs:SetText(item.label)
     f._zLabel = fs
@@ -210,19 +227,28 @@ function R.Refresh(test)
     end
     Strip()
     for _, f in pairs(icons) do f:Hide() end
+    -- (the sizes as set now: an icon made earlier follows)
+    local size, text = R.IconSize(), R.TextSize()
+    local pitch = size + R.Gap()
     for i, item in ipairs(up) do
         local f = Icon(item)
+        f:SetSize(size, size)
+        if f._zLabel and f._zTextSize ~= text then
+            f._zTextSize = text
+            Font(f._zLabel, text)
+        end
         f:ClearAllPoints()
-        f:SetPoint("TOPLEFT", strip, "TOPLEFT", (i - 1) * PITCH, 0)
+        f:SetPoint("TOPLEFT", strip, "TOPLEFT", (i - 1) * pitch, 0)
         f:Show()
     end
-    strip:SetSize((#up - 1) * PITCH + ICON, ICON + 16)
+    strip:SetSize((#up - 1) * pitch + size, size + LabelRoom())
     strip:Show()
     return up
 end
 function R.Test()
+    R._testing = true
     R.Refresh(true)
-    C_Timer.After(6, function() R.Refresh() end)
+    C_Timer.After(6, function() R._testing = nil R.Refresh() end)
 end
 
 -- ============================================================
@@ -297,7 +323,22 @@ local function Live() if QoL.enabled then R.Apply() end end
 R.Live = Live
 if Allowed() then
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Reminders", function() return strip end, "CENTER", 0, 230, nil, { own = true })
+        ns.RegisterMover(MOVER, "Reminders", function() return strip end, "CENTER", 0, 230, nil, { own = true,
+            -- (2026-11-20) its sizes in Edit Mode: the page's own three
+            sizes = function()
+                local S = R.SIZE
+                local function Row(label, key, def, lo, hi)
+                    return { label = label, unit = "px", min = lo, max = hi, step = (key == "iconSize") and 2 or 1, fine = 1, def = def,
+                        get = function() return Held(DB()[key], def, lo, hi) end,
+                        set = function(v)
+                            DB()[key] = (v ~= def) and v or nil
+                            if strip and strip:IsShown() then R.Refresh(R._testing) end
+                        end }
+                end
+                return { Row("Icon size", "iconSize", S.icon, S.iconMin, S.iconMax),
+                         Row("Spacing", "iconGap", S.gap, S.gapMin, S.gapMax),
+                         Row("Text size", "textSize", S.text, S.textMin, S.textMax) }
+            end })
     end
     local base = QoL.EnableAutomation
     function QoL.EnableAutomation(...)
@@ -349,6 +390,22 @@ AddTab("qol", "reminders", "Reminders", function(L)
     local test = UI.Button(L.current, "Test", { width = 80,
         tooltip = "Shows all three icons for a few seconds.", onClick = function() R.Test() end })
     L:Row(test, 26)
+    -- (2026-11-20) the icons' sizes (Edit Mode's box on the strip has the same three)
+    do
+        local S = R.SIZE
+        local function Size(label, key, def, lo, hi, tip)
+            local w = UI.Slider(L.current, { width = 220, min = lo, max = hi, step = 1, label = label,
+                value = Held(d[key], def, lo, hi), format = function(v) return v .. " px" end, tooltip = tip,
+                onChange = function(v)
+                    d[key] = (v ~= def) and v or nil
+                    if strip and strip:IsShown() then R.Refresh(R._testing) end
+                end })
+            L:Row(w, 40)
+        end
+        Size("Icon size", "iconSize", S.icon, S.iconMin, S.iconMax)
+        Size("Space between icons", "iconGap", S.gap, S.gapMin, S.gapMax)
+        Size("Name text size", "textSize", S.text, S.textMin, S.textMax)
+    end
     if Kit and Kit.Mover and ns.MOVERS and ns.MOVERS[MOVER] then Kit.Mover(L, MOVER, "the icons") end
     L:EndCard()
 

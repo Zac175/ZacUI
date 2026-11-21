@@ -94,6 +94,15 @@ local BOOK_SPELL = BOOKTYPE_SPELL or "spell"
 -- STATE
 -- ============================================================
 local win, tabs, search, countText, list, status
+-- (for the macro cleaner, Zacui_QoL: is this window covering the game's,
+-- and its "Clean up" button following the cleaner's setting)
+ns.MacroCover = function() return win end
+ns.MacroCoverButton = function(on)
+    local b = win and win._zCleanBtn
+    if not b then return end
+    b:SetShown(on and true or false)
+    win._zStatus:SetPoint("RIGHT", on and b or win._zNewBtn, "LEFT", -8, 0)
+end
 local edit, emptyEd, iconBtn, nameBox, scopeText, bodyLabel, counter, bodyBox
 local saveBtn, revertBtn, dupBtn, delBtn, newBtn
 local picker, pickSearch, pickCount, grid
@@ -1249,9 +1258,25 @@ local function Build()
     newBtn:SetPoint("RIGHT", win.footer, "RIGHT", -6, 0)
     newBtn:SetScript("OnClick", StartNew)
     UI.Tooltip(newBtn, NEW or "New", "Start a new macro in this tab. It is created when you click Create.")
+    -- (2026-11-20) the macro cleaner (Zacui_QoL's QoL_MacroWindow: every
+    -- macro with a tick, deleted in one go), where its part is loaded and
+    -- its "button on the macro window" setting is on
+    local cleanBtn
+    do
+        local MC = ns.QoL and ns.QoL.MacroCleanup
+        if MC and MC.Toggle then
+            cleanBtn = UI.Button(win.footer, "Clean up", { width = 84, height = 24, onClick = function() MC.Toggle() end })
+            cleanBtn:SetPoint("RIGHT", newBtn, "LEFT", -6, 0)
+            UI.Tooltip(cleanBtn, "Clean up macros", "Every macro in one list with a tick: delete many at once, see which "
+                .. "ones nothing uses, bring one back from the bin. /zui macros")
+            cleanBtn:SetShown(MC.Opt("button") ~= false)
+            win._zCleanBtn = cleanBtn
+        end
+    end
     status = UI.Font(win.footer, F.SMALL, { cat = "text", key = "gray", justify = "LEFT" })
     status:SetPoint("LEFT", win.footer, "LEFT", 8, 0)
-    status:SetPoint("RIGHT", newBtn, "LEFT", -8, 0)
+    status:SetPoint("RIGHT", (cleanBtn and cleanBtn:IsShown()) and cleanBtn or newBtn, "LEFT", -8, 0)
+    win._zStatus, win._zNewBtn = status, newBtn
     status:SetWordWrap(false)
 
     list = Kit.List(win, {

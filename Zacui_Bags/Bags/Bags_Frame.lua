@@ -2358,7 +2358,7 @@ local function CreateView(key, globalName, title, bagList)
         h.line = h:CreateTexture(nil, "ARTWORK")
         h.line._zui_own = true
         h.line:SetTexture(FLAT)
-        h.line:SetHeight(1)
+        h.line:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(h.line, "TOP") end
         h.line:SetPoint("LEFT", h.count, "RIGHT", 8, 0)
         h.line:SetPoint("RIGHT", h, "RIGHT", 0, 0)
         self.groupHeads[i] = h

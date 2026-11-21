@@ -210,7 +210,21 @@ local function Live() if QoL.enabled then DI.Apply() end end
 DI.Live = Live
 if Allowed() then
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Target distance", function() return frame end, "CENTER", 0, -110, nil, { own = true })
+        ns.RegisterMover(MOVER, "Target distance", function() return frame end, "CENTER", 0, -110, nil, { own = true,
+            -- (its text size in Edit Mode: the size of the font its page picks)
+            sizes = function()
+                return { { label = "Text size", unit = "px", min = 8, max = 40, step = 1, fine = 1, def = DI.FONT_DEFAULTS.size,
+                    get = function()
+                        local f = DB().font
+                        return (type(f) == "table" and tonumber(f.size)) or DI.FONT_DEFAULTS.size
+                    end,
+                    set = function(v)
+                        local d = DB()
+                        if type(d.font) ~= "table" then d.font = {} end
+                        d.font.size = v
+                        DI.Apply()
+                    end } }
+            end })
     end
     local base = QoL.EnableAutomation
     function QoL.EnableAutomation(...)

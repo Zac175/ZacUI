@@ -29,6 +29,7 @@ local blizzardSize              -- the windowed map's own size, for a reset
 local ours = false              -- OpenMap is moving / sizing the window itself (not to be undone)
 local sizing = false            -- a grip is being dragged: the drag sizes the window, nothing puts it back
 local moveAny = false           -- Move Any moves and sizes the window: OpenMap leaves it be
+local dragging = false          -- the window is being moved by its title bar: the drag places it, the drop saves it
 
 -- Move Any loaded, or on to load for this character (it may load after OpenMap sets the window up)
 local function MoveAnyOn()
@@ -90,6 +91,25 @@ local function Save()
 	local point, _, relPoint, x, y = map:GetPoint(1)
 	if point then mod.db.window = { point, relPoint, x, y } end
 end
+
+-- The move itself, for whatever the player has hold of: the title strip below, and ZacUI's own
+-- header, which lies over that strip (a layer up, so it took the drag and nothing moved: 2026-11-20,
+-- Zac: "why cant i move the map around anymore when i click the header"). true when a move began
+local function StartMove()
+	if not map or moveAny or dragging or Maximized() then return false end
+	dragging = true
+	map:SetMovable(true)
+	map:StartMoving()
+	return true
+end
+local function StopMove()
+	if not dragging then return end
+	dragging = false
+	map:StopMovingOrSizing()
+	map:SetUserPlaced(false)            -- (ours to remember, not the layout cache's)
+	Save()
+end
+mod.StartWindowMove, mod.StopWindowMove = StartMove, StopMove
 
 function mod:ResetWindow()
 	mod.db.window = false
@@ -269,16 +289,8 @@ function mod:SetupWindow(worldMap)
 		handle:SetFrameLevel(map:GetFrameLevel() + 5)
 		handle:EnableMouse(true)
 		handle:RegisterForDrag("LeftButton")
-		handle:SetScript("OnDragStart", function()
-			if Maximized() then return end
-			map:SetMovable(true)
-			map:StartMoving()
-		end)
-		handle:SetScript("OnDragStop", function()
-			map:StopMovingOrSizing()
-			map:SetUserPlaced(false)            -- (ours to remember, not the layout cache's)
-			Save()
-		end)
+		handle:SetScript("OnDragStart", StartMove)
+		handle:SetScript("OnDragStop", StopMove)
 		handle:SetScript("OnEnter", function(self)
 			if Maximized() then return end
 			GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -297,7 +309,6 @@ function mod:SetupWindow(worldMap)
 		-- ... and the moment anything else sizes, scales or places the windowed map (Blizzard's
 		-- layout, its quest log widening it, its minimize ...), so it never shows elsewhere first.
 		-- (Not while it's being dragged: the drag places it, and the drop saves where it went.)
-		local dragging = false
 		local function Hold()
 			if ours or dragging or not map:IsShown() then return end
 			Apply()
@@ -305,16 +316,8 @@ function mod:SetupWindow(worldMap)
 		for _, method in ipairs({ "SetSize", "SetWidth", "SetHeight", "SetScale", "SetPoint" }) do
 			if map[method] then hooksecurefunc(map, method, Hold) end
 		end
-		handle:HookScript("OnDragStart", function() dragging = true end)
-		handle:HookScript("OnDragStop", function() dragging = false end)
 		-- (the map closed mid-move: no drag stop comes, so the move ends with the map)
-		handle:HookScript("OnHide", function()
-			if not dragging then return end
-			dragging = false
-			map:StopMovingOrSizing()
-			map:SetUserPlaced(false)
-			Save()
-		end)
+		handle:HookScript("OnHide", StopMove)
 	end
 	local function Mode()
 		local max = Maximized()

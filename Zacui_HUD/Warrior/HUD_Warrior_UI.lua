@@ -421,8 +421,8 @@ local function UpdateWarriorSample(canvas, P)
     place("AuraRow", cfg.auraRow.scale)
     place("Stance", r.stance.scale)
     place("Execute", r.execute.scale)
-    place("RageBar")
-    place("Swing")
+    place("RageBar", tonumber(r.rage and r.rage.scale))
+    place("Swing", tonumber(r.swing and r.swing.scale))
     -- (the debuff row's anchor only while it draws: a row with nothing on
     -- takes no room in the sample)
     st.anchors.DebuffRow:SetShown(show.DebuffRow and true or false)
@@ -1096,6 +1096,16 @@ local function TabPosition(L, cfg)
         { "Target debuffs scale", 50, 200,
           math.floor((cfg.debuffRow.scale or 1) * 100 + 0.5),
           function(v) cfg.debuffRow.scale = v / 100 end, Pct })
+    -- (2026-11-19) the two bars: on top of their width and height
+    if type(r.rage) == "table" and type(r.swing) == "table" then
+        SliderPair(L,
+            { "Rage bar scale", 50, 200,
+              math.floor((tonumber(r.rage.scale) or 1) * 100 + 0.5),
+              function(v) r.rage.scale = v / 100 end, Pct },
+            { "Swing timers scale", 50, 200,
+              math.floor((tonumber(r.swing.scale) or 1) * 100 + 0.5),
+              function(v) r.swing.scale = v / 100 end, Pct })
+    end
     L:EndCard()
 end
 

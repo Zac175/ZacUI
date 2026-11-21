@@ -278,7 +278,7 @@ function Rail.Build(view)
     local edge = strip:CreateTexture(nil, "ARTWORK")
     edge._zui_own = true
     edge:SetTexture(FLAT)
-    edge:SetWidth(1)
+    edge:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(edge, "LEFT") end
     edge:SetPoint("TOPRIGHT", strip, "TOPRIGHT", 0, 0)
     edge:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", 0, 0)
     edge:SetVertexColor(0, 0, 0, 1)
@@ -594,7 +594,7 @@ local function Head(view, i)
     h.line = h:CreateTexture(nil, "ARTWORK")
     h.line._zui_own = true
     h.line:SetTexture(FLAT)
-    h.line:SetHeight(1)
+    h.line:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(h.line, "TOP") end
     h.line:SetPoint("LEFT", h.count, "RIGHT", 8, 0)
     view.railHeads[i] = h
     return h

@@ -1123,6 +1123,27 @@ local function BuildUI()
                 end
             end,
             own = true,
+            -- (its buttons are sized on the Button tray tab)
+            scale = false,
+            -- (2026-11-20) and on its box in Edit Mode: that tab's own
+            -- sliders (the bar itself only while it is not docked to the map)
+            sizes = function()
+                if DockSide() then return nil end
+                local function Row(label, key, def, lo, hi, step, after)
+                    return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+                        get = function() return tonumber(DB()[key]) or def end,
+                        set = function(v)
+                            DB()[key] = v
+                            after(v)
+                        end }
+                end
+                return {
+                    Row("Button size", "size", 28, 16, 44, 2, function() Layout() end),
+                    Row("Space between", "gap", 4, 0, 12, 1, function() Layout() end),
+                    Row("Bar width", "barWidth", 90, 30, 300, 5, function(v) if bar then bar:SetWidth(v) end end),
+                    Row("Bar height", "barHeight", 6, 2, 24, 1, function(v) if bar then bar:SetHeight(v) end end),
+                }
+            end,
         })
     end
     bar:SetScript("OnClick", function(_, button)

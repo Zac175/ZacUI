@@ -44,6 +44,12 @@
 --   offscreen()          pushed off the screen (the list says so)
 --   snapshot() / restore(v)   its spot of record, for undo and Cancel
 --   size = { set(w, h) }      Match width / height can set its size
+--   scale = { get() -> k, set(k) -> ok, why, limits() -> lo, hi }
+--                        its own size (Smaller / Bigger on the picked box)
+--   sizes()              -> its other sizes, a row each under the picked box:
+--                        { { label, unit, min, max, step, fine, def, get,
+--                        set }, ... } (width, height, icon size, spacing)
+--   setSize(i, v)        sets the i-th (optional: else the entry's own set)
 --   page                 the settings page that styles it
 --   state()              -> tag, reason when it is off here (greyed)
 --   follower             a ZacUI mover: it can be attached to another
@@ -169,6 +175,15 @@ local function Movables()
             snapshot = function() return ns.MoverSnapshot(key) end,
             restore = function(v) ns.MoverRestore(key, v) end,
             size = m.size,
+            -- (2026-11-19) its own size, where it has one (UIF_Movers)
+            scale = (ns.MoverScale and ns.MoverScale(key) ~= nil) and {
+                get = function() return ns.MoverScale(key) end,
+                set = function(v) return ns.SetMoverScale(key, v) end,
+                limits = function() return ns.MoverScaleLimits(key) end,
+            } or nil,
+            -- (2026-11-19) its other sizes, where its part names them
+            sizes = (ns.MoverSizes and m.sizes) and function() return ns.MoverSizes(key) end or nil,
+            setSize = function(i, v) return ns.SetMoverSize(key, i, v) end,
             page = m.page,
             state = function() return RegistryState(m) end,
         }
@@ -221,12 +236,61 @@ local function Movables()
                 end,
                 frames = function() local p = _G["ZacUIMeterWindow" .. i] return p and { p } or nil end,
                 content = function() local p = _G["ZacUIMeterWindow" .. i] return p and { p } or nil end,
-                snapshot = function() return { point = w.point, x = w.x, y = w.y, w = w.w, h = w.h } end,
+                snapshot = function()
+                    local sc = tonumber(w.scale) or 1
+                    return { point = w.point, x = w.x, y = w.y, w = w.w, h = w.h,
+                        scale = (math.abs(sc - 1) >= 0.005) and sc or nil }
+                end,
                 restore = function(v)
                     if type(v) ~= "table" then return end
                     w.point, w.x, w.y, w.w, w.h = v.point, v.x, v.y, v.w, v.h
+                    local sc = tonumber(v.scale) or 1
+                    if math.abs((tonumber(w.scale) or 1) - sc) >= 0.0005 then
+                        w.scale = (sc ~= 1) and sc or nil
+                        local win = MeterWin(w)
+                        local M = ns.Meter
+                        if win and win.frame then win.frame:SetScale((M and M.WinScale and M.WinScale(w)) or sc) end
+                    end
                     PlaceMeter(w)
                 end,
+                -- (2026-11-19) its width and height, a row each under the
+                -- picked box (what dragging its corner sets)
+                sizes = function()
+                    local function E(label, field, lo, def, step)
+                        return { label = label, unit = "px", min = lo, max = 1200, step = step, fine = 1, def = def,
+                            get = function() return math.floor((tonumber(w[field]) or def) + 0.5) end,
+                            set = function(v)
+                                w[field] = v
+                                PlaceMeter(w)
+                                if ns.SettingsChanged then ns.SettingsChanged("meter.size") end
+                                return true
+                            end }
+                    end
+                    return { E("Width", "w", 100, 226, 10), E("Height", "h", 50, 222, 10) }
+                end,
+                -- (2026-11-19) its own size: the window's Scale (its header
+                -- menu's), any value from 50 to 200 % here. A window's spot
+                -- is in its own scaled units, so it is rewritten to stay put.
+                scale = {
+                    get = function() return tonumber(w.scale) or 1 end,
+                    limits = function() return 0.5, 2 end,
+                    set = function(v)
+                        v = tonumber(v)
+                        if not v then return false end
+                        v = math.max(0.5, math.min(2, math.floor(v * 100 + 0.5) / 100))
+                        local old = tonumber(w.scale) or 1
+                        if math.abs(old - v) < 0.0005 then return true end
+                        w.scale = v
+                        if w.x and w.y then w.x, w.y = w.x * old / v, w.y * old / v end
+                        local win = MeterWin(w)
+                        -- (the pieces' one scale is on the window too: Meter.WinScale)
+                        local M = ns.Meter
+                        if win and win.frame then win.frame:SetScale((M and M.WinScale and M.WinScale(w)) or v) end
+                        PlaceMeter(w)
+                        if ns.SettingsChanged then ns.SettingsChanged("meter.scale") end
+                        return true
+                    end,
+                },
                 size = { set = function(nw, nh)
                     local win = MeterWin(w)
                     local f = win and win.frame
@@ -562,6 +626,11 @@ local Select     -- forward: pick a box, with its actions
 local Exit       -- forward: the bar's OnHide calls it
 local FillBar    -- forward: Show all / Hide all refill the list
 local RefreshBar -- forward: the count, the undo button, the moved dots
+local ScaleTo, ScaleStep -- forward: a picked box's own size
+local SizeTo, SizeStep   -- forward: its other sizes (width, height ...)
+local sizeBox            -- the rows for them, under the picked box's actions
+local BuildSizeBox       -- forward: makes them
+local entryScreen          -- the pieces' one size when this pass opened
 
 -- ============================================================
 -- OUTLINES, GUIDES AND SNAPPING
@@ -1023,6 +1092,79 @@ local function OpenSettings(m)
     Exit("save")
 end
 
+-- Its own size (m.scale), set and noticed by the session (Undo, Cancel).
+ScaleTo = function(m, v)
+    if not (m and m.scale and m.scale.set) then return false end
+    local ok, why = m.scale.set(v)
+    if ok == false then
+        if why then Print((m.label or m.key) .. ": " .. tostring(why)) end
+        return false
+    end
+    ES.Check()
+    RefreshBar()
+    if acts and acts:IsShown() then acts:Fill() end
+    return true
+end
+-- One step smaller (dir -1) or bigger (+1): to the next 5 %, Shift 1 %.
+ScaleStep = function(m, dir)
+    if not (m and m.scale and m.scale.get) then return false end
+    local k = m.scale.get() or 1
+    local step = (IsShiftKeyDown and IsShiftKeyDown()) and 1 or 5
+    local pct = k * 100
+    local to
+    if dir > 0 then to = math.floor(pct / step + 1.0001) * step
+    else to = math.ceil(pct / step - 1.0001) * step end
+    return ScaleTo(m, to / 100)
+end
+
+-- A piece's other sizes (m.sizes): one of them to a value, and a step on
+-- its own grid (Shift: its fine step). Noticed by the session like a move.
+local function SizeList(m)
+    if not (m and m.sizes) then return nil end
+    local ok, list = pcall(m.sizes)
+    return (ok and type(list) == "table" and #list > 0) and list or nil
+end
+SizeTo = function(m, i, v)
+    local list = SizeList(m)
+    local size = list and list[i]
+    v = tonumber(v)
+    if not (size and v) then return false end
+    local ok, why
+    if m.setSize then
+        ok, why = m.setSize(i, v)
+    else
+        v = ns.MoverSizeClamp and ns.MoverSizeClamp(size, v) or v
+        local done, a, b = pcall(size.set, v)
+        if done then ok, why = a, b else ok, why = false, a end
+        if ok == nil then ok = true end
+    end
+    if ok == false then
+        if why then Print((m.label or m.key) .. ": " .. tostring(why)) end
+        return false
+    end
+    ES.Check()
+    RefreshBar()
+    if acts and acts:IsShown() then acts:Fill() end
+    return true
+end
+SizeStep = function(m, i, dir)
+    local list = SizeList(m)
+    local size = list and list[i]
+    if not size then return false end
+    local step = tonumber(size.step) or 1
+    if IsShiftKeyDown and IsShiftKeyDown() then step = tonumber(size.fine) or step end
+    local ok, cur = pcall(size.get)
+    cur = ok and tonumber(cur) or 0
+    local n = cur / step
+    local to
+    if dir > 0 then to = math.floor(n + 1.0001) * step else to = math.ceil(n - 1.0001) * step end
+    return SizeTo(m, i, to)
+end
+local function SizeText(size, v)
+    if size.unit == "%" then return math.floor(v * 100 + 0.5) .. "%" end
+    return math.floor(v + 0.5) .. (size.unit and (" " .. size.unit) or "")
+end
+
 local function Menu(m, anchor)
     if not (m and UI.ContextMenu) then return false end
     local page = ES.PageFor(m)
@@ -1049,6 +1191,15 @@ local function Menu(m, anchor)
         func = function() StartPick("w", m) end }
     items[#items + 1] = { text = "Match height...", disabled = not canSize, tooltip = sizeWhy,
         func = function() StartPick("h", m) end }
+    do
+        local k = m.scale and m.scale.get and m.scale.get() or nil
+        local pct = k and math.floor(k * 100 + 0.5) or 100
+        items[#items + 1] = { text = k and ("Size: " .. pct .. "%  (back to 100%)") or "Size: its own settings",
+            disabled = (k == nil) or pct == 100,
+            tooltip = (k == nil) and "This one's size is set on its settings page."
+                or "Smaller and Bigger are on the picked box. This puts it back to 100%; it stays where it is.",
+            func = function() ScaleTo(m, 1) end }
+    end
     local followers = ES.FollowersOf(m.key)
     if #followers > 0 then
         local names = {}
@@ -1267,7 +1418,7 @@ local function BuildBar()
     bar.rule = bar:CreateTexture(nil, "ARTWORK")
     bar.rule._zui_own = true
     bar.rule:SetTexture(FLAT)
-    bar.rule:SetHeight(1)
+    bar.rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(bar.rule, "TOP") end
     bar.rule:SetPoint("BOTTOMLEFT", bar.undo, "TOPLEFT", -pad + 1, 8)
     bar.rule:SetPoint("RIGHT", bar, "RIGHT", -1, 0)
     local bc = ns.GetColor("ui", "border")
@@ -1285,6 +1436,29 @@ local function BuildBar()
     for _, w in ipairs({ bar.filter, bar.snap, bar.grid, bar.undo, bar.cancel, bar.save }) do w:Hide() end
     bar.dim:ClearAllPoints()
     bar.dim:SetPoint("TOPLEFT", bar.desc, "BOTTOMLEFT", 0, -8)
+    -- (2026-11-19, Zac: "i want sizing and stuff in both the addons moveui
+    -- as well") the one size for the pieces on the screen, here too: the
+    -- same number as the Movers page's "Size on screen" (ns.Screen). Each
+    -- piece's own size is on its picked box. Cancel puts this back.
+    if ns.Screen and ns.Screen.Set then
+        local S = ns.Screen
+        bar.size = UI.Slider(bar, { width = iw, min = math.floor(S.MIN * 100 + 0.5), max = math.floor(S.MAX * 100 + 0.5),
+            step = 5, value = math.floor(S.Scale() * 100 + 0.5), label = "Size of the pieces on screen",
+            format = function(v) return v .. "%" end,
+            onChange = function(v)
+                S.Set(v / 100)
+                -- (the boxes follow their pieces)
+                if ns.MoverRefitAll then ns.MoverRefitAll() end
+                if acts and acts:IsShown() then acts:Fill() end
+            end })
+        bar.size:SetPoint("TOPLEFT", bar.dim, "BOTTOMLEFT", 0, -8)
+        UI.Tooltip(bar.size, "Size of the pieces on screen",
+            "The class HUD, the trackers, timers, alerts and consumable bars, all together. A piece's own size "
+                .. "is on its box when you click it (Smaller / Bigger). The unit frames, the action bars and the "
+                .. "meter have their own sizes.")
+        bar.scroll:ClearAllPoints()
+        bar.scroll:SetPoint("TOPLEFT", bar.size, "BOTTOMLEFT", 0, -6)
+    end
     bar.showHide:ClearAllPoints()
     bar.showHide:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", pad, pad)
     bar.resetAll:ClearAllPoints()
@@ -1354,7 +1528,9 @@ end
 local function BarHeight(listH)
     local descH = math.max(12, (bar.desc and bar.desc:GetStringHeight()) or 24)
     -- (the hidden filter, toggles and second button row take no room)
-    return bar.headerHeight + descH + 8 + 30 + 6 + listH
+    -- (the size slider under "Dim the world": its row and the gap over it)
+    local sizeH = bar.size and (8 + 30) or 0
+    return bar.headerHeight + descH + 8 + 30 + sizeH + 6 + listH
         + 8 + 9 + M.BUTTON_H + M.CARD_PAD
 end
 
@@ -1757,6 +1933,23 @@ local function ActsFor(m)
         out[#out + 1] = { "Match height", true, function() StartPick("h", m) end,
             "Click the frame whose height this one should take." }
     end
+    -- (2026-11-19) its own size, where it has one: Smaller, what it is
+    -- now (a click: back to 100 %), Bigger
+    if m.scale and m.scale.get then
+        local k = m.scale.get() or 1
+        local lo, hi = 0.5, 2
+        if m.scale.limits then
+            local a, b = m.scale.limits()
+            lo, hi = a or lo, b or hi
+        end
+        local pct = math.floor(k * 100 + 0.5)
+        out[#out + 1] = { "Smaller", k > lo + 0.001, function() ScaleStep(m, -1) end,
+            "5% smaller (hold Shift: 1%). It stays where it is. Ctrl+Z puts it back." }
+        out[#out + 1] = { pct .. "%", pct ~= 100, function() ScaleTo(m, 1) end,
+            "This one's own size. Click: back to 100%." }
+        out[#out + 1] = { "Bigger", k < hi - 0.001, function() ScaleStep(m, 1) end,
+            "5% bigger (hold Shift: 1%). It stays where it is. Ctrl+Z puts it back." }
+    end
     return out
 end
 
@@ -1848,7 +2041,15 @@ local function BuildActs()
             end
         end
         self:Show()
+        -- (its other sizes, a row each)
+        if SizeList(m) then
+            if not sizeBox then BuildSizeBox() end
+            sizeBox:Fill(h)
+        elseif sizeBox then
+            sizeBox:Hide()
+        end
     end
+    acts:HookScript("OnHide", function() if sizeBox then sizeBox:Hide() end end)
     -- the box went (hidden, filtered, another picked): so do its actions
     acts:SetScript("OnUpdate", function(self, dt)
         self._acc = (self._acc or 0) + dt
@@ -1857,6 +2058,142 @@ local function BuildActs()
         local h = self.h
         if not (active and h and Kit.selected == h and h:IsShown()) or picking then self:Hide() end
     end)
+end
+
+-- ============================================================
+-- THE PICKED BOX'S SIZES (2026-11-19)
+-- Under the actions: a row for each size the piece has beside its scale -
+-- "Width  -  316 px  +". The minus and plus step on the size's own grid
+-- (Shift: finer); a click on the value puts its default back when it has
+-- one. Each is the same setting the piece's own page shows.
+-- ============================================================
+local SIZE_ROW = 18
+BuildSizeBox = function()
+    sizeBox = CreateFrame("Frame", "ZacUIEditModeSizes", UIParent)
+    sizeBox:SetFrameStrata("FULLSCREEN_DIALOG")
+    sizeBox:EnableMouse(true)
+    UI.Fill(sizeBox, "ui", "windowBg", 0.92)
+    sizeBox._zPaint = UI.PaintBox
+    sizeBox:_zPaint()
+    sizeBox.rows = {}
+    sizeBox:Hide()
+    local function Tint(b)
+        local c
+        if not b.on then c = ns.GetColor("text", "disabled")
+        elseif b.hot then c = ns.GetColor("text", "normal")
+        else c = Col("accent") end
+        b.text:SetTextColor(c.r, c.g, c.b, 1)
+    end
+    local function Btn(parent, tipFn, onClick)
+        local b = CreateFrame("Button", nil, parent)
+        b:SetHeight(SIZE_ROW)
+        b.text = UI.Font(b, F.SMALL, { text = "", cat = "text", key = "gold" })
+        b.text:SetPoint("CENTER", 0, 0)
+        b.on = true
+        b:SetScript("OnEnter", function(self)
+            self.hot = true
+            Tint(self)
+            local title, body = tipFn(self)
+            if title then
+                GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+                local t, c = ns.GetColor("tooltip", "title"), ns.GetColor("tooltip", "body")
+                GameTooltip:AddLine(title, t.r, t.g, t.b)
+                if body then GameTooltip:AddLine(body, c.r, c.g, c.b, true) end
+                GameTooltip:Show()
+            end
+        end)
+        b:SetScript("OnLeave", function(self) self.hot = nil Tint(self) GameTooltip:Hide() end)
+        b:SetScript("OnClick", function(self) if self.on then onClick(self) end end)
+        b.Tint = Tint
+        return b
+    end
+    local function Row(i)
+        local row = sizeBox.rows[i]
+        if row then return row end
+        row = CreateFrame("Frame", nil, sizeBox)
+        row:SetHeight(SIZE_ROW)
+        row.label = UI.Font(row, F.SMALL, { text = "", cat = "text", key = "gray" })
+        row.label:SetPoint("LEFT", row, "LEFT", 0, 0)
+        local function M() return sizeBox.picked and MovableOf(sizeBox.picked) end
+        local function Size()
+            local list = SizeList(M())
+            return list and list[i]
+        end
+        local function StepText(size)
+            local step = tonumber(size.step) or 1
+            if size.unit == "%" then return math.floor(step * 100 + 0.5) .. "%" end
+            return step .. (size.unit and (" " .. size.unit) or "")
+        end
+        row.minus = Btn(row, function()
+            local size = Size()
+            if size then return "Smaller", StepText(size) .. " less (hold Shift for a finer step). Ctrl+Z puts it back." end
+        end, function() SizeStep(M(), i, -1) end)
+        row.value = Btn(row, function()
+            local size = Size()
+            if not size then return nil end
+            local body = size.tip or "The same number its settings page has."
+            if size.def ~= nil then body = body .. " Click: back to " .. SizeText(size, size.def) .. "." end
+            return size.label, body
+        end, function()
+            local size = Size()
+            if size and size.def ~= nil then SizeTo(M(), i, size.def) end
+        end)
+        row.plus = Btn(row, function()
+            local size = Size()
+            if size then return "Bigger", StepText(size) .. " more (hold Shift for a finer step). Ctrl+Z puts it back." end
+        end, function() SizeStep(M(), i, 1) end)
+        row.minus.text:SetText("-")
+        row.plus.text:SetText("+")
+        row.minus:SetWidth(20)
+        row.plus:SetWidth(20)
+        row.value:SetWidth(62)
+        sizeBox.rows[i] = row
+        return row
+    end
+    -- h: the picked box; under (or over) the actions strip
+    function sizeBox:Fill(h)
+        self.picked = h
+        local m = h and MovableOf(h)
+        local list = m and SizeList(m)
+        if not (list and acts and acts:IsShown()) then self:Hide() return end
+        local labelW = 0
+        for i, size in ipairs(list) do
+            local row = Row(i)
+            row.label:SetText(tostring(size.label or ""))
+            local w = math.ceil(row.label:GetStringWidth() or 40)
+            if w > labelW then labelW = w end
+        end
+        local width = 8 + labelW + 8 + 20 + 62 + 20 + 6
+        for i, size in ipairs(list) do
+            local row = Row(i)
+            local ok, cur = pcall(size.get)
+            cur = ok and tonumber(cur) or 0
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", self, "TOPLEFT", 8, -3 - (i - 1) * SIZE_ROW)
+            row:SetWidth(width - 14)
+            row.minus:ClearAllPoints()
+            row.minus:SetPoint("LEFT", row, "LEFT", labelW + 8, 0)
+            row.value:ClearAllPoints()
+            row.value:SetPoint("LEFT", row.minus, "RIGHT", 0, 0)
+            row.plus:ClearAllPoints()
+            row.plus:SetPoint("LEFT", row.value, "RIGHT", 0, 0)
+            row.value.text:SetText(SizeText(size, cur))
+            row.minus.on = not (tonumber(size.min) and cur <= size.min + 0.0005)
+            row.plus.on = not (tonumber(size.max) and cur >= size.max - 0.0005)
+            row.value.on = size.def ~= nil and math.abs(cur - size.def) >= 0.0005
+            row.minus:Tint() row.value:Tint() row.plus:Tint()
+            row:Show()
+        end
+        for i = #list + 1, #self.rows do self.rows[i]:Hide() end
+        self:SetSize(width, 6 + #list * SIZE_ROW)
+        self:ClearAllPoints()
+        -- (the strip sits over the box when the box is at the screen's
+        -- bottom: the rows go over the strip then)
+        local over = select(1, acts:GetPoint(1)) == "BOTTOM"
+        if over then self:SetPoint("BOTTOM", acts, "TOP", 0, 2)
+        else self:SetPoint("TOP", acts, "BOTTOM", 0, -2) end
+        self:Show()
+    end
 end
 
 Select = function(h)
@@ -1953,6 +2290,11 @@ local function Enter(opts)
     end
     ShowGuides()
     ES.Begin()
+    -- (the pieces' one size as it is now: Cancel puts it back)
+    entryScreen = ns.Screen and ns.Screen.Scale and ns.Screen.Scale() or nil
+    if bar and bar.size and entryScreen and bar.size.slider then
+        bar.size.slider:SetValue(math.floor(entryScreen * 100 + 0.5))
+    end
     ES.OnChange = function() RefreshBar() end
     Kit.edit = KIT_HOOKS
     Kit.EditKeys(true)
@@ -2025,6 +2367,9 @@ Exit = function(mode)
     local undone
     if mode == "cancel" then
         undone = ES.Cancel()
+        if entryScreen and ns.Screen and math.abs(ns.Screen.Scale() - entryScreen) > 0.0005 then
+            ns.Screen.Set(entryScreen)
+        end
     else
         ES.Check()
     end
@@ -2046,6 +2391,7 @@ Exit = function(mode)
     focusUntil = nil
     if overlay then overlay:Hide() end
     if acts then acts:Hide() end
+    if sizeBox then sizeBox:Hide() end
     if top then
         top:Hide()
         if top.hint then top.hint:Hide() end

@@ -2909,7 +2909,7 @@ local function SetCard(parent, title, y, opts)
     local accent = card:CreateTexture(nil, "ARTWORK")
     accent._zui_own = true
     accent:SetTexture(FLAT)
-    accent:SetWidth(1)
+    accent:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(accent, "LEFT") end
     accent:SetPoint("TOPLEFT")
     accent:SetPoint("BOTTOMLEFT")
     card._zAccent = accent
@@ -3846,13 +3846,13 @@ function UI.HeaderArt(bar, opts)
     -- 1px, like every other rule in the UI; the diagonal is the same strip
     -- turned, a hair longer so its ends meet the flat parts
     local ruleL, ruleR, ruleD = Tex(), Tex(), Tex()
-    ruleL:SetHeight(1)
+    ruleL:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(ruleL, "TOP") end
     ruleL:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, STEP_Y)
     ruleL:SetPoint("BOTTOMRIGHT", bar, "BOTTOMLEFT", stepX, STEP_Y)
-    ruleR:SetHeight(1)
+    ruleR:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(ruleR, "TOP") end
     ruleR:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", stepX + STEP_W, 0)
     ruleR:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
-    ruleD:SetHeight(1)
+    ruleD:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(ruleD, "TOP") end
     ruleD:SetWidth(math.sqrt(STEP_W * STEP_W + STEP_Y * STEP_Y) + 1)
     ruleD:SetPoint("CENTER", bar, "BOTTOMLEFT", stepX + STEP_W / 2, STEP_Y / 2 + 0.5)
     ruleD:SetRotation(-math.atan2(STEP_Y, STEP_W))

@@ -1333,7 +1333,7 @@ local function getHealSeg(frame, i)
     -- same-colored healers side by side read as one long chip.
     local div = seg:CreateTexture(nil, "OVERLAY")
     div:SetPoint("TOPLEFT"); div:SetPoint("BOTTOMLEFT")
-    div:SetWidth(1)
+    div:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(div, "LEFT") end
     div:Hide()
     seg.divider = div
 

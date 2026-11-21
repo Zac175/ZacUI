@@ -73,9 +73,12 @@ local function SaveSpot(key)
     local h = Bar(key).holder
     local l, t = h:GetLeft(), h:GetTop()
     if not (l and t) then return end
+    -- (the spot is applied in the holder's own units, Live.Place: under
+    -- the pieces' one scale, ns.Screen, those are not UIParent's)
     local k = h:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    if not (k and k > 0) then k = 1 end
     ZacUIDB.movers = ZacUIDB.movers or {}
-    ZacUIDB.movers[CB.MoverKey(key)] = { point = "TOPLEFT", x = l * k, y = t * k - UIParent:GetHeight() }
+    ZacUIDB.movers[CB.MoverKey(key)] = { point = "TOPLEFT", x = l, y = t - UIParent:GetHeight() / k }
 end
 
 -- the bar's fill, edge (gold while it can be dragged) and accent line
@@ -179,7 +182,31 @@ local function Build(key)
         local d = CB.DefaultSpot(key)
         -- secure: the bar holds the item buttons, so its box locks in a fight
         ns.RegisterMover(CB.MoverKey(key), CB.LABELS[key], function() return h end, d.point, d.x, d.y, nil,
-            { secure = true, reset = function() Live.Place(key) end })
+            { secure = true, screen = true, reset = function() Live.Place(key) end,
+              -- (its own size in Edit Mode: the bar's Scale setting, the
+              -- same number the Consumable bars page shows)
+              scale = { min = 0.5, max = 2,
+                  get = function() return tonumber(CB.Bar(key).scale) or 1 end,
+                  set = function(v)
+                      CB.Bar(key).scale = v
+                      Live.Request(key, true)
+                  end },
+              -- (and its other sizes: the page's Button size, Per row and
+              -- Space between)
+              sizes = function()
+                  local function E(label, field, lo, hi, step, def, unit)
+                      return { label = label, unit = unit, min = lo, max = hi, step = step, fine = 1, def = def,
+                          get = function() return tonumber(CB.Bar(key)[field]) or lo end,
+                          set = function(v)
+                              CB.Bar(key)[field] = v
+                              Live.Request(key, true)
+                          end }
+                  end
+                  -- (no default named: it differs from bar to bar)
+                  return { E("Button size", "buttonSize", 24, 64, 2, nil, "px"),
+                      E("Per row", "buttonsPerRow", 1, 20, 1, nil, nil),
+                      E("Space between", "iconSpacing", 0, 12, 1, nil, "px") }
+              end })
     end
     -- when it shows (visibility, ZacUI's shape): its opacity goes into the
     -- box's (alpha only - the bar holds secure buttons; the holder's own

@@ -1093,6 +1093,8 @@ local function MakePopup(parent, name)
         else
             t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1)
         end
+        -- (2026-11-19: one screen pixel under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+        if ns.Pixel and ns.Pixel.Edge then ns.Pixel.Edge(t, side, f) end
         f.edge[i] = t
     end
 
@@ -1185,7 +1187,31 @@ local function BuildPopup()
     end)
     -- reset: back above the Warrior HUD's buff row (or the store's spot)
     HUD.RegisterMover("hesitation", "Hesitation Alert", holder, cfg,
-        { reset = function() PlacePopup(holder) end })
+        { reset = function() PlacePopup(holder) end,
+          -- (its own size in Edit Mode: the same number its corner grip sets)
+          scale = { min = 0.6, max = 2,
+              get = function() return tonumber(DB().scale) or 1 end,
+              set = function(v) DB().scale = v f:SetScale(v) H:ApplyAppearance() end },
+          -- (2026-11-20) its two text sizes: the Look tab's own fonts
+          sizes = function()
+              local function Row(label, key, def, lo, hi, base)
+                  return { label = label, unit = "px", min = lo, max = hi, step = 1, fine = 1, def = def,
+                      get = function()
+                          local s = DB()[key]
+                          return (type(s) == "table" and tonumber(s.size)) or def
+                      end,
+                      set = function(v)
+                          local d = DB()
+                          local spec = {}
+                          for k, val in pairs(type(d[key]) == "table" and d[key] or base) do spec[k] = val end
+                          spec.size = v
+                          d[key] = spec
+                          H:ApplyAppearance()
+                      end }
+              end
+              return { Row("Text size", "alertFont", 18, 10, 40, { size = 18, outline = "thick", shadow = true }),
+                       Row("Small text", "subFont", 11, 8, 24, { size = 11, outline = "outline", shadow = true }) }
+          end })
     -- padlock (the HUD mover) and resize grip over the corner
     if UI.HudHandle then
         f.handle = UI.HudHandle(f, {

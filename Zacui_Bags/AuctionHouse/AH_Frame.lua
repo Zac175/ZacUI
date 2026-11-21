@@ -68,7 +68,7 @@ local function CreateList(parent, columns, opts)
     header:SetHeight(16)
     local rule = header:CreateTexture(nil, "ARTWORK")
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("BOTTOMLEFT")
     rule:SetPoint("BOTTOMRIGHT")
     local a = Col("accent")
@@ -250,7 +250,7 @@ local function BuildBuyWindow()
         local t = win:CreateTexture(nil, "ARTWORK")
         t._zui_own = true
         t:SetColorTexture(1, 1, 1, POP.RULE_A * 1.5)
-        t:SetHeight(1)
+        t:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "TOP") end
         return t
     end
 

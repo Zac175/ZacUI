@@ -299,7 +299,7 @@ local function BuildSide(key, x)
     local rule = body:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("TOPLEFT", body, "TOPLEFT", 1, y - 2)
     rule:SetPoint("TOPRIGHT", body, "TOPRIGHT", -1, y - 2)
     local label = UI.Font(body, F.SMALL, { cat = "text", key = "gray", justify = "LEFT",
@@ -371,7 +371,7 @@ local function Build()
     local barRule = bar:CreateTexture(nil, "ARTWORK")
     barRule._zui_own = true
     barRule:SetTexture(FLAT)
-    barRule:SetHeight(1)
+    barRule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(barRule, "TOP") end
     barRule:SetPoint("BOTTOMLEFT")
     barRule:SetPoint("BOTTOMRIGHT")
     title = UI.Font(bar, F.TITLE, { cat = "text", key = "gold", justify = "LEFT" })

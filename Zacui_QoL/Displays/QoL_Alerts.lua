@@ -396,7 +396,22 @@ local function Live() if QoL.enabled then A.Apply() end end
 A.Live = Live
 if Allowed() then
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Alerts", function() return anchor end, "CENTER", 0, 169, nil, { own = true })
+        ns.RegisterMover(MOVER, "Alerts", function() return anchor end, "CENTER", 0, 169, nil, { own = true,
+            -- (its text size in Edit Mode: the size of the font its page
+            -- picks; each alert line keeps its own share of it)
+            sizes = function()
+                return { { label = "Text size", unit = "px", min = 10, max = 48, step = 1, fine = 1, def = A.FONT_DEFAULTS.size,
+                    get = function()
+                        local f = DB().font
+                        return (type(f) == "table" and tonumber(f.size)) or A.FONT_DEFAULTS.size
+                    end,
+                    set = function(v)
+                        local d = DB()
+                        if type(d.font) ~= "table" then d.font = {} end
+                        d.font.size = v
+                        A.Apply()
+                    end } }
+            end })
     end
     local base = QoL.EnableAutomation
     function QoL.EnableAutomation(...)

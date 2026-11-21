@@ -1273,7 +1273,7 @@ local function WireWindow(win)
     if f.SetResizeBounds then f:SetResizeBounds(100, 50)
     elseif f.SetMinResize then f:SetMinResize(100, 50) end
     f:SetClampedToScreen(true)
-    f:SetScale(tonumber(settings.scale) or 1)
+    f:SetScale(Meter.WinScale(settings))
 
     -- window-level mouse: hover reveals the icons, drag moves when
     -- unlocked (the gaps between rows and the empty bottom are the frame)
@@ -1475,7 +1475,7 @@ function Win.Create(id)
         f:ClearAllPoints()
         f:SetSize(settings.w, settings.h)
         f:SetPoint(settings.point, UIParent, settings.point, settings.x, settings.y)
-        f:SetScale(tonumber(settings.scale) or 1)
+        f:SetScale(Meter.WinScale(settings))
         f:Show()
         win.scroll = 0
         win.parkedAt = nil
@@ -1509,6 +1509,12 @@ local function PlaceNext(from, new)
     local h = new.h
     if l and t and b and UIParent.GetTop then
         local top = UIParent:GetTop() or 0
+        -- (the screen's top in the window's own units: its Scale and the
+        -- pieces' one scale are both on it)
+        do
+            local fe, ue = f:GetEffectiveScale(), UIParent:GetEffectiveScale()
+            if fe and ue and fe > 0 then top = top * ue / fe end
+        end
         local newBottom = t + GAP
         if top > 0 and newBottom + h > top then newBottom = b - GAP - h end
         new.point, new.x, new.y = "BOTTOMLEFT", l, newBottom
@@ -1645,7 +1651,7 @@ end
 local function ApplyGeometry(win)
     local f, s = win.frame, win.settings
     if s.w and s.h then f:SetSize(s.w, s.h) end
-    f:SetScale(tonumber(s.scale) or 1)
+    f:SetScale(Meter.WinScale(s))
     local T = Meter.Threat
     if T and T.IsDocked and T.IsDocked(win) then
         T.ApplyDock()

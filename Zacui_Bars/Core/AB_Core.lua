@@ -380,12 +380,30 @@ function AB.ApplyLayer(frame, cfg)
     if ns.ApplyFramePosition then ns.ApplyFramePosition(frame, fp or NO_LAYER, def) end
 end
 
+-- (2026-11-20) THE PIECES' ONE SCALE ON THE BARS (ns.Screen, "Size of the
+-- pieces on screen"; 1 until its owner moves that slider, and then every
+-- line below is what it always was). A bar is drawn at its own Scale times
+-- that number, and its saved spot - x / y from the nearest screen corner or
+-- edge - is multiplied by it too, so a row of bars gets smaller AND stays a
+-- row: 40 above the bottom edge is 32 above it at 80%. Nothing saved is
+-- rewritten. Everything that MEASURES the screen works in real screen
+-- units as before; the number is taken out again only where a measured
+-- spot becomes a saved one (AB.SavePosition, AB.SpotFor, the two docks).
+function AB.ScreenK()
+    local S = ns.Screen
+    local k = S and S.Scale and S.Scale() or 1
+    if type(k) ~= "number" or k ~= k or k <= 0 then return 1 end
+    return k
+end
+
 -- Puts a header where its config says. x/y are UIParent units; the
 -- frame is scaled, so SetPoint takes them divided by the scale.
 function AB.Place(frame, cfg, initial)
     local s = cfg.scale or 1
     if s <= 0 then s = 1 end
-    frame:SetScale(s)
+    -- (drawn at its Scale x the pieces' one scale; the offsets below are in
+    -- the frame's units over its own Scale, so they carry that number too)
+    frame:SetScale(s * AB.ScreenK())
     frame:ClearAllPoints()
     if cfg.x == nil or cfg.y == nil or not cfg.point then
         local init = initial or cfg.initial or { "CENTER", 0, -250 }
@@ -416,6 +434,11 @@ function AB.SavePosition(frame, cfg)
     local y = (v == "BOTTOM") and b or (v == "TOP") and (t - uh) or (cy - uh / 2)
     local point = v .. h
     if point == "" then point = "CENTER" end
+    -- (measured on the real screen; saved without the pieces' one scale)
+    do
+        local k = AB.ScreenK()
+        if k ~= 1 then x, y = x / k, y / k end
+    end
     cfg.point, cfg.x, cfg.y = point, x, y
     -- (a bar dropped somewhere new: the strip's right cap, AB.KitStripEnd)
     if AB.KitStripEnd and AB.headers and AB.headers.bar1 and rawget(AB.headers.bar1, "_zChrome") then
@@ -1679,6 +1702,11 @@ function AB.MoverFor(header, cfg, onMoved)
                 local v = (cy < uh / 3) and "BOTTOM" or (cy > uh * 2 / 3) and "TOP" or ""
                 probe.x = (h == "LEFT") and l or (h == "RIGHT") and (r - uw) or (cx - uw / 2)
                 probe.y = (v == "BOTTOM") and b or (v == "TOP") and (t - uh) or (cy - uh / 2)
+                -- (the number that will be saved: without the pieces' one scale)
+                do
+                    local k = AB.ScreenK()
+                    if k ~= 1 then probe.x, probe.y = probe.x / k, probe.y / k end
+                end
                 local point = v .. h
                 return ns.MoverKit.Format(point ~= "" and point or "CENTER", probe.x, probe.y)
             end
@@ -1745,18 +1773,81 @@ function AB.EditModeMovables()
                 frames = function() local m = movers[header] return m and { m } or nil end,
                 -- the bar itself, faded while it is hidden in Edit Mode
                 content = function() return { header } end,
-                -- its spot of record, for Edit Mode's undo and Cancel
+                -- its spot of record, for Edit Mode's undo and Cancel (and
+                -- its scale, when that is not 100 %)
                 snapshot = function()
                     local cfg = header.cfg
-                    return { point = cfg.point, x = cfg.x, y = cfg.y }
+                    local sc = tonumber(cfg.scale) or 1
+                    return { point = cfg.point, x = cfg.x, y = cfg.y, scale = (math.abs(sc - 1) >= 0.005) and sc or nil,
+                        buttonSize = cfg.buttonSize, padding = cfg.padding, rows = cfg.rows }
                 end,
                 restore = function(v)
                     local cfg = header.cfg
                     if type(v) ~= "table" or not cfg or InCombatLockdown() then return end
                     cfg.point, cfg.x, cfg.y = v.point, v.x, v.y
+                    local sc = tonumber(v.scale) or 1
+                    local changed = math.abs((tonumber(cfg.scale) or 1) - sc) >= 0.0005
+                    if changed then cfg.scale = sc end
+                    -- (its other sizes, when the record has them)
+                    for _, k in ipairs({ "buttonSize", "padding", "rows" }) do
+                        if cfg[k] ~= v[k] then cfg[k] = v[k] changed = true end
+                    end
                     AB.Place(header, cfg)
+                    if changed then AB.ApplyAll() end
                     if movers[header] and movers[header]:IsShown() then AB.FitMover(movers[header]) end
                 end,
+                -- (2026-11-19) its other sizes, a row each under the picked
+                -- box: the Action bars page's Button size, Space between
+                -- buttons and Rows - the same settings and ranges
+                sizes = function()
+                    local cfg = header.cfg
+                    if not cfg then return nil end
+                    local key = tostring(header.key)
+                    local isAction = key:find("^bar%d") ~= nil
+                    local isSmall = key == "pet" or key == "stance"
+                    local function E(label, field, lo, hi, def, unit, step)
+                        return { label = label, unit = unit, min = lo, max = hi, step = step or 1, fine = 1, def = def,
+                            get = function() return tonumber(header.cfg and header.cfg[field]) or def end,
+                            set = function(v)
+                                if InCombatLockdown() then return false, "The bars hold buttons: after the fight." end
+                                if not header.cfg then return false end
+                                header.cfg[field] = v
+                                AB.ApplyAll()
+                                if movers[header] and movers[header]:IsShown() then AB.FitMover(movers[header]) end
+                                if ns.SettingsChanged then ns.SettingsChanged("bars.size") end
+                                return true
+                            end }
+                    end
+                    local list = {}
+                    if isAction then list[#list + 1] = E("Button size", "buttonSize", 16, 64, AB.BUTTON, "px")
+                    elseif isSmall then list[#list + 1] = E("Button size", "buttonSize", 16, 64, AB.PET_BUTTON, "px") end
+                    if key ~= "status" then list[#list + 1] = E("Space between", "padding", -10, 30, 2, "px") end
+                    if isAction then list[#list + 1] = E("Rows", "rows", 1, 12, 1, nil)
+                    elseif isSmall then list[#list + 1] = E("Rows", "rows", 1, 10, 1, nil)
+                    elseif key == "bagbar" then list[#list + 1] = E("Rows", "rows", 1, 6, 1, nil)
+                    elseif key == "status" then list[#list + 1] = E("Width", "width", 200, 2000, 1024, "px", 8) end
+                    return (#list > 0) and list or nil
+                end,
+                -- (2026-11-19) its own size in Edit Mode: the bar's Scale,
+                -- the same number the Action bars page shows. A bar's spot is
+                -- kept in screen units, so it stays on its anchor point.
+                scale = {
+                    get = function() return tonumber(header.cfg and header.cfg.scale) or 1 end,
+                    limits = function() return 0.5, 2.5 end,
+                    set = function(v)
+                        local cfg = header.cfg
+                        v = tonumber(v)
+                        if not (cfg and v) then return false end
+                        if InCombatLockdown() then return false, "The bars hold buttons: after the fight." end
+                        v = math.max(0.5, math.min(2.5, math.floor(v * 100 + 0.5) / 100))
+                        cfg.scale = v
+                        AB.Place(header, cfg)
+                        AB.ApplyAll()
+                        if movers[header] and movers[header]:IsShown() then AB.FitMover(movers[header]) end
+                        if ns.SettingsChanged then ns.SettingsChanged("bars.scale") end
+                        return true
+                    end,
+                },
                 page = "bars",
             }
         elseif header.cfg and header.key then
@@ -2670,6 +2761,10 @@ end
 function AB.SpotFor(cfg, cx, cy, count, size, hgt)
     local sc = cfg.scale or 1
     if sc <= 0 then sc = 1 end
+    -- (cx, cy and the size handed back are real screen units: the bar as
+    -- it is drawn, its Scale x the pieces' one scale)
+    local screenK = AB.ScreenK()
+    sc = sc * screenK
     local perRow, rows, padX, padY = AB.LayoutShape(cfg, count)
     local w = (perRow * size + (perRow - 1) * padX) * sc
     local h = (rows * (hgt or size) + (rows - 1) * padY) * sc
@@ -2685,6 +2780,8 @@ function AB.SpotFor(cfg, cx, cy, count, size, hgt)
     local y = (V == "BOTTOM") and py or (V == "TOP") and (py - uh) or (py - uh / 2)
     local point = V .. H
     if point == "" then point = "CENTER" end
+    -- (the saved spot is without the pieces' one scale: AB.Place puts it back)
+    if screenK ~= 1 then x, y = x / screenK, y / screenK end
     return point, math.floor(x + 0.5), math.floor(y + 0.5), w, h
 end
 AB.STOCK_CORNER = { margin = 4, microH = 40, gap = 4 }
@@ -2717,7 +2814,7 @@ function AB.SeatFromStock(cfg, list, size, kind, hgt)
             cy = C.margin + h / 2
         else
             local mc = (AB.Profile and AB.Profile().micro) or {}
-            local ms = (mc.scale or 1)
+            local ms = (mc.scale or 1) * AB.ScreenK()
             cy = C.margin + C.microH * ms + C.gap + h / 2
         end
     end
@@ -2747,8 +2844,10 @@ function AB.SeatTrue(header, cfg, buttons, kind)
     -- (never off the screen)
     local uw, uh = UIParent:GetWidth(), UIParent:GetHeight()
     if l + dx < 0 or r + dx > uw + 0.5 or b + dy < 0 or t + dy > uh + 0.5 then return false end
-    cfg.x = math.floor(cfg.x + dx + 0.5)
-    cfg.y = math.floor(cfg.y + dy + 0.5)
+    -- (dx, dy are real screen units; the saved spot is without the pieces' one scale)
+    local screenK = AB.ScreenK()
+    cfg.x = math.floor(cfg.x + dx / screenK + 0.5)
+    cfg.y = math.floor(cfg.y + dy / screenK + 0.5)
     AB.Place(header, cfg)
     return true
 end
@@ -3339,7 +3438,8 @@ function AB.DockRow()
     for _, key in ipairs(DOCK_KEYS) do
         if AsLaid(key) then
             local cfg = bars[key]
-            cfg.x = cfg.x + dx
+            -- (dx is real screen units; the saved spot is without the pieces' one scale)
+            cfg.x = cfg.x + dx / AB.ScreenK()
             local h = AB.headers[key]
             if h and rawget(h, "cfg") == cfg then AB.Place(h, cfg) end
             if not laying then p.layoutSig[key] = SigSpot(cfg) .. "#" .. SigRest(cfg) end
@@ -3353,6 +3453,21 @@ function AB.Gryphons(header, size)
     if not header then return end
     local cfg = rawget(header, "cfg") or { enabled = true, buttons = 12, rows = 1, padding = 2 }
     return AB.KitChrome(header, cfg, size, cfg.buttons or 12, rawget(header, "n") or 1)
+end
+
+-- (2026-11-20) the pieces' one scale changed: every bar placed again at
+-- its new size (after the fight, like every placement)
+-- the open world map lies over the bars it covers (UIF_Movers: UNDER THE
+-- MAP; secure, so only outside a fight)
+if ns.UnderMap and ns.UnderMap.Add then
+    ns.UnderMap.Add(function(each)
+        for _, h in pairs(AB.headers) do each(h) end
+    end)
+end
+if ns.Screen and ns.Screen.OnChange then
+    ns.Screen.OnChange(function()
+        if AB.active and AB.ApplyAll then AB.ApplyAll() end
+    end)
 end
 
 function AB.ApplyAll()

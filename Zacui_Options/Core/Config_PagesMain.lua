@@ -368,6 +368,7 @@ RegisterPage("General", function(L)
                     ZacUIDB.insets, ZacUIDB.lines = {}, {}
                     ZacUIDB.colors, ZacUIDB.palette = {}, {}
                     ZacUIDB.movers, ZacUIDB.tooltipPos = {}, nil
+                    ZacUIDB.moverScale = nil
                     ZacUIDB.font = { name = nil, delta = 0, outline = nil }
                     ZacUIDB.look = nil
                     ZacUIDB.config = nil
@@ -512,6 +513,23 @@ RegisterPage("Movers", function(L)
         L:EndCard()
     end
 
+    -- the pieces' one scale (ns.Screen, UIF_Movers)
+    if ns.Screen then
+        local S = ns.Screen
+        L:Card("Size on screen")
+        local s = UI.Slider(L.current, { width = 240, min = 50, max = 150, step = 5,
+            value = math.floor(S.Scale() * 100 + 0.5), label = "Class HUD, trackers and timers",
+            format = function(v) return v .. "%" end,
+            onChange = function(v) S.Set(v / 100) end })
+        L:Row(s, 40)
+        L:Desc("One size for the pieces ZacUI puts on your screen: the class HUD's rows and bars, the "
+            .. "consumables bars, reminders, alerts, timers and the loot feed. They get smaller or bigger "
+            .. "together and keep their places in the layout. Handy on a smaller screen or a larger "
+            .. "interface scale. Each piece's own size settings still apply on top. Unit frames, action "
+            .. "bars, nameplates, the damage meter, raid mod bars and the blessings bar have their own scale.")
+        L:EndCard()
+    end
+
     L:Card("Frames")
     -- the tooltip's spot sits with every other spot (its look is on
     -- Screen > Tooltips)
@@ -569,7 +587,7 @@ end)
 -- template) skinned, painted and filled by the same functions.
 Kit.Keywords("tooltips", "scale size background backdrop opacity alpha transparent "
     .. "health bar texture height font title text fade animation appear offset "
-    .. "target of target spell id guild")
+    .. "target of target spell id guild made by crafted crafter maker item")
 
 local function TipCfgOf() return ns.TipCfg and ns.TipCfg() or {} end
 
@@ -696,6 +714,10 @@ RegisterPage("Tooltips", function(L)
             { defaultOn = true })
         Kit.Check(L, "Health numbers on the bar", TipCfgOf, "healthText",
             "\"4.6k / 4.6k  100%\" on the health bar, which grows to fit them.", { defaultOn = true })
+        -- (2026-11-20) off unless ticked
+        Kit.Check(L, "Hide \"<Made by ...>\" on crafted items", TipCfgOf, "hideMadeBy",
+            "The green line naming who crafted an item is left out of its tooltip.",
+            { after = function() if ns.TipMadeBy then ns.TipMadeBy() end end })
         L:EndCard()
     end
 
@@ -2299,7 +2321,7 @@ local function BuildChatPreview(canvas, P)
         b._label:SetPoint("RIGHT", b, "RIGHT", -6, 0)
         local rule = b:CreateTexture(nil, "ARTWORK")
         rule:SetTexture(ns.FLAT)
-        rule:SetWidth(1)
+        rule:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "LEFT") end
         rule:SetPoint("TOPLEFT", 0, -5)
         rule:SetPoint("BOTTOMLEFT", 0, 5)
         b._rule = rule
@@ -3030,6 +3052,13 @@ local function LRSet(key, v)
     LROwn()[key] = v
     LRTidy()
 end
+-- the settings as a table a kit row can read and write (reading makes
+-- nothing; a write goes through LRSet)
+local LRViewT = setmetatable({}, {
+    __index = function(_, k) return LRCfg()[k] end,
+    __newindex = function(_, k, v) LRSet(k, v) end,
+})
+local function LRView() return LRViewT end
 local function LRAccess(family, key)
     local get = ns.CustomAccess(LRCfg, family, key)
     local _, set = ns.CustomAccess(LROwn, family, key, LRTidy)
@@ -3041,16 +3070,12 @@ local LR_TARGETS = {
     { value = "name", text = "Item name" }, { value = "time", text = "Time left" },
     { value = "bind", text = "Bind tag" }, { value = "buttons", text = "Roll buttons" },
 }
--- where each piece sits with nothing saved (what its anchor picker shows)
-local LR_ANCHORS = {
-    name = { point = "LEFT", relPoint = "LEFT", x = 4, y = 0, label = "The bar" },
-    time = { point = "RIGHT", relPoint = "LEFT", x = -4, y = 0, label = "The bind tag" },
-    bind = { point = "RIGHT", relPoint = "LEFT", x = -4, y = 0, label = "The need button" },
-    buttons = { point = "RIGHT", relPoint = "RIGHT", x = -3, y = 0, label = "The bar" },
-    icon = { point = "RIGHT", relPoint = "LEFT", x = -2, y = 0, label = "The bar" },
-    count = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = 2, y = -2, label = "Its roll button" },
-    stack = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -1, y = 1, label = "The item icon" },
-}
+-- where each piece sits with nothing saved (what its anchor picker
+-- shows): the look's own (Blz_LootRoll LR.ANCHORS, bars or cards)
+local function LRAnchors()
+    local LR = ns.LootRoll
+    return (LR and LR.AnchorDefaults and LR.AnchorDefaults(LRCfg())) or {}
+end
 
 local function BuildLootPreview(canvas, P)
     local LR = ns.LootRoll
@@ -3096,7 +3121,7 @@ local function UpdateLootPreview(canvas, P)
     end
     local W, H = LR.V(cfg, "width"), LR.V(cfg, "height")
     local lay = cfg.layout or {}
-    local gap = tonumber(lay.spacingY) or LR.D.gap
+    local gap = tonumber(lay.spacingY) or LR.Defaults(cfg).gap
     local n = #st.bars
     local PAD = 8
     st.holder:ClearAllPoints()
@@ -3135,6 +3160,30 @@ RegisterPage("LootRoll", function(L)
         key = "screen.lootroll", title = "Loot rolls",
         width = 220, height = 76,
         build = BuildLootPreview, update = UpdateLootPreview,
+        -- Replay: the samples come up again the way a roll does (the
+        -- animations picked on Look; a style with none just shows them)
+        replay = function(canvas, P)
+            local Mo = ns.Motion
+            if not (Mo and Mo.Show) then return end
+            local cfg = ns.LootRoll.Cfg()
+            local show, icon = ns.LootRoll.AnimOf(cfg, "show"), ns.LootRoll.AnimOf(cfg, "icon")
+            for i, bar in ipairs(P.store.bars) do
+                if Mo.Stop then Mo.Stop(bar) Mo.Stop(bar.button) end
+                if show and show.style ~= "none" then
+                    local spec = {}
+                    for k, v in pairs(show) do spec[k] = v end
+                    spec.delay = (tonumber(spec.delay) or 0) + (i - 1) * 0.25
+                    bar:Hide()
+                    Mo.Show(bar, spec)
+                end
+                if icon and icon.style ~= "none" then
+                    local spec = {}
+                    for k, v in pairs(icon) do spec[k] = v end
+                    spec.delay = (tonumber(spec.delay) or 0) + (i - 1) * 0.25
+                    Mo.Show(bar.button, spec)
+                end
+            end
+        end,
     })
 
     local function Check(label, key, defaultOn, tip)
@@ -3152,7 +3201,7 @@ RegisterPage("LootRoll", function(L)
         L:Card("What the bars show")
         Check("Show the bind tag", "showBind", true, "BoP, BoE or BoU in front of the roll buttons.")
         Check("Show how many rolled", "showCounts", true, "A small number on need, greed and pass as people roll.")
-        Check("Show the time left", "showTime", false, "The seconds the roll has left, written on the bar.")
+        Check("Show the time left", "showTime", LR.IsCard(LRCfg()), "The seconds the roll has left, written on the bar.")
         L:EndCard()
         L:Card("Try them")
         Kit.Buttons(L, { { "Show test bars", 130, function()
@@ -3162,30 +3211,169 @@ RegisterPage("LootRoll", function(L)
     end
 
     local function Tab_look(L)
+        local function Px(v) return v .. " px" end
+        local function Part(key) return LR.Part(LRCfg(), key) end
+        -- (a part saved only while it differs from its style's own)
+        local function SetPart(key, v)
+            local d = LR.LookDefaults(LRCfg())[key]
+            if v == d then LRSet(key, nil) else LRSet(key, v) end
+        end
+        local function TextOf(items, v)
+            for _, it in ipairs(items) do if it.value == v then return it.text end end
+            return items[1].text
+        end
+        local function PartSlider(label, key, lo, hi, step, fmt)
+            local sl = UI.Slider(L.current, { label = label, min = lo, max = hi, step = step, width = 220,
+                value = tonumber(Part(key)) or lo, format = fmt,
+                onChange = function(v) SetPart(key, v) end })
+            L:Row(sl, 40)
+            return sl
+        end
+        -- (kept as a share of 1; shown and compared in whole percent)
+        local function PartPercent(label, key, lo, hi, step)
+            local sl = UI.Slider(L.current, { label = label, min = lo, max = hi, step = step, width = 220,
+                value = math.floor((tonumber(Part(key)) or 0) * 100 + 0.5), format = function(v) return v .. "%" end,
+                onChange = function(v)
+                    local d = math.floor((LR.LookDefaults(LRCfg())[key] or 0) * 100 + 0.5)
+                    if v == d then LRSet(key, nil) else LRSet(key, v / 100) end
+                end })
+            L:Row(sl, 40)
+            return sl
+        end
+        local function PartCheck(label, key, tip, rebuild)
+            local cb = UI.Checkbox(L.current, label, Part(key) and true or false, function(v)
+                SetPart(key, v and true or false)
+                if rebuild then RefreshConfig() end
+            end, tip and { tooltip = tip } or nil)
+            L:Row(cb, 17)
+            return cb
+        end
+        -- (2026-11-20) the two looks: the compact bars, or cards
+        L:Card("Style")
+        local styleRow = UI.Field(L.current, "The roll frames are", function(h)
+            return UI.Dropdown(h, { width = 200,
+                items = function()
+                    local out = {}
+                    for _, s in ipairs(LR.STYLES) do out[#out + 1] = { value = s.id, text = s.label } end
+                    return out
+                end,
+                selectedValue = function() return LR.IsCard(LRCfg()) and "card" or "compact" end,
+                selected = function() return LR.IsCard(LRCfg()) and LR.STYLES[2].label or LR.STYLES[1].label end,
+                onSelect = function(v)
+                    LRSet("style", (v == "card") and "card" or nil)
+                    RefreshConfig()
+                end })
+        end, { width = 200 })
+        L:Row(styleRow, 30)
+        L:Desc("Compact bars: a thin bar per item, its timer filling it. Cards: taller, the item's name over its bind tag "
+            .. "and the time left, the timer a strip along the foot, bigger roll buttons. Sizes and places left unset "
+            .. "follow the style.")
+        L:EndCard()
         L:Card("Size")
         local W = UI.Slider(L.current, { label = "Bar width", min = 120, max = 400, step = 2, width = 220,
-            value = LR.V(LRCfg(), "width"), format = function(v) return v .. " px" end,
-            onChange = function(v) LRSet("width", v ~= LR.D.width and v or nil) end })
+            value = LR.V(LRCfg(), "width"), format = Px,
+            onChange = function(v) LRSet("width", v ~= LR.Defaults(LRCfg()).width and v or nil) end })
         L:Row(W, 40)
         local H = UI.Slider(L.current, { label = "Bar height", min = 12, max = 40, step = 1, width = 220,
-            value = LR.V(LRCfg(), "height"), format = function(v) return v .. " px" end,
-            onChange = function(v) LRSet("height", v ~= LR.D.height and v or nil) end })
+            value = LR.V(LRCfg(), "height"), format = Px,
+            onChange = function(v) LRSet("height", v ~= LR.Defaults(LRCfg()).height and v or nil) end })
         L:Row(H, 40)
-        L:Desc("The item icon is as tall as the bar; the roll buttons follow it.")
+        L:Desc("The item icon is as tall as the bar.")
         L:EndCard()
-        L:Card("Timer bar")
-        local tex = UI.TexturePicker(L.current, { label = "Texture", width = 240,
-            get = function() return LRCfg().texture end,
-            set = function(name) LRSet("texture", name) end,
-            color = function() local c = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[3] return c and c.r or 0, c and c.g or 0.44, c and c.b or 0.87 end })
-        L:Add(tex, 8)
-        L:Desc("Tinted in the item's quality colour. ZacUI's texture is the one on Appearance > Fonts & Textures.")
+
+        -- (2026-11-20) every part of a bar: what it is with nothing saved
+        -- comes from the style above (LR.LOOKS), and each can be set here
+        L:Card("Roll buttons")
+        local art = UI.Field(L.current, "Need, greed and pass are drawn as", function(h)
+            return UI.Dropdown(h, { width = 200,
+                items = function() return LR.ARTS end,
+                selectedValue = function() return LR.IsFlat(LRCfg()) and "flat" or "game" end,
+                selected = function() return LR.IsFlat(LRCfg()) and LR.ARTS[2].text or LR.ARTS[1].text end,
+                onSelect = function(v)
+                    LRSet("rollArt", (v == "flat") and "flat" or nil)
+                    RefreshConfig()
+                end })
+        end, { width = 200 })
+        L:Row(art, 30)
+        L:Desc("The game's own dice, coin and pass art, or ZacUI's flat glyphs in colours of your own.")
+        if LR.IsFlat(LRCfg()) then
+            local LABEL = { need = "Need", greed = "Greed", pass = "Pass" }
+            for _, kind in ipairs(LR.KINDS) do
+                local cp = UI.ColorPicker(L.current, { label = LABEL[kind],
+                    get = function() return LR.FlatColor(LRCfg(), kind) end,
+                    set = function(r, g, b)
+                        local own = LROwn()
+                        local t = {}
+                        for k, v in pairs(type(own.flatColors) == "table" and own.flatColors or {}) do t[k] = v end
+                        t[kind] = { r = r, g = g, b = b }
+                        own.flatColors = t
+                    end })
+                L:Add(cp, 6)
+            end
+        end
+        local bs = UI.Slider(L.current, { label = "Button size", min = 10, max = 36, step = 1, width = 220,
+            value = LR.ButtonSize(LRCfg()), format = Px,
+            onChange = function(v) LRSet("buttonSize", v ~= LR.AutoButton(LRCfg()) and v or nil) end })
+        L:Row(bs, 40)
+        L:Desc("Left alone, the buttons follow the bar's height.")
+        PartSlider("Space between them", "buttonGap", 0, 16, 1, Px)
+        PartCheck("A faint plate behind each button", "plates", "Brighter under the mouse.")
         L:EndCard()
+
+        L:Card("Timer")
+        local tm = UI.Field(L.current, "The time running out is", function(h)
+            return UI.Dropdown(h, { width = 200,
+                items = function() return LR.TIMERS end,
+                selectedValue = function() return Part("timer") end,
+                selected = function() return TextOf(LR.TIMERS, Part("timer")) end,
+                onSelect = function(v)
+                    SetPart("timer", v)
+                    RefreshConfig()
+                end })
+        end, { width = 200 })
+        L:Row(tm, 30)
+        if Part("timer") == "strip" then PartSlider("Strip height", "strip", 1, 10, 1, Px) end
+        if Part("timer") ~= "none" then
+            PartPercent("Strength of its colour", "timerAlpha", 10, 100, 5)
+            Check("A bright line at its end", "spark", true)
+            local tex = UI.TexturePicker(L.current, { label = "Texture", width = 240,
+                get = function() return LRCfg().texture end,
+                set = function(name) LRSet("texture", name) end,
+                color = function() local c = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[3] return c and c.r or 0, c and c.g or 0.44, c and c.b or 0.87 end })
+            L:Add(tex, 8)
+            L:Desc("Tinted in the item's quality colour. ZacUI's texture is the one on Appearance > Fonts & Textures.")
+        end
+        L:EndCard()
+
+        L:Card("Ground and edge")
+        PartPercent("Background", "bgAlpha", 0, 100, 2)   -- (92% ships: a step it sits on)
+        PartCheck("The item's colour washing in from the icon", "wash", nil, true)
+        if Part("wash") then PartPercent("Strength of the wash", "washAlpha", 5, 100, 5) end
+        local ed = UI.Field(L.current, "Border", function(h)
+            return UI.Dropdown(h, { width = 200,
+                items = function() return LR.EDGES end,
+                selectedValue = function() return Part("edge") end,
+                selected = function() return TextOf(LR.EDGES, Part("edge")) end,
+                onSelect = function(v) SetPart("edge", v) end })
+        end, { width = 200 })
+        L:Row(ed, 30)
+        Check("The item's name in its quality colour", "nameQuality", true)
+        L:EndCard()
+
+        if Kit.Anim then
+            L:Card("Motion")
+            local d = LR.IsCard(LRCfg()) and LR.CARD_ANIM or LR.BAR_ANIM
+            Kit.Anim(L, "When one appears", LRView, "showAnim", { "none", "fade", "slide", "pop" }, nil, { default = d.show })
+            Kit.Anim(L, "Its item icon", LRView, "iconAnim", { "none", "fade", "pop", "pulse" }, nil, { default = d.icon })
+            Kit.Anim(L, "When it leaves", LRView, "hideAnim", { "none", "fade", "slide", "pop" }, nil, { default = d.hide })
+            L:Desc("Appearance > Motion's switch and speed apply. Replay on the preview plays them again.")
+            L:EndCard()
+        end
     end
 
     local function Group(L, key, label, o)
         local ag, as = LRAccess("anchors", key)
-        local d = LR_ANCHORS[key]
+        local d = LRAnchors()[key]
         local spec = { key = "lootroll." .. key, label = label,
             anchorGet = ag, anchorSet = as, anchorDefaults = d,
             targets = LR_TARGETS, defaultTargetLabel = d.label, anchorMin = -80, anchorMax = 80 }
@@ -3213,7 +3401,7 @@ RegisterPage("LootRoll", function(L)
             formatGet = fmtGet, formatSet = fmtSet, formatDefaults = LR.TIME_DEFAULT,
             formatKinds = { time = true },
             formatSample = function(spec) return ns.FormatTime(32, spec, LR.TIME_DEFAULT) end }))
-        if not LRCfg().showTime and UI.SetEnabled then UI.SetEnabled(g, false, 'Needs "Show the time left" turned on.') end
+        if not LR.ShowsTime(LRCfg()) and UI.SetEnabled then UI.SetEnabled(g, false, 'Needs "Show the time left" turned on.') end
         L:Desc("Switch it on under General first.")
         L:EndCard()
 
@@ -3234,7 +3422,7 @@ RegisterPage("LootRoll", function(L)
         Kit.Mover(L, "lootroll", "Loot rolls")
         local lg, ls = LRAccess("layout", nil)
         local lp = UI.LayoutPicker(L.current, { width = UI.CardInnerWidth(L),
-            get = lg, set = ls, defaults = { grow = "DOWN", spacingY = LR.D.gap },
+            get = lg, set = ls, defaults = { grow = "DOWN", spacingY = LR.Defaults(LRCfg()).gap },
             fields = { grow = true, spacingY = true }, grows = { "DOWN", "UP" } })
         L:Add(lp, 8)
         L:Desc("A second roll goes under the first one, or over it.")
@@ -3249,10 +3437,12 @@ RegisterPage("LootRoll", function(L)
     local function Tab_adv(L)
         L:Card("Reset")
         Kit.Buttons(L, { { "Reset the bars", 130, function()
-            ZacUIDB.lootRoll = nil
+            -- (the style picked on Look stays: its own numbers are what "reset" means)
+            local style = LRCfg().style
+            ZacUIDB.lootRoll = (style == "card") and { style = "card" } or nil
             ns.SettingsChanged("reset")
             RefreshConfig()
-        end, "Every option on this page back to how the bars always looked." } })
+        end, "Every option on this page back to how its style ships." } })
         L:EndCard()
     end
 

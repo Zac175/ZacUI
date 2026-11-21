@@ -811,7 +811,31 @@ local function Build()
         -- reset: its own first spot (its top left at 300, 400 from the
         -- bottom left of the screen)
         ns.RegisterMover(MOVER, "Buff tracker", function() return frame end, "BOTTOMLEFT", 300, 400, nil,
-            { reset = Place })
+            { reset = Place,
+              -- (its own size in Edit Mode: the tracker's Scale setting;
+              -- the scale sits on this frame, so its saved spot is
+              -- rewritten to stay put)
+              scale = { min = 0.5, max = 2, keep = true,
+                  get = function() return tonumber(BR.Tracker().scale) or 1 end,
+                  set = function(v)
+                      -- (never onto the shared defaults)
+                      local c = BR.Cfg()
+                      if not (c and type(c.tracker) == "table") then return end
+                      c.tracker.scale = v
+                      if frame then frame:SetScale(v) end
+                  end },
+              -- (and its width and row height: the page's own two settings)
+              sizes = function()
+                  local function E(label, field, lo, hi, step, def)
+                      return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+                          get = function() return tonumber(BR.Tracker()[field]) or def end,
+                          set = function(v)
+                              local c = BR.Cfg()
+                              if c and type(c.tracker) == "table" then c.tracker[field] = v end
+                          end }
+                  end
+                  return { E("Width", "width", 120, 280, 5, 165), E("Row height", "rowHeight", 14, 26, 1, 17) }
+              end })
     end
     Place()
     if ns.Visibility and ns.Visibility.Register then

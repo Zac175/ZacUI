@@ -258,7 +258,7 @@ local function Fill()
             local rule = child:CreateTexture(nil, "ARTWORK")
             rule._zui_own = true
             rule:SetTexture(FLAT)
-            rule:SetHeight(1)
+            rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
             rule:SetPoint("TOPLEFT", child, "TOPLEFT", x, y - 20)
             rule:SetWidth(width)
             rule:SetVertexColor(1, 1, 1, S.SECTION_RULE_A)

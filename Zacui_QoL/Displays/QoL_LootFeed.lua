@@ -422,7 +422,27 @@ end
 -- feed stands down with the rest of the module behind Leatrix Plus
 if not (ns.FeatureOn and not ns.FeatureOn(OWN_ID)) then
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Loot feed", function() return strip end, "CENTER", 300, 120, nil, { own = true })
+        ns.RegisterMover(MOVER, "Loot feed", function() return strip end, "CENTER", 300, 120, nil, { own = true,
+            -- (its text size in Edit Mode: the size of the font its page picks)
+            sizes = function()
+                return { { label = "Icon size", unit = "px", min = 12, max = 32, step = 1, fine = 1, def = LF.DEFAULTS.iconSize,
+                        get = function() return LF.IconSize() end,
+                        set = function(v)
+                            Writable().iconSize = (v ~= LF.DEFAULTS.iconSize) and v or nil
+                            LF.Apply()
+                        end },
+                    { label = "Text size", unit = "px", min = 8, max = 40, step = 1, fine = 1, def = LF.FONT_DEFAULTS.size,
+                    get = function()
+                        local f = Cfg().font
+                        return (type(f) == "table" and tonumber(f.size)) or LF.FONT_DEFAULTS.size
+                    end,
+                    set = function(v)
+                        local d = Writable()
+                        if type(d.font) ~= "table" then d.font = {} end
+                        d.font.size = v
+                        LF.Apply()
+                    end } }
+            end })
     end
     if ns.OnSettingsChanged then ns.OnSettingsChanged(function() if QoL.enabled then LF.Apply() end end) end
     local base = QoL.EnableAutomation

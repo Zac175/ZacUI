@@ -332,7 +332,7 @@ function S.MakeHeader(bar)
     local rule = bar:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("BOTTOMLEFT")
     rule:SetPoint("BOTTOMRIGHT")
     bar._zRule = rule
@@ -413,17 +413,51 @@ local function BuildHeader(map)
     -- nothing with it. Forwarding is the fix; taking the mouse off the
     -- bar is not, because then the canvas gets the click and pans the
     -- map instead of moving the window.
+    --
+    -- WITH THE SEAMLESS MAP (2026-11-20, Zac: "why cant i move the map
+    -- around anymore when i click the header"). The seamless map keeps the
+    -- window's place itself, so ZacUI's own move stands down ("unlock" is
+    -- one of Maps.OPENMAP_KEYS) - and this bar lies a layer over the
+    -- seamless map's own title strip, so the drag landed here and nothing
+    -- moved. The bar hands the drag to the seamless map's mover, which
+    -- moves the window and remembers the place where it reads it back
+    -- (Zacui_WorldMap/Map/Window.lua: StartWindowMove / StopWindowMove).
+    local function Seamless()
+        if not (Maps.OpenMapLoaded and Maps.OpenMapLoaded()) then return nil end
+        local part = _G.ZacuiWorldMap
+        local wm = type(part) == "table" and part.GetModule and part:GetModule("worldmap")
+        if type(wm) == "table" and wm.StartWindowMove and wm.StopWindowMove then return wm end
+        return nil
+    end
+    local moving                -- "own" | the seamless map's module, while a drag from here moves the window
+    local function StopMove()
+        local how = moving
+        moving = nil
+        if not how then return end
+        if how == "own" then
+            map:StopMovingOrSizing()
+            if map.SetUserPlaced then map:SetUserPlaced(false) end
+            Maps.SavePoint(map, DB())
+        else
+            how.StopWindowMove()
+        end
+    end
     bar:EnableMouse(true)
     bar:RegisterForDrag("LeftButton")
     bar:SetScript("OnDragStart", function()
+        if moving then return end
+        local wm = Seamless()
+        if wm then
+            if wm.StartWindowMove() then moving = wm end
+            return
+        end
         if not On("unlock") then return end
+        moving = "own"
         map:StartMoving()
     end)
-    bar:SetScript("OnDragStop", function()
-        map:StopMovingOrSizing()
-        if map.SetUserPlaced then map:SetUserPlaced(false) end
-        Maps.SavePoint(map, DB())
-    end)
+    bar:SetScript("OnDragStop", StopMove)
+    -- (the map closed mid-move: no drag stop comes)
+    bar:SetScript("OnHide", StopMove)
     -- Right-click for the options, the same gesture the tray bar uses.
     bar:SetScript("OnMouseUp", function(_, button)
         if button == "RightButton" and ns.OpenConfig then ns.OpenConfig("maps") end

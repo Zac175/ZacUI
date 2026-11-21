@@ -169,6 +169,8 @@ function ns.SpawnUnit(key)
     f.unit = unit
     f.cfg = cfg
     f:SetSize(cfg.width, cfg.height)
+    -- (the pieces' one scale, Core.lua: before it is placed, so the spot is read in its units)
+    if ns.ScreenK and ns.ScreenK() ~= 1 then f:SetScale(ns.ScreenK()) end
     applyPosition(f, cfg)
     if key == "softtarget" and ns.frames.target then
         -- Pinned to the Target frame's exact rect: they can never both be
@@ -243,7 +245,9 @@ function ns.SpawnUnit(key)
         self:StopMovingOrSizing()
         local cx, cy = self:GetCenter()
         local ux, uy = UIParent:GetCenter()
-        local nx, ny = cx - ux, cy - uy
+        -- (the frame's own units: the screen's middle in them is ux / k)
+        local k = ns.ScreenK and ns.ScreenK() or 1
+        local nx, ny = cx - ux / k, cy - uy / k
         if ns.SnapValue then nx, ny = ns.SnapValue(nx), ns.SnapValue(ny) end
         cfg.point, cfg.x, cfg.y = "CENTER", nx, ny
         self:ClearAllPoints()

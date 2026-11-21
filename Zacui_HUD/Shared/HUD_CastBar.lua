@@ -246,7 +246,8 @@ function Bar:PlaceTicks()
                 t = f.bar:CreateTexture(nil, "OVERLAY", nil, 3)
                 t:SetTexture(WHITE)
                 t:SetVertexColor(1, 1, 1, TICK_A)
-                t:SetWidth(1)
+                -- (2026-11-19: whole screen pixels under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+                t:SetWidth(ns.Snap and ns.Snap(1, f.bar) or 1)
                 f.ticks[i] = t
             end
             local x = math.floor(bw * pos + 0.5)

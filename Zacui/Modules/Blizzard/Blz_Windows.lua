@@ -485,7 +485,7 @@ Modules.trade = function()
         head:SetPoint("TOPRIGHT", -1, -1)
         head:SetHeight(26)
         local rule = Tex(card, "BORDER", 0, "ui", "accent", 0.6)
-        rule:SetHeight(1)
+        rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
         rule:SetPoint("TOPLEFT", head, "BOTTOMLEFT")
         rule:SetPoint("TOPRIGHT", head, "BOTTOMRIGHT")
         -- TradeFrame's own strings would sit UNDER the card (a child
@@ -526,7 +526,7 @@ Modules.trade = function()
             end
         end
         local sep = Tex(card, "BORDER", 0, "ui", "border")
-        sep:SetHeight(1)
+        sep:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(sep, "TOP") end
         sep:SetPoint("TOPLEFT", card, "TOPLEFT", 1, -(353 - 26))
         sep:SetPoint("TOPRIGHT", card, "TOPRIGHT", -1, -(353 - 26))
         if enchantText then

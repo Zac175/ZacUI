@@ -60,6 +60,17 @@ local function DB()
     return q.junk
 end
 J.DB = DB
+-- (2026-11-20) THE WINDOW'S SIZES, each a setting (qol.junk.iconSize /
+-- iconGap; nil = what ships: 32 px stacks, 20 apart)
+J.SIZE = { icon = ICON, iconMin = 24, iconMax = 56, gap = GAP, gapMin = 4, gapMax = 40 }
+local function Held(v, def, lo, hi)
+    v = tonumber(v)
+    if not v or v ~= v then return def end
+    if v < lo then return lo elseif v > hi then return hi end
+    return v
+end
+function J.IconSize() return Held(DB().iconSize, J.SIZE.icon, J.SIZE.iconMin, J.SIZE.iconMax) end
+function J.Gap() return Held(DB().iconGap, J.SIZE.gap, J.SIZE.gapMin, J.SIZE.gapMax) end
 local function Allowed() return not (ns.FeatureOn and not ns.FeatureOn(OWN_ID)) end
 function J.On() return Allowed() and QoL.enabled == true and DB().enabled == true end
 local function Num(key, lo, hi)
@@ -227,7 +238,7 @@ local function Cell(i)
     if cells[i] then return cells[i] end
     local UI = ns.UI
     local b = CreateFrame("Button", nil, win)
-    b:SetSize(ICON, ICON)
+    b:SetSize(J.IconSize(), J.IconSize())
     b.index = i
     local icon = b:CreateTexture(nil, "ARTWORK")
     icon:SetPoint("TOPLEFT", 1, -1)
@@ -316,9 +327,11 @@ function J.Refresh(test)
     end
     Window()
     local n = #list
-    local w = PAD * 2 + n * ICON + (n - 1) * GAP
+    -- (the sizes as set now)
+    local size, gap = J.IconSize(), J.Gap()
+    local w = PAD * 2 + n * size + (n - 1) * gap
     -- the title row must fit "Junk" and the count
-    win:SetSize(math.max(w, 150), TITLE_H + ICON + 2 + PRICE_H + PAD)
+    win:SetSize(math.max(w, 150), TITLE_H + size + 2 + PRICE_H + PAD)
     local c = lowNow and GetColor("text", "orange") or GetColor("text", "gray")
     win._zSpace:SetText(string.format("%d / %d free", free, total))
     win._zSpace:SetTextColor(c.r, c.g, c.b)
@@ -326,8 +339,9 @@ function J.Refresh(test)
         local e = list[i]
         if e then
             local b = Cell(i)
+            b:SetSize(size, size)
             b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + (i - 1) * (ICON + GAP), -TITLE_H)
+            b:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + (i - 1) * (size + gap), -TITLE_H)
             b._zIcon:SetTexture(e.icon)
             b._zEdge:SetColorTexture(QualityRGB(e.quality))
             b._zCount:SetText(e.count > 1 and tostring(e.count) or "")
@@ -353,8 +367,9 @@ function J.SampleList()
     }
 end
 function J.Test()
+    J._testing = true
     J.Refresh(true)
-    C_Timer.After(6, function() J.Refresh() end)
+    C_Timer.After(6, function() J._testing = nil J.Refresh() end)
 end
 
 -- ============================================================
@@ -398,7 +413,7 @@ function J.Apply()
     -- frame as "switched off".
     if not win then
         Window()
-        win:SetSize(150, TITLE_H + ICON + 2 + PRICE_H + PAD)
+        win:SetSize(150, TITLE_H + J.IconSize() + 2 + PRICE_H + PAD)
         win:Hide()
     end
     Schedule()
@@ -409,7 +424,21 @@ local function Live() if QoL.enabled then J.Apply() end end
 J.Live = Live
 if Allowed() then
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Junk items", function() return win end, "CENTER", 0, -120, nil, { own = true })
+        ns.RegisterMover(MOVER, "Junk items", function() return win end, "CENTER", 0, -120, nil, { own = true,
+            -- (2026-11-20) its sizes in Edit Mode: the page's own two
+            sizes = function()
+                local S = J.SIZE
+                local function Row(label, key, def, lo, hi, step)
+                    return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+                        get = function() return Held(DB()[key], def, lo, hi) end,
+                        set = function(v)
+                            DB()[key] = (v ~= def) and v or nil
+                            if win and win:IsShown() then J.Refresh(J._testing) end
+                        end }
+                end
+                return { Row("Icon size", "iconSize", S.icon, S.iconMin, S.iconMax, 2),
+                         Row("Spacing", "iconGap", S.gap, S.gapMin, S.gapMax, 1) }
+            end })
     end
     local base = QoL.EnableAutomation
     function QoL.EnableAutomation(...)
@@ -467,6 +496,20 @@ AddTab("qol", "loot", "Loot", function(L)
     kids[#kids + 1] = UI.Button(L.current, "Test", { width = 80,
         tooltip = "Shows the window with made-up stacks for a few seconds.",
         onClick = function() J.Test() end })
+    -- (2026-11-20) the stacks' sizes (Edit Mode's box on the window has the same two)
+    do
+        local S = J.SIZE
+        local function Size(label, key, def, lo, hi)
+            kids[#kids + 1] = UI.Slider(L.current, { width = 220, min = lo, max = hi, step = 1, label = label,
+                value = Held(d[key], def, lo, hi), format = function(v) return v .. " px" end,
+                onChange = function(v)
+                    d[key] = (v ~= def) and v or nil
+                    if win and win:IsShown() then J.Refresh(J._testing) end
+                end })
+        end
+        Size("Icon size", "iconSize", S.icon, S.iconMin, S.iconMax)
+        Size("Space between stacks", "iconGap", S.gap, S.gapMin, S.gapMax)
+    end
     L:Dependent(kids, d.enabled == true, 1, nil, "Show the cheapest junk in my bags")
     if Kit and Kit.Mover and ns.MOVERS and ns.MOVERS[MOVER] then Kit.Mover(L, MOVER, "the window") end
     -- the never-list list

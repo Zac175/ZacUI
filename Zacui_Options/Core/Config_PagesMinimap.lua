@@ -118,7 +118,7 @@ local function BuildMapPreview(canvas, P)
     head:SetPoint("BOTTOMRIGHT", map, "TOPRIGHT", 0, 0)
     UIF.Fill(head, "ui", "headerBg")
     local rule = ML.Rule(head, "ui", "accent", 0.6)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("BOTTOMLEFT")
     rule:SetPoint("BOTTOMRIGHT")
     head._zRule = rule
@@ -137,7 +137,7 @@ local function BuildMapPreview(canvas, P)
     foot:SetPoint("TOPRIGHT", map, "BOTTOMRIGHT", 0, 0)
     UIF.Fill(foot, "ui", "headerBg")
     local top = ML.Rule(foot, "ui", "border")
-    top:SetHeight(1)
+    top:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(top, "TOP") end
     top:SetPoint("TOPLEFT")
     top:SetPoint("TOPRIGHT")
     foot._zRule = top

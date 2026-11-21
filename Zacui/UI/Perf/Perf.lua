@@ -268,7 +268,7 @@ local function NewRow(parent, i)
     row.rule = row:CreateTexture(nil, "ARTWORK")
     row.rule._zui_own = true
     row.rule:SetTexture(ns.FLAT)
-    row.rule:SetHeight(1)
+    row.rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(row.rule, "TOP") end
     row.rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
     row.rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
     row.rule:SetVertexColor(1, 1, 1, UI.S.SECTION_RULE_A or 0.04)

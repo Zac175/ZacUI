@@ -146,6 +146,9 @@ local function ApplyAnchorPositions()
     auraAnchor:SetScale(cfg.auraRow.scale or 1)
     stanceAnchor:SetScale(r.stance.scale or 1)
     execAnchor:SetScale(r.execute.scale or 1)
+    -- (2026-11-19: the two bars have a scale too; nothing saved = 100 %)
+    rageAnchor:SetScale(tonumber(r.rage and r.rage.scale) or 1)
+    swingAnchor:SetScale(tonumber(r.swing and r.swing.scale) or 1)
     if D.ApplyBarSizes then D:ApplyBarSizes(cfg) end
 end
 D.ApplyAnchorPositions = ApplyAnchorPositions
@@ -159,13 +162,73 @@ local function RegisterMovers()
         C_Timer.After(1, RegisterMovers)   -- saved vars not ready yet
         return
     end
-    HUD.RegisterMover("whMainRow", "Warrior HUD Cooldown Grid", holders.Main, cfg.mainRow)
-    HUD.RegisterMover("whAuraRow", "Warrior HUD Active Buffs", holders.AuraRow, cfg.auraRow)
-    HUD.RegisterMover("whStance", "Warrior HUD Stance Icon", holders.Stance, cfg.resources.stance)
-    HUD.RegisterMover("whExecute", "Warrior HUD Execute Helper", holders.Execute, cfg.resources.execute)
-    HUD.RegisterMover("whRageBar", "Warrior HUD Rage Bar", holders.RageBar, cfg.resources.rage)
-    HUD.RegisterMover("whSwing", "Warrior HUD Swing Timers", holders.Swing, cfg.resources.swing)
-    HUD.RegisterMover("whDebuffRow", "Warrior HUD Target Debuffs", holders.DebuffRow, cfg.debuffRow)
+    -- (each piece's own scale: Edit Mode's Smaller / Bigger changes the
+    -- same number the Position tab shows)
+    -- (and its other sizes - the Look tab's own settings, ranges and
+    -- call after a change - as rows under the picked box in Edit Mode)
+    local function After() if D.InvalidateLayout then D:InvalidateLayout() end end
+    local function Entry(label, lo, hi, step, def, get, key)
+        return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+            get = function()
+                local c = WH.Store()
+                local t = c and get(c)
+                return (type(t) == "table" and tonumber(t[key])) or def
+            end,
+            set = function(v)
+                local c = WH.Store()
+                local t = c and get(c)
+                if type(t) ~= "table" then return end
+                t[key] = v
+                After()
+            end }
+    end
+    local SIZES = {
+        Main = function()
+            local list = {}
+            local c = WH.Store()
+            local rows = c and c.mainRow and c.mainRow.rows
+            for ri = 1, 3 do
+                if rows and rows[ri] then
+                    list[#list + 1] = Entry("Row " .. ri .. " width", 16, 64, 1, 26, function(cc) return cc.mainRow.rows[ri] end, "w")
+                    list[#list + 1] = Entry("Row " .. ri .. " height", 16, 64, 1, 26, function(cc) return cc.mainRow.rows[ri] end, "h")
+                end
+            end
+            list[#list + 1] = Entry("Spacing", 0, 12, 1, 3, function(cc) return cc.mainRow end, "spacing")
+            return list
+        end,
+        AuraRow = function() return {
+            Entry("Icon width", 16, 64, 1, 30, function(cc) return cc.auraRow end, "iconW"),
+            Entry("Icon height", 16, 64, 1, 30, function(cc) return cc.auraRow end, "iconH"),
+            Entry("Spacing", 0, 12, 1, 4, function(cc) return cc.auraRow end, "spacing") } end,
+        DebuffRow = function() return {
+            Entry("Icon width", 16, 64, 1, 26, function(cc) return cc.debuffRow end, "iconW"),
+            Entry("Icon height", 16, 64, 1, 26, function(cc) return cc.debuffRow end, "iconH"),
+            Entry("Spacing", 0, 12, 1, 4, function(cc) return cc.debuffRow end, "spacing") } end,
+        RageBar = function() return {
+            Entry("Width", 100, 400, 10, 229, function(cc) return cc.resources.rage end, "w"),
+            Entry("Height", 2, 20, 1, 4, function(cc) return cc.resources.rage end, "h") } end,
+        Swing = function() return {
+            Entry("Width", 100, 400, 10, 229, function(cc) return cc.resources.swing end, "w"),
+            Entry("Height", 2, 12, 1, 3, function(cc) return cc.resources.swing end, "h") } end,
+        Stance = function() return {
+            Entry("Width", 16, 64, 1, 32, function(cc) return cc.resources.stance end, "w"),
+            Entry("Height", 16, 64, 1, 34, function(cc) return cc.resources.stance end, "h") } end,
+    }
+    local function Sc(get, piece)
+        return { scale = HUD.ScaleOpt(function() local c = WH.Store() return c and get(c) end, "scale", ApplyAnchorPositions),
+            sizes = piece and SIZES[piece] or nil }
+    end
+    HUD.RegisterMover("whMainRow", "Warrior HUD Cooldown Grid", holders.Main, cfg.mainRow, Sc(function(c) return c.mainRow end, "Main"))
+    HUD.RegisterMover("whAuraRow", "Warrior HUD Active Buffs", holders.AuraRow, cfg.auraRow, Sc(function(c) return c.auraRow end, "AuraRow"))
+    HUD.RegisterMover("whStance", "Warrior HUD Stance Icon", holders.Stance, cfg.resources.stance,
+        Sc(function(c) return c.resources and c.resources.stance end, "Stance"))
+    HUD.RegisterMover("whExecute", "Warrior HUD Execute Helper", holders.Execute, cfg.resources.execute,
+        Sc(function(c) return c.resources and c.resources.execute end))
+    HUD.RegisterMover("whRageBar", "Warrior HUD Rage Bar", holders.RageBar, cfg.resources.rage,
+        Sc(function(c) return c.resources and c.resources.rage end, "RageBar"))
+    HUD.RegisterMover("whSwing", "Warrior HUD Swing Timers", holders.Swing, cfg.resources.swing,
+        Sc(function(c) return c.resources and c.resources.swing end, "Swing"))
+    HUD.RegisterMover("whDebuffRow", "Warrior HUD Target Debuffs", holders.DebuffRow, cfg.debuffRow, Sc(function(c) return c.debuffRow end, "DebuffRow"))
 
     -- Whole-HUD mover: dragging the handle shifts every member anchor by
     -- the same delta (HUD_Shared carries the delta to the members).
@@ -965,7 +1028,8 @@ function D.MakeRageBar(parent)
         local m = rageBar.bar:CreateTexture(nil, "OVERLAY", nil, 3)
         m:SetTexture(W.WHITE_TEX or "Interface\\Buttons\\WHITE8X8")
         m:SetVertexColor(1, 1, 1, 0.75)
-        m:SetWidth(1)
+        -- (2026-11-19: whole screen pixels under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+        m:SetWidth(ns.Snap and ns.Snap(1, rageBar.bar) or 1)
         m:Hide()
         rageBar.marks[i] = m
     end

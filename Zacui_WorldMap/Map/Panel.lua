@@ -198,6 +198,13 @@ local function Actions()
 	list[#list + 1] = { L["What's new"], id = "news", icon = Icon("INV_Scroll_03"),
 		tip = L["This version's changes (it glows after an update until you've looked)."],
 		run = function() mod:ToggleNews() end, lit = function() return mod.NewsUnseen and mod.NewsUnseen() end }
+	-- (ZacUI, 2026-11-20, Zac: "make sure if people pick the seemless map that there is a way to go
+	-- back to the old map as well") the first-opening choice, any time, from the map itself
+	if mod.ShowWelcome then
+		list[#list + 1] = { L["Map style"], id = "style", icon = Icon("INV_Misc_Map02"),
+			tip = L["Choose again: the game's own map, or the seamless map (classic or full). The game's own map comes back after a reload."],
+			run = function() mod:ShowWelcome() end }
+	end
 	return list
 end
 
@@ -442,7 +449,7 @@ end
 local function Rule(parent)
 	local t = parent:CreateTexture(nil, "ARTWORK")
 	t:SetColorTexture(BRONZE[1], BRONZE[2], BRONZE[3], 0.5)
-	t:SetHeight(1)
+	t:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "TOP") end
 	return t
 end
 

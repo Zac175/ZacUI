@@ -365,6 +365,8 @@ local function MeDress(row, what, r, g, b)
                     t:SetPoint("BOTTOM" .. side, row, "BOTTOM" .. side, 0, 0)
                     t:SetWidth(1)
                 end
+                -- (2026-11-19: one screen pixel under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+                if ns.Pixel and ns.Pixel.Edge then ns.Pixel.Edge(t, side, row) end
                 edge[i] = t
             end
             rawset(row, "_zMeEdge", edge)

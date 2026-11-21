@@ -50,7 +50,7 @@ local SECTIONS = {
       desc = "The font, the bar texture, the palette and every colour override." },
     { key = "motion",     label = "Animations",        keys = { "motion" },
       desc = "Whether ZacUI animates, and how fast." },
-    { key = "positions",  label = "Positions",         keys = { "movers", "tooltipPos", "windowPos", "positions", "moveSnap", "editMode" },
+    { key = "positions",  label = "Positions",         keys = { "movers", "moverScale", "tooltipPos", "windowPos", "positions", "moveSnap", "editMode" },
       desc = "Where movable frames, windows, the tooltip anchor and Edit Mode's own settings sit." },
     { key = "panels",     label = "Panel calibration", keys = { "insets", "lines" },
       desc = "Per-window inset and line calibration." },

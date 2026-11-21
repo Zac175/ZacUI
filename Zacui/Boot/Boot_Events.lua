@@ -207,6 +207,10 @@ ZUI:SetScript("OnEvent", function(self, event, arg1, arg2)
             -- an install made from here on starts on the new default spots
             -- (UIF_Movers: NEW DEFAULT SPOTS); an existing one never does
             if ns.freshInstall then ZacUIDB.defaultsGen = 2 end
+            -- ...and with the loot rolls as cards (2026-11-20, Blz_LootRoll:
+            -- TWO LOOKS). An existing install keeps its compact bars:
+            -- nothing saved = the bars as they always were.
+            if ns.freshInstall and ZacUIDB.lootRoll == nil then ZacUIDB.lootRoll = { style = "card" } end
             -- ...and with its windows at 80% (2026-11-14, Zac: the windows
             -- "are like super big by default"; UIF_Controls: ONE SCALE).
             -- An existing install keeps what it has: nothing saved = 100%.

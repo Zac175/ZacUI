@@ -90,7 +90,7 @@ Modules.gamemenu = function()
         line:SetColorTexture(1, 1, 1, 0.08)
         line:SetPoint("TOPLEFT",  band, "BOTTOMLEFT",  0, 0)
         line:SetPoint("TOPRIGHT", band, "BOTTOMRIGHT", 0, 0)
-        line:SetHeight(1)
+        line:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(line, "TOP") end
     end
 
     local a = Col("text")
@@ -243,7 +243,7 @@ Modules.gamemenu = function()
             d = GameMenuFrame:CreateTexture(nil, "ARTWORK")
             d._zui_own = true
             d:SetTexture(FLAT)
-            d:SetHeight(1)
+            d:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(d, "TOP") end
             dividers[i] = d
         end
         local c = Col("border")

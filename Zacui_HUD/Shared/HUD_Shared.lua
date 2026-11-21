@@ -847,6 +847,15 @@ function HUD.RegisterMover(key, label, holder, store, opts)
     -- preview below), so its box is see-through over the real icons
     opts = opts or {}
     if opts.clear == nil then opts.clear = true end
+    -- (a HUD piece is a holder with everything under it: it follows the
+    -- pieces' one scale, ns.Screen)
+    if opts.screen == nil then opts.screen = true end
+    -- (its own size in Edit Mode: only where the piece has a scale setting
+    -- and says so. The holder itself stays unscaled - the HUD's settings
+    -- samples and the "move all" handle count on its plain units - so the
+    -- registry's own per-piece scale is never used on a HUD piece.
+    -- scale = true asks for the registry's own after all.)
+    if opts.scale == nil then opts.scale = false elseif opts.scale == true then opts.scale = nil end
     RegisterMover(key, label, function() return holder end,
         "CENTER", (store and store.x) or 0, (store and store.y) or 0, nil, opts)
 end
@@ -883,12 +892,24 @@ if watch then
     end)
 end
 
--- CENTER offsets of a holder in UIParent units (holders are unscaled).
+-- A holder's units against UIParent's: 1, unless the pieces' one scale
+-- (ns.Screen, UIF_Movers) has it under the scaled screen frame.
+local function HolderK(f)
+    local us = UIParent:GetEffectiveScale() or 1
+    local fs = f and f.GetEffectiveScale and f:GetEffectiveScale() or us
+    local k = fs / (us > 0 and us or 1)
+    return (k and k > 0) and k or 1
+end
+HUD.HolderK = HolderK
+
+-- CENTER offsets of a holder from UIParent's centre, in the holder's own
+-- units (which are UIParent's unless the pieces' one scale is in use).
 local function CenterOffsets(f)
     local cx, cy = f:GetCenter()
     local ux, uy = UIParent:GetCenter()
     if not (cx and ux) then return nil end
-    return cx - ux, cy - uy
+    local k = HolderK(f)
+    return cx - ux / k, cy - uy / k
 end
 
 -- A "move all" handle: dragging its proxy shifts every member by the same
@@ -912,7 +933,9 @@ local function ShiftMember(m, dx, dy)
         pos = { point = "CENTER", x = x or 0, y = y or 0 }
         ZacUIDB.movers[m.key] = pos
     end
-    pos.x, pos.y = (pos.x or 0) + dx, (pos.y or 0) + dy
+    -- (dx, dy are the handle's box, in UIParent units)
+    local k = HolderK(m.holder)
+    pos.x, pos.y = (pos.x or 0) + dx / k, (pos.y or 0) + dy / k
     HUD.PlaceAnchor(m.key, m.holder, nil)
 end
 
@@ -1554,6 +1577,26 @@ function HUD.UnlockButton(L, prefix, label)
 end
 
 -- A percentage scale slider over a store field (1 = 100%).
+-- A scale setting as a mover's own size (HUD.RegisterMover's opts.scale):
+-- tbl() -> the table holding it, key, apply() puts it on screen. 50 to
+-- 200 %, the same range and number as HUD.ScaleSlider below.
+function HUD.ScaleOpt(tbl, key, apply)
+    return {
+        min = 0.5, max = 2,
+        get = function()
+            local t = tbl()
+            return (t and tonumber(t[key])) or 1
+        end,
+        set = function(v)
+            -- (100 % on a table never saved: nothing is made for it)
+            local t = tbl(math.abs((tonumber(v) or 1) - 1) > 0.0005)
+            if not t then return end
+            t[key] = v
+            if apply then apply() end
+        end,
+    }
+end
+
 function HUD.ScaleSlider(L, label, tbl, key, onChange)
     return HUD.Slider(L, label, 50, 200, math.floor((tbl[key] or 1) * 100 + 0.5), function(v)
         tbl[key] = v / 100
@@ -1705,6 +1748,9 @@ function HUD.ScreenPos(moverKey, store, w, h)
         local p = pos.point or "CENTER"
         local fx, fy = POINT_FX[p] or 0.5, POINT_FY[p] or 0.5
         local uw, uh = UIParent:GetWidth() or 0, UIParent:GetHeight() or 0
+        -- (the screen in the pieces' own units while their one scale is in use)
+        local k = (ns.Screen and ns.Screen.Scale and ns.Screen.Scale()) or 1
+        if k ~= 1 and k > 0 then uw, uh = uw / k, uh / k end
         return (fx - 0.5) * (uw - (w or 0)) + (pos.x or 0), (fy - 0.5) * (uh - (h or 0)) + (pos.y or 0)
     end
     return (store and store.x) or 0, (store and store.y) or 0

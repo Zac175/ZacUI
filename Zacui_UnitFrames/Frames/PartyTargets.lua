@@ -83,6 +83,8 @@ local function Spawn()
     for i = 1, COUNT do
         local b = ns.NewUnitButton("oUF_ZacUFPartyTarget" .. i, UIParent, "party" .. i .. "target", cfg,
             { poll = true, watch = Rule(i) })
+        -- (beside a party frame, at the same scale: the pieces' one, Core.lua)
+        if ns.ScreenK and ns.ScreenK() ~= 1 then b:SetScale(ns.ScreenK()) end
         c.buttons[i] = b
     end
     c.LeanRestyle = function(self)

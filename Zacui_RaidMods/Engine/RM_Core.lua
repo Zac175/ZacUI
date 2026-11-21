@@ -84,6 +84,10 @@ local DEFAULTS = {
     chat = true,           -- the packs' /say /yell /raid messages
     config = {},           -- [unitId] = { option = value } the player changed from the pack's defaults
     scale = 1,
+    -- (nil-able: groupScale - [group key] = the player's own size for a group
+    -- that stands on its own, on top of the pack's; RM_Anchors L.GroupScale)
+    -- (nil-able: anchorScale - [anchor key] = the player's own size for
+    -- everything that hangs on one of the seventeen anchors; L.AnchorUserScale)
     testMode = false,
     testRaid = nil,        -- the raid the preview shows
     barTexture = "ZacUI Flat",  -- every bar (SharedMedia name)

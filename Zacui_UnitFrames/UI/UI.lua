@@ -230,10 +230,10 @@ function UI:Checkbox(parent, label, checked, onToggle)
 
     -- 1px border drawn as four lines so the corners always meet. A 1px
     -- SetBackdrop edge leaves tiny corner gaps that read as a cut-off border.
-    local eT = box:CreateTexture(nil, "BORDER"); eT:SetPoint("TOPLEFT"); eT:SetPoint("TOPRIGHT"); eT:SetHeight(1)
-    local eB = box:CreateTexture(nil, "BORDER"); eB:SetPoint("BOTTOMLEFT"); eB:SetPoint("BOTTOMRIGHT"); eB:SetHeight(1)
-    local eL = box:CreateTexture(nil, "BORDER"); eL:SetPoint("TOPLEFT"); eL:SetPoint("BOTTOMLEFT"); eL:SetWidth(1)
-    local eR = box:CreateTexture(nil, "BORDER"); eR:SetPoint("TOPRIGHT"); eR:SetPoint("BOTTOMRIGHT"); eR:SetWidth(1)
+    local eT = box:CreateTexture(nil, "BORDER"); eT:SetPoint("TOPLEFT"); eT:SetPoint("TOPRIGHT"); eT:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(eT, "TOP") end
+    local eB = box:CreateTexture(nil, "BORDER"); eB:SetPoint("BOTTOMLEFT"); eB:SetPoint("BOTTOMRIGHT"); eB:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(eB, "TOP") end
+    local eL = box:CreateTexture(nil, "BORDER"); eL:SetPoint("TOPLEFT"); eL:SetPoint("BOTTOMLEFT"); eL:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(eL, "LEFT") end
+    local eR = box:CreateTexture(nil, "BORDER"); eR:SetPoint("TOPRIGHT"); eR:SetPoint("BOTTOMRIGHT"); eR:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(eR, "LEFT") end
     local function setBorder(col)
         eT:SetColorTexture(unpackc(col)); eB:SetColorTexture(unpackc(col))
         eL:SetColorTexture(unpackc(col)); eR:SetColorTexture(unpackc(col))
@@ -915,7 +915,7 @@ function UI:Window(name, title, w, h)
     if not (art or flat) then
         local underline = header:CreateTexture(nil, "OVERLAY")
         underline:SetPoint("BOTTOMLEFT", 0, 0); underline:SetPoint("BOTTOMRIGHT", 0, 0)
-        underline:SetHeight(1)
+        underline:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(underline, "TOP") end
         underline:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 0.6)
     end
 

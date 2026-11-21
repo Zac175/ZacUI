@@ -441,7 +441,12 @@ local GRID_COUNTS = { 6, 3, 3, 2, 2, 3, 4, 3 }
 
 local function GridWidth()
     local G = BL.Grid
+    if G.RowWidth then return G.RowWidth() end
     return G.NAME_W + (D.NUM_CLASSES + 1) * (G.CELL + G.GAP)
+end
+local function GridCell()
+    local G = BL.Grid
+    return (G.CellSize and G.CellSize()) or G.CELL
 end
 
 local function BuildGridPreview(canvas, P)
@@ -452,13 +457,23 @@ local function BuildGridPreview(canvas, P)
     st.rows = {}
     for i = 1, #GRID_PALS do
         local r = G.NewRow(canvas, w, true)
-        r:SetPoint("TOPLEFT", st.header, "BOTTOMLEFT", 0, -6 - (i - 1) * (G.CELL + G.GAP))
+        r:SetPoint("TOPLEFT", st.header, "BOTTOMLEFT", 0, -6 - (i - 1) * (GridCell() + G.GAP))
         st.rows[i] = r
     end
 end
 
 local function UpdateGridPreview(canvas, P)
     local G, st = BL.Grid, P.store
+    -- (the window's own sizes: the sample's cells and rows follow)
+    if G.SizeCells then
+        local w, cell = GridWidth(), GridCell()
+        G.SizeCells(st.header, w)
+        for i, r in ipairs(st.rows) do
+            G.SizeCells(r, w)
+            r:ClearAllPoints()
+            r:SetPoint("TOPLEFT", st.header, "BOTTOMLEFT", 0, -6 - (i - 1) * (cell + G.GAP))
+        end
+    end
     for slot = 1, D.NUM_CLASSES do
         local n = GRID_COUNTS[slot] or 0
         st.header.cells[slot].count:SetText(n > 0 and tostring(n) or "")
@@ -482,7 +497,7 @@ local function UpdateGridPreview(canvas, P)
         ac.mark:SetText("")
         G.PlaceRow(r)
     end
-    if P.Resize then P.Resize(GridWidth() + 12, 12 + G.CELL + 6 + #GRID_PALS * (G.CELL + G.GAP)) end
+    if P.Resize then P.Resize(GridWidth() + 12, 12 + GridCell() + 6 + #GRID_PALS * (GridCell() + G.GAP)) end
 end
 
 local function Tab_grid(L)
@@ -494,6 +509,22 @@ local function Tab_grid(L)
     local b = UI.Button(L.current, "Open the window", { width = 160, onClick = function() G.Toggle() end })
     L:Row(b, M.BUTTON_H + 6)
     L:Desc("One row per paladin, one column per class, the aura at the end. The casting bar's title opens it too.")
+    if G.LIM and G.DEF then
+        local function SizeSlider(label, key, cfgKey, step)
+            local lim, def = G.LIM[key], G.DEF[key]
+            local sl = UI.Slider(L.current, { label = label, min = lim[1], max = lim[2], step = step, width = 220,
+                value = (key == "cell") and G.CellSize() or G.NameWidth(), format = function(v) return v .. " px" end,
+                onChange = function(v)
+                    local c = BL.Cfg and BL.Cfg()
+                    if not c then return end
+                    c[cfgKey] = (v ~= def) and v or nil
+                    G.Refresh()
+                end })
+            L:Row(sl, 40)
+        end
+        SizeSlider("Cell size", "cell", "gridCell", 1)
+        SizeSlider("Name column", "nameW", "gridNameW", 2)
+    end
     L:EndCard()
     -- every text, freely (ZacUIDB.blessings.gridAnchors.<key>)
     L:Card("Texts in the window")

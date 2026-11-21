@@ -329,7 +329,7 @@ local function Header(frame)
 	if h then fill:SetVertexColor(h.r, h.g, h.b, h.a or 1) else fill:SetVertexColor(0.12, 0.12, 0.12, 1) end
 	local rule = bar:CreateTexture(nil, "ARTWORK")
 	rule:SetTexture("Interface\\Buttons\\WHITE8X8")
-	rule:SetHeight(1)
+	rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
 	rule:SetPoint("BOTTOMLEFT")
 	rule:SetPoint("BOTTOMRIGHT")
 	local a = ZCol("accent")

@@ -73,7 +73,8 @@ local function liveXY(key)
         local cx, cy = f:GetCenter()
         local ux, uy = UIParent:GetCenter()
         if cx and ux then
-            return math.floor(cx - ux + 0.5), math.floor(cy - uy + 0.5)
+            local k = ns.ScreenK and ns.ScreenK() or 1   -- (the frame's own units)
+            return math.floor(cx - ux / k + 0.5), math.floor(cy - uy / k + 0.5)
         end
     end
     return cfg.x, cfg.y

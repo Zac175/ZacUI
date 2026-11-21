@@ -1405,8 +1405,8 @@ local function Tab_pos(L)
         local function Geo() end
         BindSlider(L, w, "w", "Width", { min = 100, max = 600, format = Px, width = 240, after = Geo })
         BindSlider(L, w, "h", "Height", { min = 50, max = 600, format = Px, width = 240, after = Geo })
-        BindSlider(L, w, "x", "Across", { min = -1200, max = 1200, format = Px, width = 240, after = Geo })
-        BindSlider(L, w, "y", "Up", { min = -800, max = 800, format = Px, width = 240, after = Geo,
+        local acrossS = BindSlider(L, w, "x", "Across", { min = -1200, max = 1200, format = Px, width = 240, after = Geo })
+        local upS = BindSlider(L, w, "y", "Up", { min = -800, max = 800, format = Px, width = 240, after = Geo,
             desc = "Measured from the " .. (POINT_NAMES[w.point or ""] or "middle") .. " of the screen. "
             .. "A threat window sitting under the target frame ignores these." })
         -- (Meter v2) the window's own options, as its header's gear menu
@@ -1414,7 +1414,20 @@ local function Tab_pos(L)
         local sc = UI.Slider(L.current, { width = 240, min = 50, max = 150, step = 5, label = "Scale",
             value = math.floor((tonumber(w.scale) or 1) * 100 + 0.5),
             format = function(v) return format("%d%%", v) end,
-            onChange = function(v) w.scale = (v == 100) and nil or v / 100 MeterRefresh() end })
+            onChange = function(v)
+                -- (2026-11-20) the window stays where it is: its spot is in
+                -- its own scaled units and is rewritten with the scale, and
+                -- Across and Up above show the new numbers
+                if Meter and Meter.SetWindowScale then
+                    Meter.SetWindowScale(w, v / 100)
+                    if v == 100 then w.scale = nil end
+                    if acrossS and acrossS._zSetQuiet and tonumber(w.x) then acrossS._zSetQuiet(w.x) end
+                    if upS and upS._zSetQuiet and tonumber(w.y) then upS._zSetQuiet(w.y) end
+                else
+                    w.scale = (v == 100) and nil or v / 100
+                end
+                MeterRefresh()
+            end })
         L:Row(sc, 40)
         BindCheckD(L, w, "snap", "Snap to other meter windows", nil, true)
         if w.display ~= "threat" then

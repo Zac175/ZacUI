@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99QoL|r
 ## Notes: ZacUI quality of life: automation, mutes, raid performance mode. Replaces Leatrix Plus.
 ## Author: Zac
-## Version: 3.0.16
+## Version: 3.0.17
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -22,6 +22,8 @@ Raid\QoL_RaidPerf.lua
 Raid\QoL_BossFX.lua
 Raid\QoL_BuffRemover.lua
 Automation\QoL_MacroCleanup.lua
+# The macro cleaner's window (2026-11-20): every macro with a tick, /zui macros.
+Automation\QoL_MacroWindow.lua
 Automation\QoL_SmartMount.lua
 Automation\QoL_AutoRoll.lua
 Raid\QoL_RaidTimers.lua
@@ -40,6 +42,7 @@ Displays\QoL_TalentReminder.lua
 Automation\QoL_Autos.lua
 # Feature cluster 3: the loot feed (fading rows for loot, money, rep, skill-ups).
 Displays\QoL_LootFeed.lua
+Displays\QoL_BossLoot.lua
 # Overnight gap build (2026-11-08, ELLESMERE_GAPS_1108.md), each its own file,
 # all off by default: quest helpers, quest tracker visibility, alerts, gathering
 # skill on node tooltips, the junk items window, character stats, cursor rings,

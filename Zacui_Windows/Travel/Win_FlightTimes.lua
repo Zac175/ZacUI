@@ -449,7 +449,7 @@ function FT.NewBar(parent)
     f.icon = icon
     local div = f:CreateTexture(nil, "ARTWORK", nil, 1)
     div:SetTexture(ns.FLAT)
-    div:SetWidth(1)
+    div:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(div, "LEFT") end
     div:SetPoint("TOPLEFT", icon, "TOPRIGHT", 0, 0)
     div:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 0, 0)
     f.div = div
@@ -614,7 +614,16 @@ local function Holder()
     bar = FT.NewBar(holder)
     bar:SetPoint("CENTER", holder, "CENTER", 0, 0)
     if ns.RegisterMover then
-        ns.RegisterMover("flighttimer", "Flight timer", function() return holder end, "TOP", 0, -120)
+        ns.RegisterMover("flighttimer", "Flight timer", function() return holder end, "TOP", 0, -120, nil, {
+            -- (its width and height in Edit Mode: the page's own two settings)
+            sizes = function()
+                local function E(label, field, lo, hi, step, def)
+                    return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+                        get = function() return tonumber(FT.DB()[field]) or def end,
+                        set = function(v) FT.DB()[field] = v if FT.Restyle then FT.Restyle() end end }
+                end
+                return { E("Width", "width", 120, 400, 10, 240), E("Height", "height", 12, 36, 1, 20) }
+            end })
         if ns.ApplyMover then ns.ApplyMover("flighttimer") end
     end
     return holder

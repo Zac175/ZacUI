@@ -613,6 +613,19 @@ local pending = {}      -- [key] = "apply" | "reset": waits for combat to end
 --   page, tab        the settings page (menu id) and tab that style it
 --                    (Edit Mode's "Open its settings"; else guessed by key)
 --   off              fn() -> reason string when it is switched off, nil on
+--   screen           true: follows the pieces' one scale (ns.Screen, below);
+--                    false: never; nil: by its key (SCREEN_KEYS)
+--   scale            its own size in Edit Mode (A SIZE OF ITS OWN FOR EACH
+--                    PIECE, below). { get = fn() -> k, set = fn(k), keep }
+--                    when its part already has a scale setting (keep = true:
+--                    the scale is set on this frame itself, so its saved
+--                    spot is rewritten to stay put); false: none; nil: the
+--                    registry's own (ZacUIDB.moverScale)
+--   sizes            its other sizes, for Edit Mode's size rows (width,
+--                    height, icon size, spacing ...): a list, or a function
+--                    returning one, of { label, unit, min, max, step, fine,
+--                    def, get = fn() -> v, set = fn(v) } - each reads and
+--                    writes the setting the piece's own page has
 -- Registering the same key again updates it in place (no second row).
 -- ============================================================
 -- NEW DEFAULT SPOTS (2026-11-10, Zac: "i dont want someone to turn a
@@ -682,6 +695,9 @@ local function RegisterMover(key, label, getFrame, defPoint, defX, defY, reflow,
         m.size, m.page, m.tab, m.off = opts.size, opts.page, opts.tab, opts.off
         m.clear = opts.clear
         m.exact = opts.exact
+        m.screen = opts.screen
+        m.scale = opts.scale
+        m.sizes = opts.sizes
     end
     Gen2(m)
     -- (a part that put its frame on the old spot before registering: onto
@@ -689,6 +705,13 @@ local function RegisterMover(key, label, getFrame, defPoint, defX, defY, reflow,
     if m._gen2 and ns.ApplyMover then pcall(ns.ApplyMover, key) end
     local p = moverProxies[key]
     if p and p:IsShown() then Kit.Refresh(p) end
+    -- (the pieces' one scale, below: a piece registered while it is in use)
+    if ns.Screen and ns.Screen.Scale() ~= 1 then pcall(ns.Screen.Apply) end
+    -- (and its own size, when one is saved)
+    if ns.MoverScaleApply and type(ZacUIDB) == "table" and type(ZacUIDB.moverScale) == "table"
+        and ZacUIDB.moverScale[key] ~= nil then
+        pcall(ns.MoverScaleApply, key)
+    end
     return m
 end
 
@@ -807,10 +830,12 @@ local function SetFramePos(f, point, x, y)
     f:SetPoint(point or "CENTER", UIParent, point or "CENTER", x or 0, y or 0)
 end
 
+local PieceApply   -- forward: the piece's own size (below)
 local function ApplyMover(key)
     local m = MOVERS[key]
     local pos = m and SavedPos(m)
     local f = m and m.getFrame()
+    if m and f and PieceApply then PieceApply(m, f) end
     -- never moved, on an install with the new default spots: the part put
     -- the frame on its old spot just before this call
     if m and f and not pos and m._gen2 and m.defPoint and not m.reset then
@@ -954,6 +979,8 @@ local function ResetMover(key, silent)
         if ZacUIDB and ZacUIDB.movers then ZacUIDB.movers[key] = nil end
         return
     end
+    -- (its own size goes back with it: the default spot is a spot at 100 %)
+    if ns.MoverScaleClear then ns.MoverScaleClear(key) end
     WritePos(m, nil)
     PlaceDefault(m)
     local p = moverProxies[key]
@@ -1035,7 +1062,173 @@ local function ToggleMover(key)
     ShowMover(key)
 end
 
+-- ============================================================
+-- ONE SCALE FOR THE PIECES ON THE SCREEN (2026-11-19, Zac: "so many things
+-- in both addons need proper ui scaling ... someone on 1080p or 1440p")
+-- ============================================================
+-- Every piece listed on the Movers page - the class HUDs' rows and bars,
+-- the trackers, timers, alerts, reminders, the raid mods' bars, the
+-- consumables bar - has a size of its own, and a player on a smaller
+-- screen had to go through them one by one. ZacUIDB.config.pieceScale
+-- (0.5 to 1.5, nil = 1) sizes them all at once.
+--   HOW. The pieces that sit on the screen itself (their parent is
+--   UIParent) are moved under one plain frame, ZacUIScreen, that covers
+--   the screen and carries the scale. A frame's size and its offsets are
+--   both in its own units, so a piece gets smaller or bigger AND keeps
+--   its place in the layout: 208 under the centre becomes 166 under it at
+--   80%, a bar at the left edge stays at the left edge. Nothing saved is
+--   rewritten; back at 100% everything is exactly where it was.
+--   WHO IS LEFT ALONE. At 100% - every install until its owner moves the
+--   slider - no frame is touched at all: not one is reparented, so
+--   nothing can differ. Only a piece that says so is taken (opts.screen
+--   at registration, which every HUD.RegisterMover piece gets, or its key
+--   in SCREEN_KEYS): one whose whole drawing hangs under the registered
+--   frame and whose spot is kept in that frame's own units. NOT taken:
+--   the game's own frames (minimap, buffs, loot rolls), and the pieces
+--   with a scale setting and drag code of their own - the raid mods' bars,
+--   the blessings bar, the buff tracker (its click layer lies on the
+--   screen), the Snowball button (its secure button sits beside its
+--   holder). The unit frames, action bars, meter windows and nameplates
+--   follow the same number without being moved (Screen.OnChange, below).
+--   A piece that holds secure buttons is taken, and the scale changed,
+--   only outside a fight (the rest waits for the fight to end).
+local Screen = {}
+ns.Screen = Screen
+Screen.MIN, Screen.MAX = 0.5, 1.5
+local SCREEN_KEYS = {
+    flighttimer = true, raidtimers = true, buffRemIcon = true,
+    qoljunk = true, qolreminders = true, gcdtracker = true, talentreminder = true,
+    qolstats = true, qolalerts = true, lootfeed = true, qoldistance = true,
+}
+function Screen.Covers(key)
+    local m = MOVERS[key]
+    return (m ~= nil and (m.screen == true or (m.screen == nil and SCREEN_KEYS[key] == true))) or false
+end
+local screenHolder
+local screenTaken = setmetatable({}, { __mode = "k" })
+local screenWait, screenTicker = false, nil
+
+function Screen.Scale()
+    local c = type(ZacUIDB) == "table" and ZacUIDB.config
+    local v = type(c) == "table" and tonumber(c.pieceScale) or 1
+    if v ~= v then v = 1 end
+    if v < Screen.MIN then v = Screen.MIN elseif v > Screen.MAX then v = Screen.MAX end
+    if math.abs(v - 1) < 0.005 then v = 1 end
+    return v
+end
+function Screen.Holder() return screenHolder end
+function Screen.Has(f) return f ~= nil and screenTaken[f] == true end
+
+local function ScreenHolder()
+    if not screenHolder then
+        screenHolder = CreateFrame("Frame", "ZacUIScreen", UIParent)
+        screenHolder:SetAllPoints(UIParent)
+    end
+    return screenHolder
+end
+
+-- one piece under the holder; false when it has to wait for the fight to end
+local function ScreenTake(f)
+    if type(f) ~= "table" or screenTaken[f] or f == screenHolder then return true end
+    if not f.GetParent or f:GetParent() ~= UIParent then return true end
+    if InCombatLockdown() and f.IsProtected and f:IsProtected() then return false end
+    local strata = f.GetFrameStrata and f:GetFrameStrata()
+    local level = f.GetFrameLevel and f:GetFrameLevel()
+    f:SetParent(ScreenHolder())
+    -- (a new parent hands the frame its own strata and a level under it)
+    if strata and f.SetFrameStrata then f:SetFrameStrata(strata) end
+    if level and f.SetFrameLevel then f:SetFrameLevel(level) end
+    screenTaken[f] = true
+    return true
+end
+
+local function ScreenSweep()
+    local all = true
+    for _, m in ipairs(MOVERS) do
+        if m.getFrame and Screen.Covers(m.key) then
+            local ok, f = pcall(m.getFrame)
+            if ok and f and not screenTaken[f] and not MoverBlocked(m.key, f, true) then
+                if not ScreenTake(f) then all = false end
+            end
+        end
+    end
+    return all
+end
+
+-- The scale as saved, onto the screen. Safe to call at any time.
+function Screen.Apply()
+    local k = Screen.Scale()
+    if k == 1 and not screenHolder then return true end   -- never used: nothing exists, nothing to do
+    if InCombatLockdown() then
+        screenWait = true
+        return false
+    end
+    ScreenHolder():SetScale(k)
+    local all = true
+    if k ~= 1 then
+        all = ScreenSweep()
+        -- pieces are made as they are first needed (a HUD row, a raid's
+        -- bars): looked for again every two seconds while the scale is in use
+        if not screenTicker and C_Timer and C_Timer.NewTicker then
+            screenTicker = C_Timer.NewTicker(2, function()
+                if Screen.Scale() == 1 then
+                    screenTicker:Cancel()
+                    screenTicker = nil
+                    return
+                end
+                if not ScreenSweep() then screenWait = true end
+            end)
+            if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(screenTicker, "movers.screen") end
+        end
+    end
+    if not all then screenWait = true end
+    return all
+end
+
+-- (2026-11-20) THE PIECES THAT KEEP THEIR OWN PARENT. The unit frames, the
+-- action bars, the meter's windows and the nameplates place and drag
+-- themselves, so they are not moved under the screen frame: each
+-- multiplies its own scale by Screen.Scale() where it already sets it,
+-- and asks here to be told when the number changes.
+--   Screen.OnChange(fn)   fn() after every Screen.Set (and a wait for the
+--                         fight to end is the listener's own business)
+local screenHooks = {}
+function Screen.OnChange(fn)
+    if type(fn) == "function" then screenHooks[#screenHooks + 1] = fn end
+end
+function Screen.Notify()
+    for i = 1, #screenHooks do pcall(screenHooks[i]) end
+end
+
+function Screen.Set(v)
+    if type(ZacUIDB) ~= "table" then return end
+    ZacUIDB.config = ZacUIDB.config or {}
+    v = tonumber(v) or 1
+    if v < Screen.MIN then v = Screen.MIN elseif v > Screen.MAX then v = Screen.MAX end
+    ZacUIDB.config.pieceScale = (math.abs(v - 1) >= 0.005) and v or nil
+    Screen.Apply()
+    Screen.Notify()
+    if ns.SettingsChanged then ns.SettingsChanged("screen.scale") end
+end
+
+do
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:RegisterEvent("PLAYER_ENTERING_WORLD")
+    ev:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" then
+            if screenWait then
+                screenWait = false
+                Screen.Apply()
+            end
+        elseif Screen.Scale() ~= 1 then
+            Screen.Apply()
+        end
+    end)
+end
+
 local function ApplyAllMovers()
+    Screen.Apply()
     for _, m in ipairs(MOVERS) do ApplyMover(m.key) end
     if not ZUI._moverHooked
         and type(UIParent_UpdateTopFramePositions) == "function" then
@@ -1065,7 +1258,26 @@ end)
 
 RegisterMover("lootroll", "Loot rolls",
     function() return ZacUI_LootRollHolder or GroupLootFrame1 end,
-    "TOP", 0, -220, true)
+    "TOP", 0, -220, true,
+    -- (2026-11-20) the bars' width and height on their box in Edit Mode:
+    -- the Loot rolls page's own two sliders (ZacUI's bars only)
+    { sizes = function()
+        local LR = ns.LootRoll
+        if not (LR and LR.V and _G.ZacUI_LootRollHolder) then return nil end
+        local function Row(label, key, lo, hi, step)
+            return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1,
+                def = LR.Defaults(LR.Cfg())[key],
+                get = function() return LR.V(LR.Cfg(), key) end,
+                set = function(v)
+                    if type(ZacUIDB.lootRoll) ~= "table" then ZacUIDB.lootRoll = {} end
+                    local d = LR.Defaults(ZacUIDB.lootRoll)[key]
+                    ZacUIDB.lootRoll[key] = (v ~= d) and v or nil
+                    if next(ZacUIDB.lootRoll) == nil then ZacUIDB.lootRoll = nil end
+                    if LR.ApplyLive then LR.ApplyLive() end
+                end }
+        end
+        return { Row("Width", "width", 120, 400, 10), Row("Height", "height", 12, 40, 2) }
+    end })
 RegisterMover("buffs", "Buffs",
     function() return BuffFrame end, "TOPRIGHT", -200, -13, true)
 RegisterMover("minimap", "Minimap",
@@ -1120,16 +1332,267 @@ local function RefitProxy(key)
     end
 end
 
+-- ============================================================
+-- A SIZE OF ITS OWN FOR EACH PIECE (2026-11-19, Zac: "it all needs to be
+-- customizable literally everything")
+-- ============================================================
+-- Edit Mode's picked box has Smaller / Bigger: the piece's own scale, 50
+-- to 200 %.
+--   * a piece whose part already has a scale setting says so when it
+--     registers (opts.scale = { get, set }): Edit Mode then changes that
+--     one number, the same its settings page shows;
+--   * every other piece: ZacUIDB.moverScale[key] (nothing saved = 100 %),
+--     set on the piece's frame. It multiplies with the pieces' one scale
+--     (ns.Screen), which sits on the frame above;
+--   * opts.scale == false, a "move all" handle (exact) and the client's
+--     own frames (reflow: the buffs, the minimap, the loot rolls) have
+--     none.
+-- THE PIECE STAYS WHERE IT IS. A SetPoint offset is in the frame's own
+-- units, so a bare SetScale would slide it; the saved spot is rewritten
+-- for the new scale (the same spot on the screen, as a drag writes it).
+-- Reset puts the size back with the spot. Frames that hold secure buttons
+-- wait for the fight to end.
+local PIECE_MIN, PIECE_MAX = 0.5, 2
+local function PieceCan(m)
+    if not m or m.scale == false or m.exact or m.reflow then return false end
+    return true
+end
+local function PieceOwn(m) return type(m.scale) == "table" and type(m.scale.set) == "function" end
+local function PieceSaved(key)
+    local t = type(ZacUIDB) == "table" and ZacUIDB.moverScale
+    local v = type(t) == "table" and tonumber(t[key]) or nil
+    if not v or v ~= v then return 1 end
+    return math.max(PIECE_MIN, math.min(PIECE_MAX, v))
+end
+-- the piece's size now (nil: it has none of its own)
+local function PieceScale(key)
+    local m = MOVERS[key]
+    if not PieceCan(m) then return nil end
+    if PieceOwn(m) then
+        local ok, v = pcall(m.scale.get)
+        v = ok and tonumber(v) or 1
+        return (v and v > 0) and v or 1
+    end
+    return PieceSaved(key)
+end
+-- The saved size onto the frame (the registry's own only). A frame that
+-- never had one is never touched.
+PieceApply = function(m, f)
+    if not PieceCan(m) or PieceOwn(m) then return end
+    f = f or m.getFrame()
+    if not (f and f.SetScale) then return end
+    local k = PieceSaved(m.key)
+    if k == 1 and m._zPiece ~= f then return end
+    if m._zPiece == f and math.abs((m._zPieceK or 1) - k) < 0.0005 then return end
+    if MoverBlocked(m.key, f, true) then return end
+    if InCombatLockdown() and IsSecure(m, f) then
+        pending[m.key] = pending[m.key] or "apply"
+        return
+    end
+    -- (a show animation holds the frame under its scale for a moment: it
+    -- is left to finish, the watch below comes back)
+    if ns.Motion and ns.Motion.IsPlaying and ns.Motion.IsPlaying(f) then return end
+    f:SetScale(k)
+    if k == 1 then m._zPiece, m._zPieceK = nil, nil else m._zPiece, m._zPieceK = f, k end
+end
+-- pieces made after login, a profile worn: looked at every two seconds
+-- while any piece has a size saved
+local pieceTicker
+local function PieceWatch()
+    if pieceTicker or not (C_Timer and C_Timer.NewTicker) then return end
+    if not (type(ZacUIDB) == "table" and type(ZacUIDB.moverScale) == "table" and next(ZacUIDB.moverScale)) then return end
+    pieceTicker = C_Timer.NewTicker(2, function()
+        local t = type(ZacUIDB) == "table" and ZacUIDB.moverScale
+        local any = false
+        for _, m in ipairs(MOVERS) do
+            if m._zPiece or (type(t) == "table" and t[m.key] ~= nil) then
+                any = true
+                PieceApply(m)
+            end
+        end
+        if not any and pieceTicker then
+            pieceTicker:Cancel()
+            pieceTicker = nil
+        end
+    end)
+    if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(pieceTicker, "movers.pieces") end
+end
+local function PieceStore(key, v)
+    if type(ZacUIDB) ~= "table" then return end
+    if v and math.abs(v - 1) >= 0.005 then
+        ZacUIDB.moverScale = ZacUIDB.moverScale or {}
+        ZacUIDB.moverScale[key] = v
+    elseif type(ZacUIDB.moverScale) == "table" then
+        ZacUIDB.moverScale[key] = nil
+        if not next(ZacUIDB.moverScale) then ZacUIDB.moverScale = nil end
+    end
+end
+-- The size, with no word on the spot (a put-back writes the spot itself).
+local function PieceRaw(m, v)
+    if PieceOwn(m) then
+        local cur = PieceScale(m.key) or 1
+        if math.abs(cur - v) >= 0.0005 then pcall(m.scale.set, v) end
+        return
+    end
+    PieceStore(m.key, v)
+    PieceApply(m)
+    PieceWatch()
+end
+-- -> true, or false + why
+local function SetPieceScale(key, v)
+    local m = MOVERS[key]
+    if not PieceCan(m) then return false, "It has no size of its own." end
+    v = tonumber(v)
+    if not v or v ~= v then return false, "not a number" end
+    local lo = (PieceOwn(m) and tonumber(m.scale.min)) or PIECE_MIN
+    local hi = (PieceOwn(m) and tonumber(m.scale.max)) or PIECE_MAX
+    v = math.max(lo, math.min(hi, math_floor(v * 100 + 0.5) / 100))
+    local f = m.getFrame()
+    if f and MoverBlocked(key, f, true) then return false, "The game places this one." end
+    if f and InCombatLockdown() and IsSecure(m, f) then return false, "It holds buttons: after the fight." end
+    local old = PieceScale(key) or 1
+    if math.abs(old - v) < 0.0005 then return true end
+    -- where it is now, in its own numbers
+    local keep = f ~= nil and (not PieceOwn(m) or m.scale.keep == true)
+    local point, x, y, k1
+    if keep then
+        point, x, y = FrameSpot(m)
+        k1 = ScaleOf(f)
+    end
+    if PieceOwn(m) then
+        local ok, err = pcall(m.scale.set, v)
+        if not ok then return false, tostring(err) end
+    else
+        PieceStore(key, v)
+        PieceApply(m, f)
+    end
+    if keep then
+        local k2 = ScaleOf(f)
+        if k1 and k2 > 0 and math.abs(k1 - k2) > 0.00005 then
+            WritePos(m, point, Hundredths(x * k1 / k2), Hundredths(y * k1 / k2))
+            ApplyMover(key)
+        end
+    end
+    RefitProxy(key)
+    PieceWatch()
+    if ns.SettingsChanged then ns.SettingsChanged("mover.scale") end
+    return true
+end
+ns.MoverScale = PieceScale
+ns.SetMoverScale = SetPieceScale
+ns.MoverScaleLimits = function(key)
+    local m = MOVERS[key]
+    if not PieceCan(m) then return nil end
+    if PieceOwn(m) then return tonumber(m.scale.min) or PIECE_MIN, tonumber(m.scale.max) or PIECE_MAX end
+    return PIECE_MIN, PIECE_MAX
+end
+ns.MoverScaleApply = function(key)
+    local m = MOVERS[key]
+    if m then PieceApply(m) PieceWatch() end
+end
+-- the registry's own size back to 100 % (Reset; the spot is the caller's)
+ns.MoverScaleClear = function(key)
+    local m = MOVERS[key]
+    if not (m and PieceCan(m)) or PieceOwn(m) then return end
+    if PieceSaved(key) == 1 and not m._zPiece then return end
+    local f = m.getFrame()
+    if f and InCombatLockdown() and IsSecure(m, f) then return end
+    PieceStore(key, nil)
+    PieceApply(m, f)
+end
+
+-- ============================================================
+-- A PIECE'S OTHER SIZES (2026-11-19, Zac: "everything needs full sizing
+-- width height and scaling/overall scaling of the entire thing")
+-- ============================================================
+-- Beside its scale a piece has the sizes its settings page has - a bar's
+-- width and height, a row's icon size and spacing. A piece says them when
+-- it registers (opts.sizes); Edit Mode shows a row for each under the
+-- picked box. Nothing new is saved here: an entry's get / set are the
+-- page's own setting.
+local function PieceSizes(key)
+    local m = MOVERS[key]
+    local s = m and m.sizes
+    if type(s) == "function" then
+        local ok, list = pcall(s)
+        s = ok and list or nil
+    end
+    return (type(s) == "table" and #s > 0) and s or nil
+end
+local function SizeClamp(size, v)
+    local lo, hi = tonumber(size.min), tonumber(size.max)
+    if lo and v < lo then v = lo end
+    if hi and v > hi then v = hi end
+    if size.unit == "%" then return math_floor(v * 100 + 0.5) / 100 end
+    return math_floor(v + 0.5)
+end
+-- -> true, or false + why
+local function SetPieceSize(key, index, v)
+    local m = MOVERS[key]
+    local sizes = PieceSizes(key)
+    local size = sizes and sizes[index or 1]
+    v = tonumber(v)
+    if not (size and v and v == v) then return false, "It has no such size." end
+    local f = m.getFrame()
+    if f and InCombatLockdown() and IsSecure(m, f) then return false, "It holds buttons: after the fight." end
+    v = SizeClamp(size, v)
+    local ok, cur = pcall(size.get)
+    if ok and tonumber(cur) and math.abs(cur - v) < 0.0005 then return true end
+    local done, err = pcall(size.set, v)
+    if not done then return false, tostring(err) end
+    RefitProxy(key)
+    if ns.SettingsChanged then ns.SettingsChanged("mover.size") end
+    return true
+end
+ns.MoverSizes = PieceSizes
+ns.SetMoverSize = SetPieceSize
+ns.MoverSizeClamp = SizeClamp
+
 local function MoverSnapshot(key)
     local m = MOVERS[key]
     if not m then return nil end
-    return CopyPos(SavedPos(m))
+    local snap = CopyPos(SavedPos(m))
+    -- (its other sizes ride along, so Undo and Cancel put them back)
+    local sizes = PieceSizes(key)
+    if sizes then
+        snap = snap or {}
+        snap.sizes = {}
+        for i, size in ipairs(sizes) do
+            local ok, v = pcall(size.get)
+            snap.sizes[i] = ok and tonumber(v) or false
+        end
+    end
+    -- (its size rides along when it is not 100 %, so Undo and Cancel put
+    -- both back; at 100 % the record is exactly what it always was)
+    local k = PieceScale(key)
+    if k and math.abs(k - 1) >= 0.005 then
+        snap = snap or {}
+        snap.scale = math_floor(k * 100 + 0.5) / 100
+    end
+    return snap
 end
 
 -- false / nil = nothing saved: the frame goes back to its default
 local function MoverRestore(key, snap)
     local m = MOVERS[key]
     if not m then return end
+    if PieceCan(m) then
+        local f = m.getFrame()
+        if not (f and InCombatLockdown() and IsSecure(m, f)) then
+            PieceRaw(m, (type(snap) == "table" and tonumber(snap.scale)) or 1)
+        end
+    end
+    if type(snap) == "table" and type(snap.sizes) == "table" then
+        local sizes = PieceSizes(key)
+        local f = m.getFrame()
+        if sizes and not (f and InCombatLockdown() and IsSecure(m, f)) then
+            for i, size in ipairs(sizes) do
+                local want = tonumber(snap.sizes[i])
+                local ok, cur = pcall(size.get)
+                if want and ok and tonumber(cur) and math.abs(cur - want) >= 0.0005 then pcall(size.set, want) end
+            end
+        end
+    end
     if type(snap) == "table" and snap.point then
         WritePos(m, snap.point, snap.x, snap.y)
         ApplyMover(key)
@@ -1167,6 +1630,9 @@ ns.MoverRestore = MoverRestore
 ns.MoverShift = MoverShift
 ns.MoverRect = MoverRect
 ns.MoverKit = Kit
+-- every box that is up, fitted to its piece again now (the pieces' one
+-- size changed while Edit Mode is open)
+ns.MoverRefitAll = RefitShown
 ns.ApplyAllMovers = ApplyAllMovers
 ns.HideMover = HideMover
 ns.MOVERS = MOVERS
@@ -1202,4 +1668,458 @@ ns.MoverProxy = function(key) return moverProxies[key] end
 ns.IsMoverShown = function(key)
     local p = moverProxies[key]
     return p ~= nil and p:IsShown()
+end
+
+-- ============================================================
+-- UNDER THE MAP (2026-11-20, Zac, with pictures of a reminder icon, bar
+-- icons, a button's name and timer texts drawn over the open world map:
+-- "can you fix things like this" ... "i know i pointed out 1 thing but it
+-- needs to be fixed for all")
+-- ============================================================
+-- WHY THEY WERE ON TOP. The game's map as a window is on the MEDIUM layer
+-- and is not a "top level" window, so its frame level stays low: every
+-- piece on MEDIUM with a higher level, and every piece on HIGH or above,
+-- is drawn over it. Raising the map instead is not on the table: it would
+-- also go over bags, the character window and every popup (Maps_Skin:
+-- NOTHING FLOATS OVER THE MAP - AND NOT BY RAISING THE MAP).
+--
+-- WHAT HAPPENS. While the map window is open every on-screen piece of
+-- ZacUI's whose box overlaps the map's is put one layer under the map, and
+-- put back the moment the map closes, the piece hides or the two no longer
+-- overlap. Nothing saved is touched; a piece beside the map is not
+-- touched; full screen the map is on a layer above every piece already.
+--   ALL OF THEM, NOT A LIST OF THE ONES SEEN IN A PICTURE:
+--     1. every registered mover's frame;
+--     2. what the parts add (ns.UnderMap.Add(fn(each)): the unit frames,
+--        the action bars, the meter's windows, the raid mods' widgets, the
+--        aura displays). each(frame, "piece") names a piece that stands on
+--        a window's layer (the soft-target arrows are on the dialog
+--        layer); each(frame, "always") one with no box of its own;
+--     3. THE NET: every frame on the screen (a child of UIParent or of
+--        the pieces' holder) that ZacUI's code made, whoever forgot to
+--        list it - the hesitation plate, the raid chat toasts, the loot
+--        roll bars. Whose it is comes from the client itself
+--        (issecurevariable names the addon that made a global or wrote a
+--        field), so no other addon's frame and nothing of the game's is
+--        ever touched - a game window ZacUI only skinned is the game's.
+--   INSIDE A PIECE. A child that was put on a layer of its own (a text
+--   layer on HIGH) does not follow its parent down on this client: each is
+--   put under by itself and its own layer is noted first, so it goes back
+--   to exactly that - also where the parent's change does carry it along.
+--   BESIDE A PIECE. Frames in frame._zSatellites go with it.
+--   AT ONCE. A piece that shows, or sets its own layer again, while the
+--   map is open is looked at in that same moment (its OnShow and
+--   SetFrameStrata are hooked once), not at the next quarter second.
+--   NEVER a window: a top-level frame, one on the dialog layers that is
+--   not named a piece (PIECE_NAMES, or by its part), the few windows on
+--   lower layers (WINDOW_NAMES), anything the two map parts made;
+--   and never a frame that fills the screen (a holder, not a piece).
+--   IN A FIGHT a secure frame cannot change layer: it is left as it is and
+--   looked at again when the fight ends (its texts still go under).
+--   OFF: ZacUIDB.config.underMap = false (Maps page: "Pieces on screen go
+--   behind the open map").
+-- COST: nothing while the map is closed (two script hooks, and one early
+-- return in each hooked piece's show). Open: one walk of the pieces four
+-- times a second, their children every other time.
+do
+    local Under = {}
+    ns.UnderMap = Under
+    local RANK = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6,
+        FULLSCREEN_DIALOG = 7, TOOLTIP = 8 }
+    local BY_RANK = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG", "TOOLTIP" }
+    -- windows that are not top level and sit on a piece's layer
+    local WINDOW_NAMES = { ZacUIJunkItems = true, ZacUIMeterBreakdown = true, ZacUITooltipMover = true }
+    -- pieces that stand on a window's layer (the target arrows over the nameplates are on the
+    -- dialog layer, to be over Readycheck's nameplate icons)
+    local PIECE_NAMES = { ZacUI_SoftTargetMarker = true, ZacUI_CurrentTargetMarker = true }
+    local KID_DEPTH = 3
+    local weak = { __mode = "k" }
+    local lowered = setmetatable({}, weak)   -- piece -> { had, put, moved, kids = { [frame] = its own layer } }
+    local hooks = setmetatable({}, weak)     -- piece -> true: its show / layer change is looked at at once
+    local owned = setmetatable({}, weak)     -- frame -> true | false: made by ZacUI (the net)
+    local pieces = setmetatable({}, weak)    -- frame -> true: a piece whatever its layer (a part said so)
+    local always = setmetatable({}, weak)    -- frame -> true: no box of its own, under whenever the map is open
+    local providers = {}
+    local seen = {}
+    local netList, netCount = {}, -1
+    local ticker, hooked
+    local waiting = false          -- a secure frame could not be touched in a fight
+    local working = false          -- our own layer change: the hooks stay quiet
+    local active = false           -- the map is open as a window and the switch is on
+    local deep = true              -- this look also walks the pieces' children
+    local tick = 0
+    local map, ml, mb, mr, mt, mapRank, below, screenW, screenH
+
+    function Under.On()
+        local c = type(ZacUIDB) == "table" and ZacUIDB.config
+        return not (type(c) == "table" and c.underMap == false)
+    end
+    -- fn(each): calls each(frame [, "piece" | "always"]) for every frame of a part that stands on the screen
+    function Under.Add(fn)
+        if type(fn) == "function" then providers[#providers + 1] = fn end
+    end
+    function Under.Lowered(f)
+        local rec = lowered[f]
+        return rec ~= nil and rec.moved == true
+    end
+
+    local function Map() return _G.WorldMapFrame end
+    local function Rank(st) return RANK[st or ""] or 3 end
+    -- l, b, r, t in real screen pixels (nil when the frame has no box yet)
+    local function Rect(f)
+        if not (f.GetRect and f.GetEffectiveScale) then return nil end
+        local ok, l, b, w, h = pcall(f.GetRect, f)
+        if not ok or type(l) ~= "number" or type(w) ~= "number" or type(h) ~= "number" then return nil end
+        local sc = f:GetEffectiveScale() or 1
+        return l * sc, b * sc, (l + w) * sc, (b + h) * sc
+    end
+    -- the piece's box; a holder with no size of its own is as big as what it holds
+    local function Box(f)
+        local l, b, r, t = Rect(f)
+        if l and (r - l) > 2 and (t - b) > 2 then return l, b, r, t end
+        local L, B, R, T
+        if f.GetChildren then
+            local kids = { f:GetChildren() }
+            for i = 1, #kids do
+                local c = kids[i]
+                if type(c) == "table" and c.IsShown and c:IsShown() then
+                    local cl, cb, cr, ct = Rect(c)
+                    if cl and (cr - cl) > 0 and (ct - cb) > 0 then
+                        if not L or cl < L then L = cl end
+                        if not B or cb < B then B = cb end
+                        if not R or cr > R then R = cr end
+                        if not T or ct > T then T = ct end
+                    end
+                end
+            end
+        end
+        return L, B, R, T
+    end
+    -- a window, not a piece: it keeps its layer
+    local function IsWindow(f)
+        if pieces[f] or always[f] then return false end
+        local name = f.GetName and f:GetName()
+        if name then
+            if PIECE_NAMES[name] then return false end
+            if WINDOW_NAMES[name] then return true end
+        end
+        if f.IsToplevel and f:IsToplevel() then return true end
+        return Rank(f:GetFrameStrata()) >= RANK.DIALOG
+    end
+    local function Protected(f)
+        return (f.IsProtected and f:IsProtected()) and true or false
+    end
+    local function Set(f, strata)
+        working = true
+        pcall(f.SetFrameStrata, f, strata)
+        working = false
+    end
+    local function EachKid(f, depth, fn)
+        if depth <= 0 or not f.GetChildren then return end
+        local kids = { f:GetChildren() }
+        for i = 1, #kids do
+            local c = kids[i]
+            if type(c) == "table" and c.GetFrameStrata and not (c.IsForbidden and c:IsForbidden()) then
+                fn(c)
+                EachKid(c, depth - 1, fn)
+            end
+        end
+    end
+
+    local function Restore(f)
+        local rec = lowered[f]
+        if not rec then return end
+        local combat = InCombatLockdown and InCombatLockdown()
+        local left = false
+        if rec.put then
+            if combat and Protected(f) then
+                left = true
+            else
+                -- (only while it is still where it was put: a piece that took a layer of its own since keeps that)
+                if f.GetFrameStrata and f:GetFrameStrata() == rec.put then Set(f, rec.had) end
+                rec.put, rec.had = nil, nil
+            end
+        end
+        -- (after the parent: where a parent's change carries its children, this is what puts
+        -- them right. A parent that has to wait for the fight to end: its children go back now
+        -- and stay on record, to be put right once more after it)
+        local parentWaits = left
+        for k, ks in pairs(rec.kids) do
+            if combat and Protected(k) then
+                left = true
+            else
+                if k.GetFrameStrata and k:GetFrameStrata() ~= ks then Set(k, ks) end
+                if not parentWaits then rec.kids[k] = nil end
+            end
+        end
+        if left then waiting = true else lowered[f] = nil end
+    end
+    local function RestoreAll()
+        for f in pairs(lowered) do pcall(Restore, f) end
+    end
+
+    local function Lower(f, walk)
+        local rec = lowered[f]
+        local combat = InCombatLockdown and InCombatLockdown()
+        if not rec then
+            rec = { kids = {} }
+            lowered[f] = rec
+            -- noted BEFORE the piece moves: every child on a layer of its own
+            EachKid(f, KID_DEPTH, function(k)
+                local p = k:GetParent()
+                local ks = k:GetFrameStrata()
+                if p and p.GetFrameStrata and ks ~= p:GetFrameStrata() then rec.kids[k] = ks end
+            end)
+            walk = true
+        end
+        local st = f:GetFrameStrata()
+        if Rank(st) >= mapRank then
+            if combat and Protected(f) then
+                waiting = true
+            else
+                rec.had, rec.put, rec.moved = st, below, true
+                Set(f, below)
+            end
+        end
+        if walk then
+            EachKid(f, KID_DEPTH, function(k)
+                local ks = k:GetFrameStrata()
+                if Rank(ks) >= mapRank then
+                    if combat and Protected(k) then
+                        waiting = true
+                    else
+                        rec.kids[k] = ks
+                        rec.moved = true
+                        Set(k, below)
+                    end
+                end
+            end)
+        end
+    end
+
+    local Look
+    -- a piece that shows, or sets its own layer, while the map is open
+    local function Nudge(f)
+        if working or not active or type(f) ~= "table" then return end
+        seen[f] = nil
+        local was = deep
+        deep = true
+        pcall(Look, f)
+        deep = was
+    end
+    local function Hook(f)
+        if hooks[f] then return end
+        hooks[f] = true
+        if f.HookScript then pcall(f.HookScript, f, "OnShow", Nudge) end
+        -- (never a method hook on a secure frame: the game's own code calling that method
+        -- would run through our hook; its show script is enough there)
+        if not Protected(f) and type(f.SetFrameStrata) == "function" and hooksecurefunc then
+            pcall(hooksecurefunc, f, "SetFrameStrata", Nudge)
+        end
+    end
+    -- with: nil = by its own box, true / false = as the frame it hangs beside
+    Look = function(f, with)
+        if type(f) ~= "table" or not f.GetFrameStrata or f == map or seen[f] then return end
+        if f.IsForbidden and f:IsForbidden() then return end
+        seen[f] = true
+        Hook(f)
+        local under = false
+        if f.IsShown and f:IsShown() and not IsWindow(f) then
+            if with ~= nil then
+                under = with
+            elseif always[f] then
+                under = true
+            else
+                local l, b, r, t = Box(f)
+                if l and r > ml + 1 and l < mr - 1 and t > mb + 1 and b < mt - 1
+                   -- (a frame that fills the screen holds pieces; it is not one)
+                   and not ((r - l) >= screenW * 0.9 and (t - b) >= screenH * 0.9) then
+                    under = true
+                end
+            end
+        end
+        if under then Lower(f, deep) else Restore(f) end
+        local sats = rawget(f, "_zSatellites")
+        if type(sats) == "table" then
+            for i = 1, #sats do Look(sats[i], under) end
+        end
+    end
+    local function LookSafe(f, how)
+        if type(f) == "table" then
+            if how == "piece" then pieces[f] = true elseif how == "always" then always[f] = true end
+        end
+        pcall(Look, f)
+    end
+
+    -- THE NET. true when ZacUI's code made this frame: the client names the
+    -- addon that created a global, or that wrote a field. A frame with a
+    -- global name is judged by that name alone, so a window of the game's
+    -- that ZacUI skinned (and so wrote fields on) stays the game's.
+    -- (never the two map parts' own frames: what belongs to the map stays on the map)
+    local function Ours(who)
+        return type(who) == "string" and who:find("^Zacui") ~= nil
+            and who ~= "Zacui_WorldMap" and who ~= "Zacui_Maps"
+    end
+    local function Owned(f)
+        local v = owned[f]
+        if v ~= nil then return v end
+        v = false
+        if issecurevariable then
+            pcall(function()
+                local name = f.GetName and f:GetName()
+                if name and _G[name] == f then
+                    local secure, who = issecurevariable(_G, name)
+                    if not secure and Ours(who) then v = true end
+                    return
+                end
+                -- no name: its fields. Ours when every field on it was written by our code and none by
+                -- the game or another addon (a frame of theirs that we only dressed carries both)
+                local n, mine = 0, 0
+                for k in pairs(f) do
+                    if type(k) == "string" then
+                        n = n + 1
+                        local secure, who = issecurevariable(f, k)
+                        if secure or not Ours(who) then return end
+                        mine = mine + 1
+                        if n >= 12 then break end
+                    end
+                end
+                if mine > 0 then v = true end
+            end)
+        end
+        owned[f] = v
+        return v
+    end
+    local function Net()
+        local holder = Screen.Holder and Screen.Holder()
+        local n = (UIParent.GetNumChildren and UIParent:GetNumChildren() or 0)
+            + (holder and holder.GetNumChildren and holder:GetNumChildren() or 0) * 10000
+        if n ~= netCount then      -- (something was made, or changed parent, since)
+            netCount = n
+            wipe(netList)
+            local kids = { UIParent:GetChildren() }
+            for i = 1, #kids do
+                local f = kids[i]
+                -- (one frame that cannot be asked never stops the scan)
+                local ok, mine = pcall(function()
+                    return type(f) == "table" and f ~= holder and not (f.IsForbidden and f:IsForbidden()) and Owned(f)
+                end)
+                if ok and mine then netList[#netList + 1] = f end
+            end
+            if holder and holder.GetChildren then
+                kids = { holder:GetChildren() }
+                for i = 1, #kids do
+                    if type(kids[i]) == "table" then netList[#netList + 1] = kids[i] end
+                end
+            end
+        end
+        return netList
+    end
+
+    local Sweep
+    -- (a look that fails says so once in the debug log and is tried again at the next)
+    function Under.Sweep()
+        local ok, err = pcall(Sweep)
+        if not ok then
+            active = false
+            -- (told once, so it is seen and not repeated four times a second)
+        if not Under._erred then Under._erred = true if geterrorhandler then geterrorhandler()("ZacUI, under the map: " .. tostring(err)) end end
+        end
+    end
+    Sweep = function()
+        map = Map()
+        active = Under.On() and map ~= nil and map:IsShown()
+        if active then
+            mapRank = Rank(map:GetFrameStrata())
+            -- (full screen it is over every piece by itself; on the lowest layers there is no "under")
+            if mapRank >= RANK.FULLSCREEN or mapRank <= 1 then
+                active = false
+            else
+                ml, mb, mr, mt = Rect(map)
+                active = ml ~= nil and (mr - ml) > 0 and (mt - mb) > 0
+            end
+        end
+        if not active then RestoreAll() return end
+        below = BY_RANK[mapRank - 1]
+        local us = UIParent:GetEffectiveScale() or 1
+        screenW, screenH = (UIParent:GetWidth() or 0) * us, (UIParent:GetHeight() or 0) * us
+        waiting = false
+        tick = tick + 1
+        deep = (tick % 2 == 1)
+        wipe(seen)
+        for _, m in ipairs(MOVERS) do
+            if m.getFrame then
+                local ok, f = pcall(m.getFrame)
+                if ok and type(f) == "table" then LookSafe(f) end
+            end
+        end
+        for i = 1, #providers do pcall(providers[i], LookSafe) end
+        for name in pairs(PIECE_NAMES) do LookSafe(_G[name]) end
+        local okNet, list = pcall(Net)
+        if okNet and list then
+            for i = 1, #list do LookSafe(list[i]) end
+        end
+        -- a piece that is gone from every list (its part let go of it)
+        for f in pairs(lowered) do
+            if not seen[f] then pcall(Restore, f) end
+        end
+    end
+
+    local function Stop()
+        if ticker then ticker:Cancel() ticker = nil end
+        active = false
+        RestoreAll()
+    end
+    local function Start()
+        if not Under.On() then return end
+        -- (a frame looked at before its fields were written is asked again)
+        for f, v in pairs(owned) do if v == false then owned[f] = nil end end
+        netCount = -1
+        tick = 0
+        Under.Sweep()
+        if not ticker and C_Timer and C_Timer.NewTicker then
+            ticker = C_Timer.NewTicker(0.25, function()
+                local m = Map()
+                if not (m and m:IsShown()) then Stop() return end
+                Under.Sweep()
+            end)
+            if ns.Profiler and ns.Profiler.TrackTicker then ns.Profiler.TrackTicker(ticker, "movers.undermap") end
+        end
+    end
+    -- the switch (the Maps page): at once
+    function Under.Set(on)
+        if type(ZacUIDB) ~= "table" then return end
+        ZacUIDB.config = ZacUIDB.config or {}
+        if on then ZacUIDB.config.underMap = nil else ZacUIDB.config.underMap = false end
+        local m = Map()
+        if on and m and m:IsShown() then Start() else Stop() end
+    end
+
+    local function HookMap()
+        local m = Map()
+        if hooked or not (m and m.HookScript) then return end
+        hooked = true
+        m:HookScript("OnShow", Start)
+        m:HookScript("OnHide", Stop)
+        if m:IsShown() then Start() end
+    end
+    Under.Hook = HookMap
+    local ev = CreateFrame("Frame")
+    ev:RegisterEvent("PLAYER_LOGIN")
+    ev:RegisterEvent("ADDON_LOADED")
+    ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+    ev:SetScript("OnEvent", function(self, event, name)
+        if event == "PLAYER_REGEN_ENABLED" then
+            -- what a fight kept on the wrong layer, either way
+            if waiting or next(lowered) then
+                waiting = false
+                local m = Map()
+                if m and m:IsShown() and Under.On() then Under.Sweep() else RestoreAll() end
+            end
+            return
+        end
+        if event == "ADDON_LOADED" and name ~= "Blizzard_WorldMap" then return end
+        HookMap()
+        if hooked then self:UnregisterEvent("ADDON_LOADED") end
+    end)
 end

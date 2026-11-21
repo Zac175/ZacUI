@@ -86,7 +86,9 @@ local DEFAULTS = {
     },
     aux = {
         enabled = false,             -- WA "Paladin Aux" is use_never
-        x = 0, y = -400, iconSize = 30, spacing = 4,
+        -- (2026-11-19: was 0, -400, off the bottom of a 768-unit screen;
+        -- a HUD set up before keeps its saved spot - HUD_ClassHUD.lua)
+        x = 165, y = -208, iconSize = 30, spacing = 4,
         -- (slot 2 starts off, 2026-11-19; a HUD already set up keeps its own)
         trinket1 = true, trinket2 = false, racial = true,
     },

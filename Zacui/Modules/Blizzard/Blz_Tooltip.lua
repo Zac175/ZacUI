@@ -324,7 +324,28 @@ end
 
 ns.TipLook = TipLook
 
+-- "<Made by Name>" ON CRAFTED ITEMS (2026-11-20; tooltip.hideMadeBy, off
+-- unless ticked: Tooltips > What they say). The game writes that line from
+-- its own ITEM_CREATED_BY text, so with that text emptied there is nothing
+-- to write. The game's text is kept and put back the moment the tick is
+-- off. (Nothing in the game's own interface code reads that text, so
+-- changing it reaches the tooltip line and nothing else.)
+local madeByWas
+local function ApplyMadeBy()
+    local hide = TipCfg().hideMadeBy == true
+    if hide then
+        if madeByWas == nil and type(_G.ITEM_CREATED_BY) == "string" then madeByWas = _G.ITEM_CREATED_BY end
+        if madeByWas ~= nil then _G.ITEM_CREATED_BY = "" end
+    elseif madeByWas ~= nil then
+        _G.ITEM_CREATED_BY = madeByWas
+        madeByWas = nil
+    end
+    return hide
+end
+ns.TipMadeBy = ApplyMadeBy
+
 Modules.tooltip = function()
+    pcall(ApplyMadeBy)
     -- Explicit appends (hole-in-ipairs law): WorldMapTooltip is gone on
     -- 11509 and the shopping tooltips vary by build - a nil mid-literal
     -- would silently skip every tooltip after the hole.

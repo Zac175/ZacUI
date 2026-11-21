@@ -967,7 +967,7 @@ function Kit.Footer(parent, height)
     local rule = f:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("TOPLEFT")
     rule:SetPoint("TOPRIGHT")
     f._zPaint = function(self)

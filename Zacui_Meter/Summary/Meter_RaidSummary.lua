@@ -711,7 +711,7 @@ local function AcquireRow(card)
         row.rule = row:CreateTexture(nil, "BORDER")
         row.rule:SetPoint("BOTTOMLEFT")
         row.rule:SetPoint("BOTTOMRIGHT")
-        row.rule:SetHeight(1)
+        row.rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(row.rule, "TOP") end
         row.rule:SetColorTexture(1, 1, 1, 0.12)
         row.icon = row:CreateTexture(nil, "ARTWORK")
         ZacUI.Look.CropIcon(row.icon)

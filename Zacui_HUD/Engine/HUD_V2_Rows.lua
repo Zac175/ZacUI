@@ -58,7 +58,8 @@ function Engine:V2EnsureUtility()
     if not cfg then return end
     local key = self.def.prefix .. "Utility"
     HUD.PlaceAnchor(key, self.holders.Utility, UTIL_POS)
-    HUD.RegisterMover(key, self.def.label .. " Utility row", self.holders.Utility, UTIL_POS)
+    HUD.RegisterMover(key, self.def.label .. " Utility row", self.holders.Utility, UTIL_POS,
+        { scale = self:PieceScaleOpt({ key = "Utility" }) })
     if self.built then self:V2BuildUtility() end
     self:V2Visibility()
 end
@@ -166,6 +167,17 @@ end
 
 function Engine:V2ApplySizes(cfg)
     HUD.ForgetLayout(self.memo.utility)
+end
+
+-- (the utility row's own scale, as HUD.RegisterMover is told it: the
+-- engine's RegisterMovers registers this key too, once the row is on)
+local BasePieceScaleOpt = Engine.PieceScaleOpt
+function Engine:PieceScaleOpt(e)
+    if e.key == "Utility" then
+        return HUD.ScaleOpt(function(create) return Util(self:Store(), create) end, "scale",
+            function() self:ApplyAnchorPositions() end)
+    end
+    return BasePieceScaleOpt(self, e)
 end
 
 function Engine:V2Positions(cfg)

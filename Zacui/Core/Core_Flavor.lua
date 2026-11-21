@@ -552,6 +552,10 @@ ns.FEATURE_FLAVORS = {
     { id = "loot_feed", part = "Zacui_QoL", name = "Loot feed: fading rows for loot, money, reputation and skill-ups",
       on = { forever = "loot, money, reputation and skill lines arrive the same way on Forever; a line the game hides in a fight is skipped",
              retail = "loot, money, reputation and skill lines arrive the same way on Retail; a line the game hides in a fight is skipped" } },
+    -- (2026-11-20, Zac: "something that will show ... what dropped from a boss")
+    { id = "boss_loot", part = "Zacui_QoL", name = "Boss loot: what a boss dropped and who got it, on a small card",
+      changed = { forever = "a loot line or a chat link Forever hides from addons in a fight is skipped",
+                  retail = "a loot line or a chat link Retail hides from addons in a fight is skipped" } },
     { id = "qol_autos", part = "Zacui_QoL", name = "Small automations: DELETE typed, containers opened, cinematics skipped, a res accepted, release in battlegrounds",
       on = { forever = "the popups, cinematics, resurrections and battlegrounds work the same way on Forever (the container list is Classic's; your own ids add the rest)" },
       changed = { retail = "the container list is Classic's (your own ids add Retail's); the rest works the same" } },

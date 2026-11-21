@@ -320,7 +320,7 @@ local function Title(host, title, sub)
     local rule = host:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("TOPLEFT", s, "BOTTOMLEFT", 0, -8)
     rule:SetWidth(W - 2 * PAD)
     host._zRule = rule
@@ -375,7 +375,7 @@ local function BuildSample(box)
     local rule = box:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -28)
     rule:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, -28)
     local line = UI.Font(box, F.LABEL, { text = "The quick brown fox jumps over the lazy dog.", width = 196 })
@@ -707,7 +707,7 @@ local function Build()
     local rule = foot:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("TOPLEFT")
     rule:SetPoint("TOPRIGHT")
     foot._zPaint = function()

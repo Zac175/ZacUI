@@ -211,7 +211,7 @@ local function BuildRow(row)
     local rule = row:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 6, 1)
     rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", -6, 1)
     row.rule = rule

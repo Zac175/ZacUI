@@ -56,6 +56,7 @@ local function Spawn()
     local c = CreateFrame("Frame", "ZacUF_bossHeader", UIParent)
     c.cfg = cfg
     c:SetMovable(true)
+    if ns.ScreenK and ns.ScreenK() ~= 1 then c:SetScale(ns.ScreenK()) end   -- (the pieces' one scale, Core.lua)
     c:SetClampedToScreen(true)
     c.buttons = {}
     for i = 1, COUNT do
@@ -72,7 +73,8 @@ local function Spawn()
             local cx, cy = c:GetCenter()
             local ux, uy = UIParent:GetCenter()
             if cx and ux then
-                local nx, ny = cx - ux, cy - uy
+                local k = ns.ScreenK and ns.ScreenK() or 1   -- (the holder's own units)
+                local nx, ny = cx - ux / k, cy - uy / k
                 if ns.SnapValue then nx, ny = ns.SnapValue(nx), ns.SnapValue(ny) end
                 cfg.point, cfg.x, cfg.y = "CENTER", nx, ny
             end

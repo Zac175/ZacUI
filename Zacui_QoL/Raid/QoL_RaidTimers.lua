@@ -98,7 +98,16 @@ local function Holder()
     holder:SetClampedToScreen(true)
     holder:SetPoint("TOP", UIParent, "TOP", 0, -180)
     if ns.RegisterMover then
-        ns.RegisterMover("raidtimers", "Pull & break timers", function() return holder end, "TOP", 0, -180)
+        ns.RegisterMover("raidtimers", "Pull & break timers", function() return holder end, "TOP", 0, -180, nil, {
+            -- (its bars' width and height in Edit Mode: the page's own two settings)
+            sizes = function()
+                local function E(label, key, lo, hi, step, def)
+                    return { label = label, unit = "px", min = lo, max = hi, step = step, fine = 1, def = def,
+                        get = function() return tonumber(DB()[key]) or def end,
+                        set = function(v) DB()[key] = v if RT.Layout then RT.Layout() end end }
+                end
+                return { E("Width", "width", 120, 400, 10, 240), E("Height", "height", 12, 36, 1, 20) }
+            end })
         if ns.ApplyMover then ns.ApplyMover("raidtimers") end
     end
     return holder
@@ -142,6 +151,8 @@ function RT.NewBar(kind, parent)
     local div = f:CreateTexture(nil, "ARTWORK", nil, 1)
     div:SetTexture(ns.FLAT)
     div:SetWidth(1)
+    -- (2026-11-19: one screen pixel under ZacUI's look, Core_Pixel; one unit everywhere else, as before)
+    if ns.Pixel and ns.Pixel.Edge then ns.Pixel.Edge(div, "LEFT", f) end
     div:SetPoint("TOPLEFT", icon, "TOPRIGHT", 0, 0)
     div:SetPoint("BOTTOMLEFT", icon, "BOTTOMRIGHT", 0, 0)
     f.div = div

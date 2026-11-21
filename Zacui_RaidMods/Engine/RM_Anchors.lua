@@ -84,17 +84,64 @@ local function PlaceDefault(f, point, relPoint, x, y, moverKey)
     end
 end
 
+-- (2026-11-20) THE PLAYER'S OWN SIZE ON AN ANCHOR: Edit Mode's Smaller /
+-- Bigger on an anchor's box sizes everything that hangs there - the
+-- groups on it and the widgets that name it - about the anchor's own
+-- point, which stays where it is. Saved per anchor in the raid mods'
+-- settings (anchorScale[key]; nothing saved = the packs' sizes exactly).
+L.ANCHOR_SCALE_MIN, L.ANCHOR_SCALE_MAX = 0.5, 2
+function L.AnchorUserScale(akey)
+    local db = RM.DB and RM.DB()
+    local t = db and db.anchorScale
+    local v = type(t) == "table" and tonumber(t[akey]) or nil
+    if not v or v ~= v or v <= 0 then return 1 end
+    return math.max(L.ANCHOR_SCALE_MIN, math.min(L.ANCHOR_SCALE_MAX, v))
+end
+function L.SetAnchorUserScale(akey, v)
+    local db = RM.DB and RM.DB()
+    if not db then return end
+    v = tonumber(v)
+    if not v or v ~= v then return end
+    v = math.max(L.ANCHOR_SCALE_MIN, math.min(L.ANCHOR_SCALE_MAX, v))
+    if math.abs(v - 1) < 0.005 then
+        if type(db.anchorScale) == "table" then
+            db.anchorScale[akey] = nil
+            if not next(db.anchorScale) then db.anchorScale = nil end
+        end
+    else
+        if type(db.anchorScale) ~= "table" then db.anchorScale = {} end
+        db.anchorScale[akey] = v
+    end
+    -- (the handle's box is the size of what hangs there)
+    local f = L.anchorFrames[akey]
+    if f and f.anchorDef then
+        local s = L.AnchorUserScale(akey)
+        f:SetSize(f.anchorDef.w * s, f.anchorDef.h * s)
+    end
+    if L.Rescale then L.Rescale() end
+end
+
 for _, a in ipairs(ANCHORS) do
     local f = CreateFrame("Frame", "ZacUIRaidMods_" .. a.key, UIParent)
     f:SetSize(a.w, a.h)
     f.anchorDef = a
+    do
+        -- (a size of the player's own for this anchor: its box follows)
+        local okS, sc = pcall(L.AnchorUserScale, a.key)
+        if okS and sc and sc ~= 1 then f:SetSize(a.w * sc, a.h * sc) end
+    end
     PlaceDefault(f, a.point, a.relPoint, a.x, a.y, MoverKey(a.key))
     L.anchorFrames[a.key] = f
     if ns.RegisterMover then
         local dx, dy = SamePointOffset(a.point, a.relPoint, a.x, a.y)
         -- reset: back where the packs had it
         ns.RegisterMover(MoverKey(a.key), a.label, function() return f end, a.point, dx, dy, nil,
-            { reset = function() PlaceDefault(f, a.point, a.relPoint, a.x, a.y, MoverKey(a.key)) end })
+            { reset = function() PlaceDefault(f, a.point, a.relPoint, a.x, a.y, MoverKey(a.key)) end,
+              -- its size in Edit Mode: the player's own, on everything
+              -- that hangs there (L.AnchorUserScale); the anchor stays put
+              scale = { min = L.ANCHOR_SCALE_MIN, max = L.ANCHOR_SCALE_MAX, keep = true,
+                  get = function() return L.AnchorUserScale(a.key) end,
+                  set = function(v) L.SetAnchorUserScale(a.key, v) end } })
     end
 end
 
@@ -258,6 +305,59 @@ end
 
 local function IsDynamic(grp) return grp and grp.kind == "dynamicgroup" end
 
+-- (2026-11-20) A SIZE OF YOUR OWN ON A GROUP THAT STANDS ON ITS OWN: the
+-- pack gives a group its scale (grp.scale); Edit Mode's Smaller / Bigger on
+-- the group's box multiplies it. Saved per group in the raid mods' settings
+-- (groupScale[key], nothing saved = the pack's size exactly).
+L.GROUP_SCALE_MIN, L.GROUP_SCALE_MAX = 0.5, 2
+function L.GroupUserScale(key)
+    local db = RM.DB and RM.DB()
+    local t = db and db.groupScale
+    local v = type(t) == "table" and tonumber(t[key]) or nil
+    if not v or v ~= v or v <= 0 then return 1 end
+    return math.max(L.GROUP_SCALE_MIN, math.min(L.GROUP_SCALE_MAX, v))
+end
+-- the player's own size for what a group draws: its anchor's when it
+-- hangs on one, its parent group's, its own when it stands on its own;
+-- never anything for a group that rides a raid frame or a nameplate
+function L.UserScaleOf(key, grp, depth)
+    grp = grp or (RM.groups and RM.groups[key])
+    if not grp then return 1 end
+    if grp.anchor and L.anchorFrames[grp.anchor] then return L.AnchorUserScale(grp.anchor) end
+    if grp.anchorTo or grp.zuiPlate then return 1 end
+    if grp.useAnchorPerUnit and grp.anchorPerUnit == "UNITFRAME" then return 1 end
+    if grp.anchorFrameType == "UNITFRAME" or grp.anchorFrameType == "NAMEPLATE" then return 1 end
+    if grp.parent and RM.groups and RM.groups[grp.parent] then
+        if (depth or 0) >= 6 then return 1 end
+        return L.UserScaleOf(grp.parent, RM.groups[grp.parent], (depth or 0) + 1)
+    end
+    return L.GroupUserScale(key)
+end
+-- the scale a group's container is drawn at
+function L.GroupScale(key, grp)
+    local s = grp and tonumber(grp.scale) or 1
+    if not s or s <= 0 then s = 1 end
+    return s * L.UserScaleOf(key, grp)
+end
+function L.SetGroupUserScale(key, v)
+    local db = RM.DB and RM.DB()
+    if not db then return end
+    v = tonumber(v)
+    if not v or v ~= v then return end
+    v = math.max(L.GROUP_SCALE_MIN, math.min(L.GROUP_SCALE_MAX, v))
+    if math.abs(v - 1) < 0.005 then
+        if type(db.groupScale) == "table" then
+            db.groupScale[key] = nil
+            if not next(db.groupScale) then db.groupScale = nil end
+        end
+    else
+        if type(db.groupScale) ~= "table" then db.groupScale = {} end
+        db.groupScale[key] = v
+    end
+    -- (the container, the groups that hang on it, and every widget they draw)
+    if L.Rescale then L.Rescale() end
+end
+
 function L.Container(key, unit)
     local ck = unit and (key .. "|" .. unit) or key
     local c = containers[ck]
@@ -273,7 +373,11 @@ function L.Container(key, unit)
     if not grp.anchor and not grp.anchorTo and not grp.parent and not unit then c.minW, c.minH = 120, 20 end
     c:SetSize(c.minW, c.minH)
     c:SetFrameStrata("MEDIUM")
-    if grp.scale and tonumber(grp.scale) and tonumber(grp.scale) ~= 1 then c:SetScale(tonumber(grp.scale)) end
+    -- (the pack's scale; a group standing on its own, times the player's own - L.GroupScale)
+    do
+        local sc = unit and (tonumber(grp.scale) or 1) or L.GroupScale(key, grp)
+        if sc and sc > 0 and sc ~= 1 then c:SetScale(sc) end
+    end
     containers[ck] = c
     PositionContainer(c)
     return c
@@ -543,6 +647,33 @@ local function Detach(w)
     unitAnchored[w] = nil
 end
 
+-- the player's own size for one widget: from the anchor it names, else
+-- from its group (L.UserScaleOf); 1 on a raid frame or a nameplate
+function L.BaseOf(w)
+    local def = w.inst and w.inst.def
+    if not def then return 1 end
+    if def.anchor and L.anchorFrames[def.anchor] then return L.AnchorUserScale(def.anchor) end
+    if def.anchorTo then return 1 end
+    local D = w.D or def.display or {}
+    local grp = GroupDef(def.group)
+    if PerUnit(grp) then return 1 end
+    if D.anchorFrameType == "UNITFRAME" or D.anchorFrameType == "NAMEPLATE" then return 1 end
+    if grp then return L.UserScaleOf(def.group, grp) end
+    return 1
+end
+-- a size was changed: the containers and every widget on screen, again
+function L.Rescale()
+    for _, c in pairs(containers) do
+        if not c.unit and c.grp then
+            local sc = L.GroupScale(c.gkey, c.grp)
+            if sc and sc > 0 and math.abs((c:GetScale() or 1) - sc) > 0.0005 then c:SetScale(sc) end
+            MarkDirty(c)
+        end
+    end
+    local Wd = RM.Widgets
+    if Wd and Wd.Rebase then Wd.Rebase(L.BaseOf) end
+end
+
 function L.Place(w)
     local def = w.inst.def
     local D = w.D or def.display or {}
@@ -552,6 +683,10 @@ function L.Place(w)
     w.placedUnit = w.state and w.state.unit
     w.animX, w.animY = 0, 0
     w:SetParent(UIParent)
+    do
+        local Wd = RM.Widgets
+        if Wd and Wd.SetBase then Wd.SetBase(w, L.BaseOf(w)) end
+    end
     local selfPoint, anchorPoint = D.selfPoint or "CENTER", D.anchorPoint or "CENTER"
     local x, y = tonumber(D.xOffset) or 0, tonumber(D.yOffset) or 0
     -- 1. the leaf names its own anchor
@@ -712,7 +847,13 @@ local function RegisterGroupMovers()
                 { reset = function()
                     local c = L.Container(key)
                     if c and c.grp then PositionContainer(c) end
-                end })
+                end,
+                -- (2026-11-20) its size in Edit Mode: the player's own, on
+                -- top of the scale the pack gives the group (L.GroupScale);
+                -- the group stays where it is
+                scale = { min = L.GROUP_SCALE_MIN, max = L.GROUP_SCALE_MAX, keep = true,
+                    get = function() return L.GroupUserScale(key) end,
+                    set = function(v) L.SetGroupUserScale(key, v) end } })
         end
     end
 end

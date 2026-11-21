@@ -828,9 +828,9 @@ local function BuildRail()
             local t = f:CreateTexture(nil, "OVERLAY", nil, 7)
             t:SetTexture(ns.FLAT)
             if side == "TOP" or side == "BOTTOM" then
-                t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1)
+                t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "TOP") end
             else
-                t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1)
+                t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "LEFT") end
             end
             rail.edges[#rail.edges + 1] = t
         end

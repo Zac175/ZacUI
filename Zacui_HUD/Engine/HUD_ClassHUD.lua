@@ -159,7 +159,11 @@ local function DefaultsFor(def)
         },
         aux = {
             enabled = false,
-            x = 0, y = -400, iconSize = 30, spacing = 4,
+            -- (2026-11-19: was 0, -400 - Zac's own spot, which is under the
+            -- bottom edge of a screen 768 units tall, the game's default at
+            -- 1080p. A HUD set up before keeps the spot it has saved; a new
+            -- one starts beside the grid's first row.)
+            x = 165, y = -208, iconSize = 30, spacing = 4,
             -- (slot 2 starts off - 2026-11-19, Zac: "i want slot 2 off by
             -- default and only slot 1 showing"; a HUD already set up keeps
             -- what it has saved)
@@ -590,6 +594,19 @@ end
 -- bars etc have proper sizing"): its own once it is set on the page
 -- (pos.ranged.own), until then the swing bar's, as it always was - a HUD
 -- already set up does not change.
+-- The thin strips under the mana and power bars (2026-11-19: they were a
+-- fixed 3 and 2 units): the five-second-rule strip's height is
+-- pos.mana.fsrH, the energy tick strip's pos.power.tickH; nothing saved =
+-- 3 and 2, as before.
+local function FsrH(r)
+    local v = r and r.pos and r.pos.mana and tonumber(r.pos.mana.fsrH)
+    return (v and v >= 1) and v or 3
+end
+local function TickH(r)
+    local v = r and r.pos and r.pos.power and tonumber(r.pos.power.tickH)
+    return (v and v >= 1) and v or 2
+end
+
 local function RangedSize(r)
     local g, s = r.pos.ranged, r.pos.swing
     if type(g) == "table" and g.own then return g.w or s.w or 316, g.h or s.h or 2 end
@@ -610,6 +627,131 @@ function Engine:CreateAnchors()
     if not self.anchors.GroupHandle then self:MakeAnchor("GroupHandle", 170, 24) end
 end
 
+-- A SCALE FOR EVERY PIECE (2026-11-19, Zac: "it all needs to be
+-- customizable literally everything"). The grid and the buff row had a
+-- scale setting; now every piece of the HUD has (the bars, the debuff row,
+-- the reminders, the trinket row, the texts): <its store>.scale, nothing
+-- saved = 100 %, as before. It sits on the piece's anchor inside its
+-- unscaled holder, as the two rows' always did, so a piece grows from its
+-- centre and every saved spot stays what it is. Edit Mode's Smaller /
+-- Bigger and the Position tab's sliders change the same number.
+local PIECE_SCALE = { Main = true, AuraRow = true, DebuffRow = true, Reminders = true, Swing = true, Ranged = true,
+    Mana = true, Power = true, Combo = true, Wand = true, Texts = true, Aux = true }
+function Engine:PieceScale(cfg, e)
+    if not PIECE_SCALE[e.key] then return nil end
+    local t = e.cfg(cfg)
+    local v = type(t) == "table" and tonumber(t.scale) or 1
+    return (v and v > 0) and v or 1
+end
+-- what HUD.RegisterMover is told (nil: this piece's scale is not here)
+function Engine:PieceScaleOpt(e)
+    if not PIECE_SCALE[e.key] then return nil end
+    return HUD.ScaleOpt(function()
+        local c = self:Store()
+        local t = c and e.cfg(c)
+        return type(t) == "table" and t or nil
+    end, "scale", function() self:ApplyAnchorPositions() end)
+end
+
+-- EVERY PIECE'S OTHER SIZES, FOR EDIT MODE (2026-11-19, Zac: "everything
+-- needs full sizing width height and scaling"). What the Look tab's sliders
+-- set, per piece, as HUD.RegisterMover's opts.sizes: the same settings, the
+-- same ranges, the same call after a change. Read when Edit Mode asks, so a
+-- piece always shows what is saved now.
+function Engine:PieceSizes(e)
+    local eng = self
+    local function C() return eng:Store() end
+    local function Entry(label, lo, hi, step, fine, get, set, def)
+        return { label = label, unit = "px", min = lo, max = hi, step = step, fine = fine or 1, def = def,
+            get = function() local c = C() return c and get(c) or lo end,
+            set = function(v) local c = C() if c then set(c, v) end end }
+    end
+    local function Refresh() eng:Refresh() end
+    local function Sizes() eng:ApplySizes() end
+    -- (a bar's store is the element's own - e.cfg: pos.<bar> here,
+    -- resources.<bar> on a HUD built on this engine with its own layout)
+    local function Bar(name, hLo, hHi, defW, defH)
+        return {
+            Entry("Width", 100, 500, 10, 1, function(c) return e.cfg(c).w or defW end,
+                function(c, v) e.cfg(c).w = v Sizes() end, defW),
+            Entry("Height", hLo, hHi, 1, 1, function(c) return e.cfg(c).h or defH end,
+                function(c, v) e.cfg(c).h = v Sizes() end, defH),
+        }
+    end
+    local function Icons(get, lo, hi, apply, def, spHi, defSp)
+        return {
+            Entry("Icon size", lo, hi, 1, 1, function(c) return get(c).iconSize or def end,
+                function(c, v) get(c).iconSize = v apply() end, def),
+            Entry("Spacing", 0, spHi, 1, 1, function(c) return get(c).spacing or defSp end,
+                function(c, v) get(c).spacing = v Refresh() end, defSp),
+        }
+    end
+    local k = e.key
+    if k == "Main" then
+        return function()
+            return {
+                Entry("Row 1 icons", 16, 48, 1, 1, function(c) return c.mainRow.rows[1].w end,
+                    function(c, v) local r = c.mainRow.rows[1] r.w, r.h = v, v Refresh() end, 30),
+                Entry("Row 2+ icons", 16, 48, 1, 1, function(c) return c.mainRow.rows[2].w end,
+                    function(c, v)
+                        local rows = c.mainRow.rows
+                        rows[2].w, rows[2].h = v, v
+                        rows[3].w, rows[3].h = v, v
+                        Refresh()
+                    end, 25),
+                Entry("Spacing", 0, 12, 1, 1, function(c) return c.mainRow.spacing end,
+                    function(c, v) c.mainRow.spacing = v Refresh() end, 4),
+            }
+        end
+    elseif k == "AuraRow" then
+        return function() return Icons(function(c) return c.auraRow end, 14, 48, Sizes, 25, 12, 4) end
+    elseif k == "DebuffRow" then
+        return function() return Icons(function(c) return c.debuffRow end, 14, 48, Sizes, 26, 12, 4) end
+    elseif k == "Reminders" then
+        return function() return Icons(function(c) return c.reminders end, 20, 64, Sizes, 40, 16, 6) end
+    elseif k == "Aux" then
+        return function() return Icons(function(c) return c.aux end, 16, 56, Refresh, 30, 12, 4) end
+    elseif k == "Mana" then
+        return function() return Bar("mana", 2, 16, 234, 4) end
+    elseif k == "Power" then
+        return function() return Bar("power", 2, 16, 234, 6) end
+    elseif k == "Swing" then
+        return function() return Bar("swing", 1, 12, 316, 2) end
+    elseif k == "Wand" then
+        return function() return Bar("wand", 2, 16, 300, 8) end
+    elseif k == "Ranged" then
+        -- (its own size from the first change; until then the swing bar's)
+        return function()
+            local function Own(c)
+                local g = c.resources.pos.ranged
+                if not g.own then g.w, g.h = RangedSize(c.resources) g.own = true end
+                return g
+            end
+            return {
+                Entry("Width", 100, 500, 10, 1, function(c) return (RangedSize(c.resources)) end,
+                    function(c, v) Own(c).w = v Sizes() end),
+                Entry("Height", 1, 12, 1, 1, function(c) return (select(2, RangedSize(c.resources))) end,
+                    function(c, v) Own(c).h = v Sizes() end),
+            }
+        end
+    elseif k == "Texts" then
+        return function()
+            return { Entry("Text size", 8, 48, 1, 1, function(c) return e.cfg(c).size or 20 end,
+                function(c, v) e.cfg(c).size = v Sizes() end, 20) }
+        end
+    elseif k == "Combo" then
+        return function()
+            return {
+                Entry("Point size", 6, 20, 1, 1, function(c) return c.resources.pos.combo.size end,
+                    function(c, v) c.resources.pos.combo.size = v Refresh() end, 10),
+                Entry("Spacing", 0, 12, 1, 1, function(c) return c.resources.pos.combo.spacing end,
+                    function(c, v) c.resources.pos.combo.spacing = v Refresh() end, 4),
+            }
+        end
+    end
+    return nil
+end
+
 function Engine:ApplyAnchorPositions()
     if not self.anchors.Main then return end
     local cfg = self:Store()
@@ -619,8 +761,11 @@ function Engine:ApplyAnchorPositions()
         HUD.PlaceAnchor(e.mover, self.holders[e.key], e.cfg(cfg))
     end
     if cfg.group then HUD.PlaceAnchor(self.def.prefix .. "Group", self.holders.GroupHandle, cfg.group) end
-    self.anchors.Main:SetScale(cfg.mainRow.scale or 1)
-    self.anchors.AuraRow:SetScale(cfg.auraRow.scale or 1)
+    for _, e in ipairs(self:Elements()) do
+        local k = self:PieceScale(cfg, e)
+        local a = k and self.anchors[e.key]
+        if a then a:SetScale(k) end
+    end
     if self.V2Positions then self:V2Positions(cfg) end
 end
 
@@ -632,8 +777,13 @@ function Engine:RegisterMovers()
     end
     local members = {}
     local label = self.def.label
+    -- (each piece's own scale: Edit Mode's Smaller / Bigger changes the
+    -- same number the Position tab shows)
     for _, e in ipairs(self:Elements()) do
-        HUD.RegisterMover(e.mover, label .. " " .. e.label, self.holders[e.key], e.cfg(cfg))
+        local sc = self:PieceScaleOpt(e)
+        local sizes = self:PieceSizes(e)
+        HUD.RegisterMover(e.mover, label .. " " .. e.label, self.holders[e.key], e.cfg(cfg),
+            (sc or sizes) and { scale = sc, sizes = sizes } or nil)
         members[#members + 1] = { key = e.mover, holder = self.holders[e.key] }
     end
     cfg.group = cfg.group or { x = cfg.mainRow.x or 0, y = (cfg.mainRow.y or -208) + 50 }
@@ -780,7 +930,7 @@ function Engine:BuildBars()
         b:Hide()
         self.manaBar = b
 
-        local f = W.CreateBar(self.anchors.Mana, { width = r.pos.mana.w, height = 3,
+        local f = W.CreateBar(self.anchors.Mana, { width = r.pos.mana.w, height = FsrH(r),
             barColor = self:Col("fsr") })
         f:SetFrameStrata(HUD_STRATA)
         f:SetPoint("TOP", b, "BOTTOM", 0, -1)
@@ -844,7 +994,7 @@ function Engine:BuildBars()
         b:Hide()
         self.powerBar = b
 
-        local t = W.CreateBar(self.anchors.Power, { width = r.pos.power.w, height = 2,
+        local t = W.CreateBar(self.anchors.Power, { width = r.pos.power.w, height = TickH(r),
             barColor = self:Col("tick") })
         t:SetFrameStrata(HUD_STRATA)
         t:SetPoint("TOP", b, "BOTTOM", 0, -1)
@@ -1293,10 +1443,11 @@ function Engine:ApplySizes()
     end
     size(self.swingBar, "Swing", r.pos.swing.w or 316, r.pos.swing.h or 2)
     size(self.rangedBar, "Ranged", RangedSize(r))
-    size(self.manaBar, "Mana", r.pos.mana.w or 234, r.pos.mana.h or 4, 6)
-    if self.fsrBar then self.fsrBar:SetSize(r.pos.mana.w or 234, 3) end
-    size(self.powerBar, "Power", r.pos.power.w or 234, r.pos.power.h or 6, 4)
-    if self.tickBar then self.tickBar:SetSize(r.pos.power.w or 234, 2) end
+    -- (the piece's box takes in the strip under the bar: 3 + 3 and 2 + 2 as before)
+    size(self.manaBar, "Mana", r.pos.mana.w or 234, r.pos.mana.h or 4, FsrH(r) + 3)
+    if self.fsrBar then self.fsrBar:SetSize(r.pos.mana.w or 234, FsrH(r)) end
+    size(self.powerBar, "Power", r.pos.power.w or 234, r.pos.power.h or 6, TickH(r) + 2)
+    if self.tickBar then self.tickBar:SetSize(r.pos.power.w or 234, TickH(r)) end
     size(self.wandBar, "Wand", r.pos.wand.w or 300, r.pos.wand.h or 8)
     for _, fs in pairs(self.textFS or {}) do HUD.ApplyFont(fs, r.pos.texts.size or 20, "OUTLINE", "alert") end
     if self.V2ApplySizes then self:V2ApplySizes(cfg) end
@@ -1685,7 +1836,8 @@ function Engine:LayoutSample(cfg)
         Combo = r.combo, Wand = r.wand,
         Aux = AuxOn(self, cfg),
     }
-    local scale = { Main = cfg.mainRow.scale or 1, AuraRow = cfg.auraRow.scale or 1 }
+    local scale = {}
+    for _, e in ipairs(self:Elements()) do scale[e.key] = self:PieceScale(cfg, e) end
     if self.V2SampleOn then self:V2SampleOn(on, scale, cfg) end
     local pieces = {}
     for _, e in ipairs(self:Elements()) do
@@ -1882,11 +2034,25 @@ function Engine:Tab_Look(L, cfg)
         SliderPair(L,
             { "Mana bar width", 100, 500, r.pos.mana.w, function(v) r.pos.mana.w = v eng:ApplySizes() end, Px },
             { "Mana bar height", 2, 16, r.pos.mana.h, function(v) r.pos.mana.h = v eng:ApplySizes() end, Px })
+        if bars.fsr then
+            SliderPair(L,
+                { "Five-second rule strip height", 1, 10, FsrH(r), function(v)
+                    r.pos.mana.fsrH = (v ~= 3) and v or nil
+                    eng:ApplySizes()
+                end, Px })
+        end
     end
     if bars.power then
         SliderPair(L,
             { "Power bar width", 100, 500, r.pos.power.w, function(v) r.pos.power.w = v eng:ApplySizes() end, Px },
             { "Power bar height", 2, 16, r.pos.power.h, function(v) r.pos.power.h = v eng:ApplySizes() end, Px })
+        if bars.tick then
+            SliderPair(L,
+                { "Energy tick strip height", 1, 10, TickH(r), function(v)
+                    r.pos.power.tickH = (v ~= 2) and v or nil
+                    eng:ApplySizes()
+                end, Px })
+        end
     end
     if bars.swing then
         SliderPair(L,
@@ -1964,6 +2130,23 @@ function Engine:Tab_Position(L, cfg)
     HUD.ScaleSlider(L, "Cooldown grid scale", cfg.mainRow, "scale", function() eng:ApplyAnchorPositions() end)
     if self.def.buffRow and #self.def.buffRow > 0 then
         HUD.ScaleSlider(L, "Active buff row scale", cfg.auraRow, "scale", function() eng:ApplyAnchorPositions() end)
+    end
+    -- (2026-11-19) every other piece's scale, in the order the pieces are listed
+    for _, e in ipairs(self:Elements()) do
+        if e.key ~= "Main" and e.key ~= "AuraRow" and self:PieceScale(cfg, e) then
+            local t = e.cfg(cfg)
+            if type(t) == "table" then
+                -- ("Target Debuffs" -> "Target debuffs scale", like the two above;
+                -- a word in capitals - FSR, MP5 - stays as it is)
+                local n = 0
+                local name = tostring(e.label):gsub("%a[%w]*", function(w)
+                    n = n + 1
+                    if n == 1 or w == w:upper() then return w end
+                    return w:lower()
+                end)
+                HUD.ScaleSlider(L, name .. " scale", t, "scale", function() eng:ApplyAnchorPositions() end)
+            end
+        end
     end
     if self.V2Tab_PositionCard then self:V2Tab_PositionCard(L, cfg) end
     L:EndCard()

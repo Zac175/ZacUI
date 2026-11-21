@@ -125,7 +125,8 @@ function Engine:V2EnsureBars()
     self:MakeAnchor("BuffBars", Num(b, "width"), Num(b, "height"))
     local key = self.def.prefix .. "BuffBars"
     HUD.PlaceAnchor(key, self.holders.BuffBars, BARS_POS)
-    HUD.RegisterMover(key, self.def.label .. " Buff bars", self.holders.BuffBars, BARS_POS)
+    HUD.RegisterMover(key, self.def.label .. " Buff bars", self.holders.BuffBars, BARS_POS,
+        { scale = self:PieceScaleOpt({ key = "BuffBars" }) })
     self.v2bars = self.v2bars or {}
 end
 
@@ -423,6 +424,16 @@ function Engine:V2HideAll()
     if Base.V2HideAll then Base.V2HideAll(self) end
     for _, f in pairs(self.v2bars or {}) do f:Hide() end
     if self.v2barActive then wipe(self.v2barActive) end
+end
+
+-- (the buff bars' own scale, as HUD.RegisterMover is told it)
+local BasePieceScaleOpt = Engine.PieceScaleOpt
+function Engine:PieceScaleOpt(e)
+    if e.key == "BuffBars" then
+        return HUD.ScaleOpt(function(create) return BB(self:Store(), create) end, "scale",
+            function() self:ApplyAnchorPositions() end)
+    end
+    return BasePieceScaleOpt(self, e)
 end
 
 function Engine:V2Positions(cfg)

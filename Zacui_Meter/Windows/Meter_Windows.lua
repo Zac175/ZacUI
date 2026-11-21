@@ -1126,6 +1126,35 @@ local function LayoutRows(win)
 end
 Meter.LayoutRows = LayoutRows
 
+-- (2026-11-20) THE SCALE A WINDOW IS DRAWN AT: its own Scale times the
+-- pieces' one scale (ns.Screen, "Size of the pieces on screen" - 1 until
+-- its owner moves that slider, so nothing differs). A window's spot is in
+-- its own units, so at 80% it is smaller AND keeps its place in the
+-- layout, like every other piece. Nothing saved is rewritten.
+function Meter.WinScale(s)
+    local own = (type(s) == "table" and tonumber(s.scale)) or 1
+    if own <= 0 then own = 1 end
+    local S = ns.Screen
+    local k = (S and S.Scale and S.Scale()) or 1
+    return own * k
+end
+
+-- (2026-11-20) ONE WAY TO CHANGE A WINDOW'S SCALE. A window's spot is kept
+-- in its own scaled units, so a new scale alone carried the window across
+-- the screen (its header menu and the Position tab both did). The spot is
+-- rewritten here so the corner it hangs from stays where it is.
+-- -> true when the scale changed
+function Meter.SetWindowScale(s, v)
+    v = tonumber(v)
+    if type(s) ~= "table" or not v or v <= 0 then return false end
+    local old = tonumber(s.scale) or 1
+    if old <= 0 then old = 1 end
+    if math.abs(old - v) < 0.0005 then return false end
+    if tonumber(s.x) and tonumber(s.y) then s.x, s.y = s.x * old / v, s.y * old / v end
+    s.scale = v
+    return true
+end
+
 -- ============================================================
 -- REFRESH - the data pass. Sort a scratch list, feed the rows.
 -- ============================================================
@@ -1484,6 +1513,21 @@ local function FlashLabel(win, text)
 end
 Meter.FlashLabel = FlashLabel
 
+
+-- (2026-11-20) the pieces' one scale changed: every window at its new size
+-- the open world map lies over the meter windows it covers (UIF_Movers: UNDER THE MAP)
+if ns.UnderMap and ns.UnderMap.Add then
+    ns.UnderMap.Add(function(each)
+        for _, win in ipairs(Meter.windowFrames or {}) do
+            if win.frame then each(win.frame) end
+        end
+    end)
+end
+if ns.Screen and ns.Screen.OnChange then
+    ns.Screen.OnChange(function()
+        if Meter.enabled and Meter.RestyleAll then Meter.RestyleAll() end
+    end)
+end
 
 if ns.OnSettingsChanged and ns.Coalesce then
     local soon = ns.Coalesce(function()

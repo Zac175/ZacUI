@@ -1241,6 +1241,7 @@ local function ReleaseNow(w)
     w:SetParent(UIParent)
     w:SetAlpha(1)
     w:SetScale(1)
+    w.baseScale, w.animS = nil, nil
     w.inst, w.state, w.cloneId, w.D, w.props, w.anim, w.custom, w.condActive, w.condKey = nil, nil, nil, nil, nil, nil, nil, nil, nil
     w.forcedColor, w.nextCheck, w.lastCond, w.lastW, w.lastH, w.placedUnit, w.overLimit = nil, nil, nil, nil, nil, nil, nil
     w.cdStart, w.cdDur, w.cdKey, w.place, w.animX, w.animY = nil, nil, nil, nil, nil, nil
@@ -1475,7 +1476,13 @@ end
 local function ApplyAnimFrame(w, alphaMul, scale, dx, dy)
     local baseAlpha = tonumber(w.props and w.props.alpha) or tonumber(w.D.alpha) or 1
     w:SetAlpha(baseAlpha * alphaMul)
-    if scale and scale > 0 and abs((w:GetScale() or 1) - scale) > 0.001 then w:SetScale(scale) end
+    -- (its animation's scale on top of the player's own size for the spot
+    -- it hangs on - w.baseScale, RM_Anchors: THE PLAYER'S OWN SIZE)
+    if scale and scale > 0 then
+        w.animS = scale
+        local s = scale * (w.baseScale or 1)
+        if abs((w:GetScale() or 1) - s) > 0.001 then w:SetScale(s) end
+    end
     if (dx or 0) ~= (w.animX or 0) or (dy or 0) ~= (w.animY or 0) then
         w.animX, w.animY = dx or 0, dy or 0
         if RM.Layout and RM.Layout.Nudge then RM.Layout.Nudge(w) end
@@ -1915,6 +1922,37 @@ function RM.Release(inst)
         ReleaseNow(w)
     end
     W.HideAllGlows(inst)
+end
+
+-- THE PLAYER'S OWN SIZE on a widget (Edit Mode's Smaller / Bigger on the
+-- anchor or the group it hangs on): its base scale, under whatever its
+-- animation is doing right now. 1 (nothing saved) leaves it as the pack made it.
+function W.SetBase(w, base)
+    base = tonumber(base) or 1
+    if base <= 0 or abs(base - 1) < 0.001 then base = 1 end
+    w.baseScale = (base ~= 1) and base or nil
+    local s = (w.animS or 1) * base
+    if abs((w:GetScale() or 1) - s) > 0.001 then w:SetScale(s) end
+end
+-- every widget on screen, for whoever has to look at them all (the open
+-- world map lies over the ones it covers - UIF_Movers: UNDER THE MAP)
+function W.EachShown(fn)
+    for w in pairs(shown) do fn(w) end
+end
+if ns.UnderMap and ns.UnderMap.Add then
+    ns.UnderMap.Add(function(each)
+        for w in pairs(shown) do
+            -- (one on a raid frame or a nameplate goes where that goes)
+            if w.GetParent and w:GetParent() == UIParent then each(w) end
+        end
+    end)
+end
+
+-- every widget on screen takes its base again (a size was changed)
+function W.Rebase(baseOf)
+    for w in pairs(shown) do
+        if w.inst and not w.finishing then W.SetBase(w, baseOf(w)) end
+    end
 end
 
 -- every widget of a unit, restyled (the config page changed an option)

@@ -435,12 +435,12 @@ local function Guides(L)
     L.gx = L:CreateTexture(nil, "OVERLAY", nil, 6)
     L.gx:SetTexture(FLAT)
     L.gx:SetVertexColor(c.r, c.g, c.b, GUIDE_ALPHA)
-    L.gx:SetWidth(1)
+    L.gx:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(L.gx, "LEFT") end
     L.gx:Hide()
     L.gy = L:CreateTexture(nil, "OVERLAY", nil, 6)
     L.gy:SetTexture(FLAT)
     L.gy:SetVertexColor(c.r, c.g, c.b, GUIDE_ALPHA)
-    L.gy:SetHeight(1)
+    L.gy:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(L.gy, "TOP") end
     L.gy:Hide()
     return L.gx, L.gy
 end
@@ -542,9 +542,9 @@ local function NewHandle(L)
         t:SetTexture(FLAT)
         t._zSide = side
         if side == "TOP" or side == "BOTTOM" then
-            t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1)
+            t:SetPoint(side .. "LEFT") t:SetPoint(side .. "RIGHT") t:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "TOP") end
         else
-            t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1)
+            t:SetPoint("TOP" .. side) t:SetPoint("BOTTOM" .. side) t:SetWidth(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(t, "LEFT") end
         end
         t:Hide()
         h.edges[#h.edges + 1] = t

@@ -38,12 +38,123 @@ function LR.Cfg()
     local c = ZacUIDB and ZacUIDB.lootRoll
     return type(c) == "table" and c or EMPTY
 end
+
+-- TWO LOOKS (2026-11-20, Zac: "improve the loot frames that come up to
+-- need/greed/pass just make them look better overall"). lootRoll.style:
+--   nil / "compact"  the bars as they always were: 180 x 16, the timer
+--                    filling the body, the name on it;
+--   "card"           a taller card: 250 x 30, the item's name over its
+--                    bind tag and the time left, a wash of the item's
+--                    quality colour from the icon, the timer a thin strip
+--                    along the foot, bigger roll buttons on plates, the
+--                    card fading in and its icon popping.
+-- A new install starts on the cards (Boot_Events writes the style once);
+-- an existing one keeps its bars until Screen > Loot rolls > Look says
+-- otherwise. Everything else on that page works on both: under a look,
+-- "nothing saved" is that look's own numbers (LR.Defaults).
+LR.STYLES = {
+    { id = "compact", label = "Compact bars" },
+    { id = "card",    label = "Cards" },
+}
+LR.CARD = { width = 250, height = 30, gap = 6, strip = 3 }
+LR.CARD_ANIM = {
+    show = { style = "fade", duration = 0.20, delay = 0, easing = "easeOutQuad" },
+    icon = { style = "pop", duration = 0.30, delay = 0.03, easing = "easeOutBack" },
+    hide = { style = "fade", duration = 0.15, delay = 0, easing = "easeOutQuad" },
+}
+-- (a bar's own: none, as always - what its pickers show until one is set)
+local NO_ANIM = { style = "none", duration = 0.2, delay = 0, easing = "easeOutQuad" }
+LR.BAR_ANIM = { show = NO_ANIM, icon = NO_ANIM, hide = NO_ANIM }
+function LR.IsCard(cfg)
+    cfg = cfg or LR.Cfg()
+    return cfg.style == "card"
+end
+function LR.Defaults(cfg) return LR.IsCard(cfg) and LR.CARD or LR.D end
+-- EVERY PART IS A SETTING (2026-11-20, Zac: "fully customizable"). A look
+-- is only what its parts are with nothing saved; each can be set on
+-- either look (Screen > Loot rolls > Look):
+--   timer       "fill" the whole body / "strip" along the foot / "none"
+--   strip       the strip's height
+--   timerAlpha  how strong the timer's colour is
+--   wash        the quality colour washing in from the icon, washAlpha
+--   plates      a faint plate behind each roll button
+--   buttonGap   between the roll buttons (buttonSize: nil = from the height)
+--   edge        "quality" / "dim" (quality, quieter) / "plain" (ZacUI's
+--               border) / "none"
+--   bgAlpha     the ground
+-- and, the same on both: spark (on), nameQuality (the name in its quality
+-- colour, on).
+LR.LOOKS = {
+    compact = { timer = "fill", strip = 3, timerAlpha = 0.45, wash = false, washAlpha = 0.30, plates = false,
+                buttonGap = 3, edge = "quality", bgAlpha = 0.92 },
+    card    = { timer = "strip", strip = 3, timerAlpha = 0.95, wash = true, washAlpha = 0.30, plates = true,
+                buttonGap = 6, edge = "dim", bgAlpha = 0.92 },
+}
+LR.TIMERS = { { value = "fill", text = "Fills the bar" }, { value = "strip", text = "A strip along the foot" },
+              { value = "none", text = "Hidden" } }
+LR.EDGES = { { value = "quality", text = "The item's quality colour" }, { value = "dim", text = "Quality colour, quieter" },
+             { value = "plain", text = "ZacUI's border" }, { value = "none", text = "None" } }
+function LR.LookDefaults(cfg) return LR.IsCard(cfg) and LR.LOOKS.card or LR.LOOKS.compact end
+function LR.Part(cfg, key)
+    cfg = cfg or LR.Cfg()
+    local v = cfg[key]
+    if v == nil then v = LR.LookDefaults(cfg)[key] end
+    return v
+end
+-- the roll buttons' size: set, or from the bar's height (as always)
+function LR.AutoButton(cfg)
+    local H = cfg.height
+    if H == nil then H = LR.Defaults(cfg).height end
+    return LR.IsCard(cfg) and math.max(16, H - 10) or math.max(14, H - 4)
+end
+function LR.ButtonSize(cfg)
+    cfg = cfg or LR.Cfg()
+    return tonumber(cfg.buttonSize) or LR.AutoButton(cfg)
+end
+-- an animation: the one picked, else the look's own (a bar has none)
+function LR.AnimOf(cfg, key)
+    cfg = cfg or LR.Cfg()
+    local a = cfg[key .. "Anim"]
+    if type(a) == "table" then return a end
+    return LR.IsCard(cfg) and LR.CARD_ANIM[key] or nil
+end
+-- the time left is written on a card unless switched off, on a bar only
+-- when switched on (as always)
+function LR.ShowsTime(cfg)
+    cfg = cfg or LR.Cfg()
+    if LR.IsCard(cfg) then return cfg.showTime ~= false end
+    return cfg.showTime and true or false
+end
 local function V(cfg, k)
     local v = cfg[k]
-    if v == nil then v = LR.D[k] end
+    if v == nil then v = LR.Defaults(cfg)[k] end
     return v
 end
 LR.V = V
+-- where each piece hangs with nothing saved, per look (what the page's
+-- anchor pickers show as the default)
+LR.ANCHORS = {
+    compact = {
+        name = { point = "LEFT", relPoint = "LEFT", x = 4, y = 0, label = "The bar" },
+        time = { point = "RIGHT", relPoint = "LEFT", x = -4, y = 0, label = "The bind tag" },
+        bind = { point = "RIGHT", relPoint = "LEFT", x = -4, y = 0, label = "The need button" },
+        buttons = { point = "RIGHT", relPoint = "RIGHT", x = -3, y = 0, label = "The bar" },
+        icon = { point = "RIGHT", relPoint = "LEFT", x = -2, y = 0, label = "The bar" },
+        count = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = 2, y = -2, label = "Its roll button" },
+        stack = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -1, y = 1, label = "The item icon" },
+    },
+    card = {
+        -- (everything sits one up from the middle: the timer strip has the foot)
+        name = { point = "LEFT", relPoint = "LEFT", x = 8, y = 7, label = "The card" },
+        time = { point = "RIGHT", relPoint = "LEFT", x = -6, y = -5, label = "The need button" },
+        bind = { point = "LEFT", relPoint = "LEFT", x = 8, y = -5, label = "The card" },
+        buttons = { point = "RIGHT", relPoint = "RIGHT", x = -6, y = 1, label = "The card" },
+        icon = { point = "RIGHT", relPoint = "LEFT", x = -3, y = 0, label = "The card" },
+        count = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = 3, y = -3, label = "Its roll button" },
+        stack = { point = "BOTTOMRIGHT", relPoint = "BOTTOMRIGHT", x = -2, y = 2, label = "The item icon" },
+    },
+}
+function LR.AnchorDefaults(cfg) return LR.IsCard(cfg) and LR.ANCHORS.card or LR.ANCHORS.compact end
 
 -- ElvUI's texcoord surgery on Blizzard's stock dice/coin/pass art:
 -- crops the built-in ring so the glyph sits clean on a flat bar.
@@ -56,6 +167,31 @@ local ROLL_ART = {
               1.05, -0.1, 1.05, -0.1 },
 }
 local ROLL_ID = { need = 1, greed = 2, pass = 0 }
+-- THE ROLL BUTTONS' ART (2026-11-20, Zac: "should be 3d by default but
+-- have the option to be 2d"). lootRoll.rollArt:
+--   nil / "game"   the game's own dice, coin and pass art (3D), as always
+--   "flat"         ZacUI's flat glyphs (Media\Icons\roll*64: a die, a
+--                  coin, a struck ring), each in its own colour
+--                  (lootRoll.flatColors.need / .greed / .pass)
+LR.ARTS = { { value = "game", text = "The game's art (3D)" }, { value = "flat", text = "Flat (2D)" } }
+local ICON_DIR = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\"
+LR.FLAT_ART = { need = ICON_DIR .. "rollneed64", greed = ICON_DIR .. "rollgreed64", pass = ICON_DIR .. "rollpass64" }
+LR.FLAT_COLORS = {
+    need  = { r = 0.93, g = 0.88, b = 0.72 },
+    greed = { r = 0.95, g = 0.79, b = 0.30 },
+    pass  = { r = 0.88, g = 0.28, b = 0.23 },
+}
+LR.KINDS = { "need", "greed", "pass" }
+function LR.IsFlat(cfg)
+    cfg = cfg or LR.Cfg()
+    return cfg.rollArt == "flat"
+end
+function LR.FlatColor(cfg, kind)
+    cfg = cfg or LR.Cfg()
+    local c = type(cfg.flatColors) == "table" and cfg.flatColors[kind]
+    if type(c) ~= "table" then c = LR.FLAT_COLORS[kind] end
+    return c.r or 1, c.g or 1, c.b or 1
+end
 -- the texts a font can be picked for, and their fields on a bar
 local TEXT_FIELD = { name = "name", time = "timeText", bind = "bind" }
 local ROLL_TIP = { need = NEED, greed = GREED, pass = PASS }
@@ -78,7 +214,50 @@ local function RollButton_OnEnter(self)
         end
     end
     GameTooltip:Show()
+    if self._zPlate and self._zPlate:IsShown() then self._zPlate:SetColorTexture(1, 1, 1, 0.18) end
 end
+local function RollButton_OnLeave(self)
+    GameTooltip:Hide()
+    if self._zPlate then self._zPlate:SetColorTexture(1, 1, 1, 0.07) end
+end
+
+-- a roll button's art as set: the textures change only when the pick
+-- does, the flat glyph's colour on every style pass (cheap)
+local function PaintRollArt(b, cfg)
+    local kind = b._zKind
+    local flat = LR.IsFlat(cfg)
+    local want = flat and "flat" or "game"
+    if b._zArt ~= want then
+        b._zArt = want
+        local art = ROLL_ART[kind]
+        local file = flat and LR.FLAT_ART[kind] or art[1]
+        b:SetNormalTexture(file)
+        b:SetPushedTexture(file)
+        b:SetDisabledTexture(file)
+        b:SetHighlightTexture(file)
+        for _, tex in ipairs({ b:GetNormalTexture(), b:GetPushedTexture(),
+                               b:GetDisabledTexture(), b:GetHighlightTexture() }) do
+            if tex then
+                if flat then tex:SetTexCoord(0, 1, 0, 1) else tex:SetTexCoord(art[2], art[3], art[4], art[5]) end
+            end
+        end
+        local dis = b:GetDisabledTexture()
+        if dis then
+            dis:SetDesaturated(true)
+            dis:SetAlpha(0.25)
+        end
+    end
+    local r, g, bl = 1, 1, 1
+    if flat then r, g, bl = LR.FlatColor(cfg, kind) end
+    if b._zArtR ~= r or b._zArtG ~= g or b._zArtB ~= bl then
+        b._zArtR, b._zArtG, b._zArtB = r, g, bl
+        for _, tex in ipairs({ b:GetNormalTexture(), b:GetPushedTexture(),
+                               b:GetDisabledTexture(), b:GetHighlightTexture() }) do
+            if tex and tex.SetVertexColor then tex:SetVertexColor(r, g, bl) end
+        end
+    end
+end
+LR.PaintRollArt = PaintRollArt
 
 local function MakeRollButton(bar, kind)
     local art = ROLL_ART[kind]
@@ -97,13 +276,21 @@ local function MakeRollButton(bar, kind)
         dis:SetDesaturated(true)
         dis:SetAlpha(0.25)
     end
+    b._zKind, b._zArt, b._zArtR, b._zArtG, b._zArtB = kind, "game", 1, 1, 1
     b:SetMotionScriptsWhileDisabled(true)
     b:SetHitRectInsets(2, 2, 2, 2)
     b.bar = bar
     b.rolltype = ROLL_ID[kind]
     b.tiptext = ROLL_TIP[kind]
     b:SetScript("OnEnter", RollButton_OnEnter)
-    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnLeave", RollButton_OnLeave)
+    -- (the cards' look: a faint plate behind the glyph, brighter under the mouse)
+    local plate = b:CreateTexture(nil, "BACKGROUND")
+    plate:SetPoint("TOPLEFT", -2, 2)
+    plate:SetPoint("BOTTOMRIGHT", 2, -2)
+    plate:SetColorTexture(1, 1, 1, 0.07)
+    plate:Hide()
+    b._zPlate = plate
     -- live roll count, bottom-right of the glyph
     b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
     b.count:SetPoint("BOTTOMRIGHT", 2, -2)
@@ -123,7 +310,15 @@ function LR.NewBar(parent, name)
     local bg = bar:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(w.r, w.g, w.b, 0.92)
+    bar._zBg = bg
     AddPixelBorder(bar)
+    -- (the cards' look: the item's quality colour washing in from the icon)
+    local wash = bar:CreateTexture(nil, "BACKGROUND", nil, 1)
+    wash:SetPoint("TOPLEFT", 1, -1)
+    wash:SetPoint("BOTTOMRIGHT", -1, 1)
+    wash:SetTexture([[Interface\Buttons\WHITE8X8]])
+    wash:Hide()
+    bar._zWash = wash
 
     -- timer fills the whole body, quality-tinted on show
     local status = CreateFrame("StatusBar", nil, bar)
@@ -218,12 +413,45 @@ end
 -- fonts. Cheap; call it on a change, never per frame.
 function LR.Style(bar, cfg)
     cfg = cfg or LR.Cfg()
+    local card = LR.IsCard(cfg)
+    local AD = LR.AnchorDefaults(cfg)
     local W, H = V(cfg, "width"), V(cfg, "height")
-    local BTN = math.max(14, H - 4)
+    local BTN = LR.ButtonSize(cfg)
     local A = cfg.anchors or EMPTY
+    local plates = LR.Part(cfg, "plates") and true or false
     bar:SetSize(W, H)
     bar.button:SetSize(H, H)
-    for _, k in ipairs({ "pass", "greed", "need" }) do bar[k]:SetSize(BTN, BTN) end
+    for _, k in ipairs({ "pass", "greed", "need" }) do
+        bar[k]:SetSize(BTN, BTN)
+        bar[k]._zPlate:SetShown(plates)
+        PaintRollArt(bar[k], cfg)
+    end
+    -- the roll buttons' own spacing (3 apart on a bar, as always)
+    local between = tonumber(LR.Part(cfg, "buttonGap")) or 3
+    do
+        local w = Col("windowBg")
+        bar._zBg:SetColorTexture(w.r, w.g, w.b, tonumber(LR.Part(cfg, "bgAlpha")) or 0.92)
+    end
+    bar.greed:ClearAllPoints()
+    bar.greed:SetPoint("RIGHT", bar.pass, "LEFT", -between, 0)
+    bar.need:ClearAllPoints()
+    bar.need:SetPoint("RIGHT", bar.greed, "LEFT", -between, 0)
+    -- the timer: the whole body of a bar, a strip along a card's foot
+    local timer = LR.Part(cfg, "timer")
+    bar.status:ClearAllPoints()
+    if timer == "strip" then
+        bar.status:SetPoint("BOTTOMLEFT", 1, 1)
+        bar.status:SetPoint("BOTTOMRIGHT", -1, 1)
+        bar.status:SetHeight(math.max(1, math.min(H - 2, tonumber(LR.Part(cfg, "strip")) or 3)))
+    else
+        bar.status:SetPoint("TOPLEFT", 1, -1)
+        bar.status:SetPoint("BOTTOMRIGHT", -1, 1)
+    end
+    -- (a hidden timer still counts: only its paint goes)
+    bar.status:SetAlpha(timer == "none" and 0 or 1)
+    bar.status.spark:SetShown(cfg.spark ~= false)
+    bar._zWash:SetShown(LR.Part(cfg, "wash") and true or false)
+    bar._zLRCard = card
     if cfg.texture then
         bar.status:SetStatusBarTexture(ns.ResolveBarTexture(cfg.texture))
         bar._zLRTex = true
@@ -233,33 +461,50 @@ function LR.Style(bar, cfg)
     end
     local to = bar._zAnchorTo
     local d
+    local showTime = LR.ShowsTime(cfg)
     d = Def(bar, "icon")
-    d.point, d.to, d.relPoint, d.x, d.y = "RIGHT", bar, "LEFT", -2, 0
+    d.point, d.to, d.relPoint, d.x, d.y = "RIGHT", bar, "LEFT", AD.icon.x, 0
     ns.ApplyAnchor(bar.button, A.icon, d, to)
     d = Def(bar, "buttons")
-    d.point, d.to, d.relPoint, d.x, d.y = "RIGHT", bar, "RIGHT", -3, 0
+    d.point, d.to, d.relPoint, d.x, d.y = "RIGHT", bar, "RIGHT", AD.buttons.x, AD.buttons.y
     ns.ApplyAnchor(bar.pass, A.buttons, d, to)
-    d = Def(bar, "bind")
-    d.point, d.to, d.relPoint, d.x, d.y = "RIGHT", bar.need, "LEFT", -4, 0
-    ns.ApplyAnchor(bar.bind, A.bind, d, to)
-    d = Def(bar, "time")
-    d.point, d.to, d.relPoint, d.x, d.y, d.justify = "RIGHT", bar.bind, "LEFT", -4, 0, "RIGHT"
-    ns.ApplyAnchor(bar.timeText, A.time, d, to)
-    bar.timeText:SetShown(cfg.showTime and true or false)
-    d = Def(bar, "name")
-    d.point, d.to, d.relPoint, d.x, d.y, d.justify = "LEFT", bar, "LEFT", 4, 0, "LEFT"
-    d.point2, d.to2, d.relPoint2, d.x2, d.y2 = "RIGHT", cfg.showTime and bar.timeText or bar.bind, "LEFT", -2, 0
-    local _, two = ns.ApplyAnchor(bar.name, A.name, d, to)
-    if two == false then bar.name:SetWidth(math.max(40, W - 3 * BTN - 30)) end
+    if card then
+        -- two lines: the name over the bind tag (left) and the time left (right)
+        d = Def(bar, "bind")
+        d.point, d.to, d.relPoint, d.x, d.y, d.justify = "LEFT", bar, "LEFT", AD.bind.x, AD.bind.y, "LEFT"
+        ns.ApplyAnchor(bar.bind, A.bind, d, to)
+        d = Def(bar, "time")
+        d.point, d.to, d.relPoint, d.x, d.y, d.justify = "RIGHT", bar.need, "LEFT", AD.time.x, AD.time.y, "RIGHT"
+        ns.ApplyAnchor(bar.timeText, A.time, d, to)
+        bar.timeText:SetShown(showTime)
+        d = Def(bar, "name")
+        d.point, d.to, d.relPoint, d.x, d.y, d.justify = "LEFT", bar, "LEFT", AD.name.x, AD.name.y, "LEFT"
+        d.point2, d.to2, d.relPoint2, d.x2, d.y2 = "RIGHT", bar.need, "LEFT", -6, AD.name.y
+        local _, two = ns.ApplyAnchor(bar.name, A.name, d, to)
+        if two == false then bar.name:SetWidth(math.max(40, W - 3 * BTN - 2 * between - 26)) end
+    else
+        d = Def(bar, "bind")
+        d.point, d.to, d.relPoint, d.x, d.y, d.justify = "RIGHT", bar.need, "LEFT", -4, 0, nil
+        ns.ApplyAnchor(bar.bind, A.bind, d, to)
+        d = Def(bar, "time")
+        d.point, d.to, d.relPoint, d.x, d.y, d.justify = "RIGHT", bar.bind, "LEFT", -4, 0, "RIGHT"
+        ns.ApplyAnchor(bar.timeText, A.time, d, to)
+        bar.timeText:SetShown(showTime)
+        d = Def(bar, "name")
+        d.point, d.to, d.relPoint, d.x, d.y, d.justify = "LEFT", bar, "LEFT", 4, 0, "LEFT"
+        d.point2, d.to2, d.relPoint2, d.x2, d.y2 = "RIGHT", showTime and bar.timeText or bar.bind, "LEFT", -2, 0
+        local _, two = ns.ApplyAnchor(bar.name, A.name, d, to)
+        if two == false then bar.name:SetWidth(math.max(40, W - 3 * BTN - 30)) end
+    end
     for _, k in ipairs({ "pass", "greed", "need" }) do
         local b = bar[k]
         d = Def(bar, "count" .. k)
-        d.point, d.to, d.relPoint, d.x, d.y = "BOTTOMRIGHT", b, "BOTTOMRIGHT", 2, -2
+        d.point, d.to, d.relPoint, d.x, d.y = "BOTTOMRIGHT", b, "BOTTOMRIGHT", AD.count.x, AD.count.y
         ns.ApplyAnchor(b.count, A.count, d, to)
         b.count:SetShown(cfg.showCounts ~= false)
     end
     d = Def(bar, "stack")
-    d.point, d.to, d.relPoint, d.x, d.y = "BOTTOMRIGHT", bar.button, "BOTTOMRIGHT", -1, 1
+    d.point, d.to, d.relPoint, d.x, d.y = "BOTTOMRIGHT", bar.button, "BOTTOMRIGHT", AD.stack.x, AD.stack.y
     ns.ApplyAnchor(bar.button.stack, A.stack, d, to)
     Font(bar, "name", cfg.nameFont, FONT_SHADOW)
     Font(bar, "time", cfg.timeFont, FONT_SHADOW)
@@ -305,10 +550,37 @@ function LR.Fill(bar, item, cfg)
     local r, g, b = 0.8, 0.8, 0.8
     if qc then r, g, b = qc.r, qc.g, qc.b end
     bar.name:SetText(item.name)
-    bar.name:SetTextColor(r, g, b)
-    TintBorder(bar, r, g, b, 1)
+    if cfg.nameQuality == false then
+        local t = Col("text")
+        bar.name:SetTextColor(t.r, t.g, t.b)
+    else
+        bar.name:SetTextColor(r, g, b)
+    end
     TintBorder(bar.button, r, g, b, 1)
-    bar.status:SetStatusBarColor(r, g, b, 0.45)
+    -- the edge: the quality colour (a bar), quieter (a card), ZacUI's, none
+    local edge = LR.Part(cfg, "edge")
+    if edge == "dim" then
+        TintBorder(bar, r * 0.55, g * 0.55, b * 0.55, 1)
+    elseif edge == "plain" then
+        local bd = Col("border")
+        TintBorder(bar, bd.r, bd.g, bd.b, 1)
+    elseif edge == "none" then
+        TintBorder(bar, r, g, b, 0)
+    else
+        TintBorder(bar, r, g, b, 1)
+    end
+    bar.status:SetStatusBarColor(r, g, b, tonumber(LR.Part(cfg, "timerAlpha")) or 0.45)
+    if LR.Part(cfg, "wash") then
+        -- the quality colour washing in from the icon
+        local wash = bar._zWash
+        local wa = tonumber(LR.Part(cfg, "washAlpha")) or 0.30
+        local okG = CreateColor and wash.SetGradient
+            and pcall(wash.SetGradient, wash, "HORIZONTAL", CreateColor(r, g, b, wa), CreateColor(r, g, b, 0))
+        if not okG and wash.SetGradientAlpha then
+            okG = pcall(wash.SetGradientAlpha, wash, "HORIZONTAL", r, g, b, wa, r, g, b, 0)
+        end
+        if not okG then wash:SetVertexColor(r, g, b, wa / 3) end
+    end
     bar.status.spark:SetColorTexture(r, g, b, 0.9)
 
     local tag = item.bind and BIND_TAG[item.bind]
@@ -330,7 +602,7 @@ local TIME_VALUES, TIME_KINDS = {}, { time = "time" }
 -- for a text nobody sees)
 function LR.PaintTime(bar, left, cfg)
     cfg = cfg or LR.Cfg()
-    if not cfg.showTime then return end
+    if not LR.ShowsTime(cfg) then return end
     local f = cfg.formats and cfg.formats.time
     local ms = math.floor((left or 0) * 1000)
     if bar._zLRTimeMs == ms and bar._zLRTimeF == f then return end
@@ -352,10 +624,13 @@ function LR.Place(bars, holder, cfg)
     cfg = cfg or LR.Cfg()
     local lay = type(cfg.layout) == "table" and cfg.layout or EMPTY
     local W, H = V(cfg, "width"), V(cfg, "height")
-    local GAP = tonumber(lay.spacingY) or LR.D.gap
+    local GAP = tonumber(lay.spacingY) or LR.Defaults(cfg).gap
     local up = lay.grow == "UP"
     holder:SetSize(W + H + 2, H)
+    local M = ns.Motion
     for i, bar in ipairs(bars) do
+        -- (a bar is only ever placed at rest)
+        if M and M.IsPlaying and M.Stop and M.IsPlaying(bar) then M.Stop(bar) end
         bar:ClearAllPoints()
         if i == 1 then
             bar:SetPoint("TOP", holder, "TOP", (H + 2) / 2, 0)
@@ -430,7 +705,26 @@ Modules.lootroll = function()
         bar.button.rollID = nil
         bar.button.link = nil
         bar._zItem = nil
-        bar:Hide()
+        -- (a card fades out; a bar goes at once, as always)
+        local M = ns.Motion
+        local out = LR.AnimOf(nil, "hide")
+        if out and out.style ~= "none" and M and M.Hide and bar:IsShown() then
+            bar._zLeaving = true
+            M.Hide(bar, out, function() bar._zLeaving = nil end)
+        else
+            if M and M.Stop then M.Stop(bar) end
+            bar._zLeaving = nil
+            bar:Hide()
+        end
+    end
+    -- a roll (or a test) onto a bar: shown at once, or a card's entrance
+    local function ShowBar(bar)
+        local M = ns.Motion
+        bar._zLeaving = nil
+        local show, icon = LR.AnimOf(nil, "show"), LR.AnimOf(nil, "icon")
+        if M and M.Stop then M.Stop(bar) M.Stop(bar.button) end
+        if show and show.style ~= "none" and M and M.Show then M.Show(bar, show) else bar:Show() end
+        if icon and icon.style ~= "none" and M and M.Show then M.Show(bar.button, icon) else bar.button:Show() end
     end
 
     local function StatusUpdate(status, elapsed)
@@ -442,7 +736,8 @@ Modules.lootroll = function()
             return
         end
         if not bar.rollID then
-            bar:Hide()
+            -- (a card on its way out is left to finish its fade)
+            if not bar._zLeaving then bar:Hide() end
             return
         end
         status.elapsed = (status.elapsed or 0) + elapsed
@@ -557,7 +852,7 @@ Modules.lootroll = function()
         LR.Fill(bar, item)
 
         bar.status.elapsed = 1
-        bar:Show()
+        ShowBar(bar)
 
         -- roll info that arrived before the bar existed
         local cached = cachedRolls[rollID]
@@ -684,7 +979,7 @@ Modules.lootroll = function()
                 for k, v in pairs(fake) do item[k] = v end
                 bar._zItem = item
                 LR.Fill(bar, item)
-                bar:Show()
+                ShowBar(bar)
             end
         end
     end

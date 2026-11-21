@@ -67,8 +67,15 @@ local function ensure(kind)
     local container = CreateFrame("Frame", nil, UIParent)
     container:SetSize(10, 10)
     container:SetFrameStrata("MEDIUM")
+    if ns.ScreenK and ns.ScreenK() ~= 1 then container:SetScale(ns.ScreenK()) end   -- (the pieces' one scale, Core.lua)
     mocks[kind] = { container = container, frames = {} }
     return mocks[kind]
+end
+-- the samples' holders (they wear the pieces' one scale like the real frames)
+function ns.MockContainers()
+    local out = {}
+    for _, m in pairs(mocks) do out[#out + 1] = m.container end
+    return out
 end
 
 -- Where each placeholder of a group goes: returns count and place(idx) ->
@@ -146,7 +153,8 @@ local function layout(kind)
     m.container:ClearAllPoints()
     if header.mover then
         -- anchor to the drag handle so mocks track the handle live while dragging
-        m.container:SetPoint("TOPLEFT", header.mover, "BOTTOMLEFT", 0, -2)
+        -- (two screen units under the handle, in the samples' own units)
+        m.container:SetPoint("TOPLEFT", header.mover, "BOTTOMLEFT", 0, -2 / (ns.ScreenK and ns.ScreenK() or 1))
     else
         m.container:SetPoint("TOPLEFT", header, "TOPLEFT", 0, 0)
     end

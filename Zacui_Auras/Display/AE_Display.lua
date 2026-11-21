@@ -356,3 +356,23 @@ end
 E.AtLogin(function()
     E.CheckLoads()
 end)
+
+-- the open world map lies over the displays it covers (UIF_Movers: UNDER
+-- THE MAP): every display and group that stands on the screen itself (one
+-- on a unit frame or a nameplate goes where that goes)
+do
+    local Z = _G.ZacUI
+    if Z and Z.UnderMap and Z.UnderMap.Add then
+        Z.UnderMap.Add(function(each)
+            local function One(r)
+                if type(r) == "table" and r.GetParent and r:GetParent() == UIParent then each(r) end
+            end
+            for _, r in pairs(E.regions or {}) do One(r) end
+            for _, list in pairs(E.clones or {}) do
+                for _, r in pairs(list) do One(r) end
+            end
+            local Gp = E.Groups
+            for _, g in pairs(Gp and Gp.list or {}) do One(g.frame) end
+        end)
+    end
+end

@@ -768,6 +768,33 @@ RegisterPage("Maps", function(L)
                 end })
             om:SetPoint("LEFT")
             L:Row(omRow, M.BUTTON_H + 4)
+            -- (2026-11-20, Zac: "make sure if people pick the seemless map
+            -- that there is a way to go back to the old map as well") the
+            -- three-way choice again, from here too
+            if wm and wm.ShowWelcome then
+                local backRow = UI.Holder(L.current)
+                backRow:SetSize(300, M.BUTTON_H)
+                local back = UI.Button(backRow, "Choose the map style again", { width = 200,
+                    tooltip = "The game's own map, the seamless map started closer to the game's, or the full "
+                        .. "seamless map. Going back to the game's own map takes a reload.",
+                    onClick = function() wm:ShowWelcome() end })
+                back:SetPoint("LEFT")
+                L:Row(backRow, M.BUTTON_H + 4)
+                L:Desc("The same choice is in the seamless map's own menu (Map style) and under /zuimap welcome.")
+            end
+            L:EndCard()
+        end
+
+        -- (2026-11-20) UNDER THE MAP (UIF_Movers): on unless switched off
+        if ns.UnderMap then
+            L:Card("What is under the map")
+            local ucb = UI.Checkbox(L.current, "Pieces on screen go behind the open map", ns.UnderMap.On(),
+                function(checked) ns.UnderMap.Set(checked and true or false) end,
+                { tooltip = "While the map window is open, a bar, an icon, a reminder or a text of ZacUI's that "
+                    .. "the map lies over is drawn behind it instead of on top, and comes back when the map "
+                    .. "closes. Windows opened over the map stay over it. A piece that holds buttons cannot "
+                    .. "change in a fight: it follows when the fight ends." })
+            L:Row(ucb, 17)
             L:EndCard()
         end
 

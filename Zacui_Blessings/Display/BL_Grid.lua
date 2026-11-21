@@ -26,6 +26,35 @@ local NAME_W = 130
 local CELL = 32
 local GAP = 3
 local PAD = 12
+-- (2026-11-20) THE WINDOW'S OWN SIZES: a cell's size and the name column's
+-- width are settings (blessings.gridCell / .gridNameW; nothing saved = 32
+-- and 130, as always). Its box in Edit Mode has a row for each, and the
+-- Blessings page two sliders.
+Grid.DEF = { cell = CELL, nameW = NAME_W }
+Grid.LIM = { cell = { 22, 48 }, nameW = { 90, 220 } }
+local function Sized(key, cfgKey)
+    local c = BL.Cfg and BL.Cfg()
+    local v = tonumber(c and c[cfgKey]) or Grid.DEF[key]
+    if v ~= v then v = Grid.DEF[key] end
+    local lim = Grid.LIM[key]
+    return math.floor(math.max(lim[1], math.min(lim[2], v)) + 0.5)
+end
+local function CellSize() return Sized("cell", "gridCell") end
+local function NameW() return Sized("nameW", "gridNameW") end
+Grid.CellSize, Grid.NameWidth = CellSize, NameW
+-- the rows' width (name column, a cell per class, the aura) and the window's
+function Grid.RowWidth() return NameW() + (D.NUM_CLASSES + 1) * (CellSize() + GAP) end
+function Grid.Width() return PAD * 2 + Grid.RowWidth() end
+-- a header's or a row's cells at the sizes as set (the window's and the page's sample)
+function Grid.SizeCells(holder, width)
+    local cell, nameW = CellSize(), NameW()
+    holder:SetSize(width, cell)
+    for slot, c in ipairs(holder.cells) do
+        c:SetSize(cell, cell)
+        c:ClearAllPoints()
+        c:SetPoint("LEFT", holder, "LEFT", nameW + (slot - 1) * (cell + GAP), 0)
+    end
+end
 
 local win, header, rowsHost, footer
 local rowFrames = {}
@@ -47,7 +76,7 @@ Grid.BlessingIcon, Grid.BlessingName = BlessingIcon, BlessingName
 
 local function Cell(parent)
     local c = CreateFrame("Button", nil, parent)
-    c:SetSize(CELL, CELL)
+    c:SetSize(CellSize(), CellSize())
     c:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     UI.Fill(c, "ui", "elementBg")
     UI.Border(c, "ui", "border")
@@ -166,12 +195,12 @@ end
 -- (`preview`: the Blessings page's sample, tagged for "customize this element")
 function Grid.NewHeader(parent, width, preview)
     local header = CreateFrame("Frame", nil, parent)
-    header:SetSize(width, CELL)
+    header:SetSize(width, CellSize())
     header.cells = {}
     for slot = 1, D.NUM_CLASSES + 1 do
         local h = CreateFrame("Frame", nil, header)
-        h:SetSize(CELL, CELL)
-        h:SetPoint("LEFT", header, "LEFT", NAME_W + (slot - 1) * (CELL + GAP), 0)
+        h:SetSize(CellSize(), CellSize())
+        h:SetPoint("LEFT", header, "LEFT", NameW() + (slot - 1) * (CellSize() + GAP), 0)
         h.icon = h:CreateTexture(nil, "ARTWORK")
         h.icon:SetAllPoints()
         h.count = h:CreateFontString(nil, "OVERLAY")
@@ -202,7 +231,7 @@ end
 
 local function Build()
     if win then return end
-    local w = PAD * 2 + NAME_W + (D.NUM_CLASSES + 1) * (CELL + GAP)
+    local w = Grid.Width()
     -- (2026-11-08) the popup shell (UIF_Dialogs UI.Popup) when there is one
     win = (UI.Popup or UI.Window)("ZacUIBlessingsGrid", w, 200, "Blessings")
     win._zOnMoved = function()
@@ -210,6 +239,7 @@ local function Build()
         local c = BL.Cfg()
         if c then c.gridPos = { p[1], p[4], p[5] } end
     end
+    win._zCell, win._zNameW = CellSize(), NameW()
     header = Grid.NewHeader(win, w - PAD * 2)
     header:SetPoint("TOPLEFT", PAD, -(win.headerHeight + 8))
     rowsHost = CreateFrame("Frame", nil, win)
@@ -274,13 +304,30 @@ if ns.RegisterMover then
             win:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         end,
         own = true,
+        -- (a window: sized with the other windows)
+        scale = false,
+        -- (2026-11-20) its own sizes on its box in Edit Mode
+        sizes = function()
+            local function Row(label, key, cfgKey, step)
+                local lim, def = Grid.LIM[key], Grid.DEF[key]
+                return { label = label, unit = "px", min = lim[1], max = lim[2], step = step, fine = 1, def = def,
+                    get = function() return Sized(key, cfgKey) end,
+                    set = function(v)
+                        local c = BL.Cfg and BL.Cfg()
+                        if not c then return end
+                        c[cfgKey] = (v ~= def) and v or nil
+                        Grid.Refresh()
+                    end }
+            end
+            return { Row("Cell size", "cell", "gridCell", 2), Row("Name column", "nameW", "gridNameW", 10) }
+        end,
     })
 end
 
 -- One paladin's row: name, the line under it, a cell per class and the aura.
 function Grid.NewRow(parent, width, preview)
     local r = CreateFrame("Frame", nil, parent)
-    r:SetSize(width, CELL)
+    r:SetSize(width, CellSize())
     r.name = UI.Font(r, F.LABEL, { text = "" })
     r.name:SetPoint("LEFT", r, "LEFT", 0, 4)
     r.sub = UI.Font(r, F.SMALL, { text = "", cat = "text", key = "gray" })
@@ -288,7 +335,7 @@ function Grid.NewRow(parent, width, preview)
     r.cells = {}
     for slot = 1, D.NUM_CLASSES + 1 do
         local c = Cell(r)
-        c:SetPoint("LEFT", r, "LEFT", NAME_W + (slot - 1) * (CELL + GAP), 0)
+        c:SetPoint("LEFT", r, "LEFT", NameW() + (slot - 1) * (CellSize() + GAP), 0)
         r.cells[slot] = c
         if preview and ns.TagElement then ns.TagElement(c.mark, "blgrid.mark") ns.TagElement(c, "blgrid.mark") end
     end
@@ -307,8 +354,23 @@ local function Row(i)
     return r
 end
 
+-- the window at the sizes as set (once per change, not per refresh)
+local function FitWindow()
+    local cell, nameW = CellSize(), NameW()
+    if win._zCell == cell and win._zNameW == nameW then return end
+    win._zCell, win._zNameW = cell, nameW
+    local w = Grid.Width()
+    win:SetWidth(w)
+    Grid.SizeCells(header, w - PAD * 2)
+    rowsHost:SetWidth(w - PAD * 2)
+    footer:SetWidth(w - PAD * 2)
+    for _, r in ipairs(rowFrames) do Grid.SizeCells(r, w - PAD * 2) end
+end
+
 function Grid.Refresh()
     if not (win and win:IsShown()) then return end
+    FitWindow()
+    local CELL = CellSize()
     for slot = 1, D.NUM_CLASSES do
         local n = BL.bySlot[slot] and #BL.bySlot[slot] or 0
         header.cells[slot].count:SetText(n > 0 and tostring(n) or "")

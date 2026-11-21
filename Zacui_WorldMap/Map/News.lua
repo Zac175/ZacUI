@@ -120,7 +120,7 @@ local function ShowPage(n)
 				h:SetTextColor(TITLE[1], TITLE[2], TITLE[3])
 				h.rule = child:CreateTexture(nil, "ARTWORK")
 				h.rule:SetColorTexture(TITLE[1], TITLE[2], TITLE[3], 0.35)
-				h.rule:SetHeight(1)
+				h.rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(h.rule, "TOP") end
 				page.heads[nh] = h
 			end
 			if i > 1 then y = y + 8 end

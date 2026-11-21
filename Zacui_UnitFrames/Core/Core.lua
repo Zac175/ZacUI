@@ -396,6 +396,75 @@ function ns.ApplySettings()
     if ns.RestyleLowHealth then ns.RestyleLowHealth() end
     if ns.ShoutAlertApply then ns.ShoutAlertApply() end   -- a profile switch can flip it
     if ns.UpdateMocks then ns.UpdateMocks() end
+    if ns.ApplyScreenScale then ns.ApplyScreenScale() end
+end
+
+-- ----------------------------------------------------------------------------
+-- THE PIECES' ONE SCALE (2026-11-20, Zac: the overall scale should reach
+-- the unit frames too). ZacUI's Screen scale (Appearance: one scale for
+-- everything on screen) on the unit frames: every frame of ours that
+-- stands on the screen itself - the singles, the party / raid / tank / boss
+-- holders, the party targets, move mode's samples and the Classic raid
+-- frames' holder - wears it as its own scale. A frame's saved spot is then
+-- in its own (scaled) units, like every other piece's: it shrinks or grows
+-- toward the screen point it hangs from, and the code that turns a drag
+-- into a saved spot divides the screen's measurements by ns.ScreenK().
+-- At 100% nothing is set and nothing moves.
+-- Secure frames: only outside a fight (a change in one waits for its end).
+-- ----------------------------------------------------------------------------
+function ns.ScreenK()
+    local Z = ns.ZUI or _G.ZacUI
+    local S = Z and Z.Screen
+    local k = S and S.Scale and S.Scale() or 1
+    if type(k) ~= "number" or k <= 0 or k ~= k then k = 1 end
+    return k
+end
+-- every frame of ours that stands on the screen itself
+function ns.ScreenTops(fn)
+    for _, f in pairs(ns.frames or {}) do fn(f) end
+    local pt = _G.ZacUF_partyTargets
+    if pt and pt.buttons then for _, b in ipairs(pt.buttons) do fn(b) end end
+    if ns.MockContainers then for _, c in ipairs(ns.MockContainers()) do fn(c) end end
+    -- (the Classic WoW UI raid frames: their holder saves its spot from
+    -- the game's own point after a drag, which is already in its units)
+    local old = ns._oldRaidOurs and _G.OldRF_Container
+    if old then fn(old) end
+end
+local scalePending = false
+function ns.ApplyScreenScale()
+    if InCombatLockdown() then scalePending = true return false end
+    scalePending = false
+    local k = ns.ScreenK()
+    local changed = false
+    ns.ScreenTops(function(f)
+        if f and f.SetScale and f.GetScale and f.GetParent and f:GetParent() == UIParent
+            and math.abs((f:GetScale() or 1) - k) >= 0.0005 then
+            f:SetScale(k)
+            changed = true
+        end
+    end)
+    return changed
+end
+do
+    local w = CreateFrame("Frame")
+    w:RegisterEvent("PLAYER_REGEN_ENABLED")
+    w:SetScript("OnEvent", function()
+        if not scalePending then return end
+        if ns.ApplyScreenScale() and ns.ScreenScaleChanged then ns.ScreenScaleChanged() end
+    end)
+end
+-- the scale moved: frames first, then everything measured against the
+-- screen (the raid fitted to the chat box, the handles, the samples)
+function ns.ScreenScaleChanged()
+    if InCombatLockdown() then scalePending = true return end
+    ns.ApplyScreenScale()
+    for _, f in pairs(ns.frames or {}) do
+        if f.LeanRestyle then pcall(f.LeanRestyle, f) end
+    end
+    if ns.FitRaidToChat then pcall(ns.FitRaidToChat) end
+    if ns.PlacePartyTargets then pcall(ns.PlacePartyTargets) end
+    if ns.UpdateMocks then pcall(ns.UpdateMocks) end
+    if ns.RefreshMoveDialog then pcall(ns.RefreshMoveDialog) end
 end
 
 local function Init()
@@ -431,7 +500,9 @@ local function Init()
             -- themselves (OldRaid.lua) and ZacUI's raid header is not made;
             -- when the OldRaidFrames addon is loaded it draws them instead
             if ns.OldRaidActive and ns.OldRaidActive() then
-                if ns.OldRaidStart then ns.OldRaidStart() end
+                -- (true when the built-in ones were started; the standalone
+                -- addon's frames are its own and keep their own size)
+                if ns.OldRaidStart then ns._oldRaidOurs = ns.OldRaidStart() and true or false end
             else
                 ns.SpawnHeader("raid")
             end
@@ -441,6 +512,17 @@ local function Init()
     -- the frames only some games have (focus, boss...: Extras.lua and
     -- theirs), each made only when it is switched on
     for _, spawn in ipairs(ns.ExtraSpawns or {}) do spawn() end
+
+    -- the pieces' one scale on everything just made, and from here on
+    -- whenever it is changed (ZacUI's Screen)
+    ns.ApplyScreenScale()
+    if Z and Z.Screen and Z.Screen.OnChange then
+        Z.Screen.OnChange(function() ns.ScreenScaleChanged() end)
+    end
+    -- the open world map lies over the unit frames it covers (ZacUI: UNDER THE MAP)
+    if Z and Z.UnderMap and Z.UnderMap.Add then
+        Z.UnderMap.Add(function(each) ns.ScreenTops(each) end)
+    end
 
     -- no "loaded" line of its own: ZacUI says it once for all of its parts.
     -- The one thing worth a line is the first-time adoption of old settings.

@@ -150,8 +150,10 @@ local function ensureMover(host, kind, cfg, spanW)
         -- always has a size), so this works even when the group is empty.
         local left, bottom = self:GetLeft(), self:GetBottom()
         if left and bottom then
-            local x = left - UIParent:GetLeft()
-            local y = (bottom - 2) - UIParent:GetTop()
+            -- (the handle is in the screen's units, the container's spot in its own)
+            local k = ns.ScreenK and ns.ScreenK() or 1
+            local x = (left - UIParent:GetLeft()) / k
+            local y = ((bottom - 2) - UIParent:GetTop()) / k
             if ns.SnapValue then x, y = ns.SnapValue(x), ns.SnapValue(y) end
             cfg.point, cfg.x, cfg.y = "TOPLEFT", x, y
             if not InCombatLockdown() then
@@ -308,6 +310,8 @@ function ns.SpawnHeader(kind)
     local container = CreateFrame("Frame", "ZacUF_" .. kind .. "Header", UIParent)
     container:SetMovable(true)
     container:SetSize(cfg.width, cfg.height)
+    -- (the pieces' one scale, Core.lua)
+    if ns.ScreenK and ns.ScreenK() ~= 1 then container:SetScale(ns.ScreenK()) end
     container:ClearAllPoints()
     container:SetPoint(cfg.point or "TOPLEFT", UIParent, cfg.point or "TOPLEFT", cfg.x or 0, cfg.y or 0)
     container.grouped = grouped
@@ -398,7 +402,7 @@ function ns.SpawnHeader(kind)
         local cols = math.max(1, math.min(8, cfg.maxColumns or 8))
         spanW = cols * cfg.width + (cols - 1) * (cfg.columnSpacing or 0)
     end
-    ensureMover(container, kind, cfg, spanW)
+    ensureMover(container, kind, cfg, spanW and spanW * (ns.ScreenK and ns.ScreenK() or 1))
 
     -- Live restyle: re-apply media/colors to every child, re-apply the cheap
     -- layout attrs (sort + row/column spacing) and re-grid the headers, and
@@ -429,7 +433,7 @@ function ns.SpawnHeader(kind)
                 local cols = math.max(1, math.min(8, cfg.maxColumns or 8))
                 span = cols * cfg.width + (cols - 1) * (cfg.columnSpacing or 0)
             end
-            self.mover:SetWidth(math.max(span, 90))
+            self.mover:SetWidth(math.max(span * (ns.ScreenK and ns.ScreenK() or 1), 90))
         end
         return true
     end
@@ -584,6 +588,11 @@ function ns.FitPartyToChat()
         and RCh.PartyEnabled and RCh.PartyEnabled() and true or false
     if (kind == "party" or preview) and cfg.growth ~= "UP" then
         local l, r, t, b = RCh.Area(true)
+        -- (the box is measured in the screen's units; the frames live in
+        -- their own, the pieces' one scale: everything from here is in theirs)
+        local k = ns.ScreenK and ns.ScreenK() or 1
+        local uiL, uiH = (UIParent:GetLeft() or 0) / k, UIParent:GetHeight() / k
+        if l then l, r, t, b = l / k, r / k, t / k, b / k end
         local n = cfg.showPlayer and 5 or 4
         if l and r - l > 40 and t - b > 20 then
             local w = (r - l - (n - 1) * PARTY_ROW_GAP) / n
@@ -595,8 +604,8 @@ function ns.FitPartyToChat()
                     for _, k in ipairs(PARTY_GEO) do cfg.preChat[k] = cfg[k] end
                 end
                 cfg.point = "TOPLEFT"
-                cfg.x = Round2(l - (UIParent:GetLeft() or 0))
-                cfg.y = Round2(t - UIParent:GetHeight())
+                cfg.x = Round2(l - uiL)
+                cfg.y = Round2(t - uiH)
                 cfg.width, cfg.height = Round2(w), Round2(h)
                 if c then
                     c:ClearAllPoints()
@@ -634,8 +643,12 @@ function ns.FitRaidToChat()
     -- height from before comes back when the mode is off.
     local RCh = _G.ZacUIRaidChat
     local preview = ChatPreview() and not IsInRaid()
+    -- (measured in the screen's units, kept in the frames' own: the pieces' one scale)
+    local k = ns.ScreenK and ns.ScreenK() or 1
+    local uiL, uiH = (UIParent:GetLeft() or 0) / k, UIParent:GetHeight() / k
     if RCh and ((RCh.IsActive and RCh.IsActive()) or preview) then
         local l, r, t, b = RCh.Area(true)
+        if l then l, r, t, b = l / k, r / k, t / k, b / k end
         -- the preview shows the party row along the top as well: the raid
         -- grid goes under it
         if preview and ns.partyChatRow and l and ns.db.party then
@@ -653,8 +666,8 @@ function ns.FitRaidToChat()
                 cfg.height = Round2(h)
                 cfg.width = Round2(w)
                 cfg.point = "TOPLEFT"
-                cfg.x = Round2(l - (UIParent:GetLeft() or 0))
-                cfg.y = Round2(t - UIParent:GetHeight())
+                cfg.x = Round2(l - uiL)
+                cfg.y = Round2(t - uiH)
                 local c = ns.frames and ns.frames.raid
                 if c then
                     c:ClearAllPoints()
@@ -672,22 +685,22 @@ function ns.FitRaidToChat()
     local cf = _G.ChatFrame1
     local panel = cf and (cf._zui_chatbg or cf)
     if not (panel and panel:GetLeft() and panel:GetRight() and panel:GetTop()) then return false end
-    local left  = ToUIParent(panel, panel:GetLeft())
-    local right = ToUIParent(panel, panel:GetRight())
-    local top   = ToUIParent(panel, panel:GetTop())
+    local left  = ToUIParent(panel, panel:GetLeft()) / k
+    local right = ToUIParent(panel, panel:GetRight()) / k
+    local top   = ToUIParent(panel, panel:GetTop()) / k
     -- the chat's tab row stands on the panel's top edge (ZacUI's strip
     -- behind the tabs, Blizzard's own tabs): the raid sits above it, or
     -- its bottom row covers the tabs. The strip is hidden until the mouse
     -- is over the chat, so it counts from its height, not its rect.
     local head = _G.ZacUIChatHead
     if head and head.GetNumPoints and head:GetNumPoints() > 0 and (head:GetHeight() or 0) > 0 then
-        local t = top - ToUIParent(head, 1) + ToUIParent(head, head:GetHeight())
+        local t = top - ToUIParent(head, 1) / k + ToUIParent(head, head:GetHeight()) / k
         if t > top then top = t end
     end
     local tab = _G.ChatFrame1Tab
     if tab and tab:IsShown() and tab:GetTop() then
-        local t = ToUIParent(tab, tab:GetTop())
-        if t > top and t - top < 60 then top = t end
+        local t = ToUIParent(tab, tab:GetTop()) / k
+        if t > top and t - top < 60 / k then top = t end
     end
     local cols = math.max(1, math.min(8, cfg.maxColumns or 8))
     local cs = cfg.columnSpacing or 0
@@ -697,9 +710,9 @@ function ns.FitRaidToChat()
     local blockH = 5 * cfg.height + 4 * (cfg.spacing or 0) + cs
     local totalH = rows * blockH - cs
     local gap = cfg.fitGap or 4
-    local uiTop = UIParent:GetHeight()
+    local uiTop = uiH
     cfg.point = "TOPLEFT"
-    cfg.x = Round2(left - (UIParent:GetLeft() or 0))
+    cfg.x = Round2(left - uiL)
     cfg.y = Round2(top + gap + totalH - uiTop)
     cfg.width = Round2(w)
     local c = ns.frames and ns.frames.raid

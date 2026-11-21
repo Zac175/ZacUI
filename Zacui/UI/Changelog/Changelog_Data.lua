@@ -28,6 +28,43 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.17",
+        date = "2026-11-20",
+        title = "A size for every piece on screen, a macro cleaner, and boss loot",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "One size for everything ZacUI puts on screen: a slider on the Movers page and in Edit Mode. It reaches the class HUD, trackers, timers, alerts, consumable bars, unit frames, action bars, nameplates and meter windows.",
+                    "Edit Mode: each piece has its own size. Pick a piece to make it smaller or bigger, or to set its width, height, icon size and spacing right there.",
+                    { "Class HUDs: every piece has its own scale, and the mana and energy tick strips have a height.", feature = "hud_classes" },
+                    "Macro cleaner: every macro in one list with a tick. Delete many at once, see which ones nothing uses, and bring one back from the bin. Open it with /zui macros or the Clean up button on the macro window.",
+                    "The macro cleaner can also delete by itself: macros another addon keeps making, or macros that have gone unused for a number of days. Off until you turn it on under Quality of life, Macros.",
+                    "Boss loot: a small card of what a boss dropped and who got it. Off until you turn it on under Quality of life.",
+                    "Loot rolls: a card style with the item's name, bind type and time left, and every part of it is a setting. A new install starts with it; yours stays as it was until you pick it.",
+                    "Loot rolls: the need, greed and pass buttons can wear the game's 3D art or flat icons.",
+                    { "Seamless map: Map style in its menu, to go back to the game's map or choose again.", feature = "worldmap" },
+                    "Tooltips: a tick to hide the \"Made by\" line on crafted items.",
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "Borders and thin lines are one screen pixel wide at every UI scale.",
+                    { "Class HUDs: a new setup places the trinket row where every screen size shows it. A HUD already set up keeps its place.", feature = "hud_classes" },
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "Bars, timers and other pieces could draw over the open world map. They go behind it now and come back when it closes.",
+                    { "Seamless map: dragging the map's header did not move the map.", feature = "worldmap" },
+                    "Changing a meter window's scale from its header menu moved the window. It stays in place.",
+                },
+            },
+        },
+    },
+    {
         version = "3.0.16",
         date = "2026-11-19",
         title = "Chat that keeps its place and its font, and icon sizes on nameplates",

@@ -1103,7 +1103,7 @@ local function NewTabBar(parent)
     local rule = bar:CreateTexture(nil, "ARTWORK")
     rule._zui_own = true
     rule:SetTexture(ns.FLAT)
-    rule:SetHeight(1)
+    rule:SetHeight(1) if ZacUI and ZacUI.Pixel then ZacUI.Pixel.Edge(rule, "TOP") end
     rule:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, -4)
     rule:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, -4)
     bar._zRule = rule

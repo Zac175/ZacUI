@@ -190,7 +190,16 @@ boot:RegisterEvent("PLAYER_LOGIN")
 boot:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
     if ns.RegisterMover then
-        ns.RegisterMover(MOVER, "Unspent talents", function() return live end, "TOPRIGHT", -230, -12, nil, { own = true })
+        ns.RegisterMover(MOVER, "Unspent talents", function() return live end, "TOPRIGHT", -230, -12, nil, { own = true,
+            -- (its size in Edit Mode: the page's own Size)
+            sizes = function()
+                return { { label = "Size", unit = "px", min = 16, max = 64, step = 2, fine = 1, def = DEFAULT_SIZE,
+                    get = function() return TR.Size() end,
+                    set = function(v)
+                        DB().size = (v ~= DEFAULT_SIZE) and v or nil
+                        TR.Refresh()
+                    end } }
+            end })
     end
     if ns.OnSettingsChanged then ns.OnSettingsChanged(function() soon() end) end
 end)
