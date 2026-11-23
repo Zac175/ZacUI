@@ -450,11 +450,14 @@ function PV.FrameCanvasSize(mode)
     if mode == "party" or mode == "raid" then
         -- the group's real footprint, as the headers lay it out
         local count, place = ns.GroupLayout(mode, cfg, nil, true)
+        -- (the box a slot really draws: the look's own for the party under a game look)
+        local bw, bh = cfg.width, cfg.height
+        if ns.GroupBox then bw, bh = ns.GroupBox(mode, cfg) end
         local l, r, t, b = 0, 0, 0, 0
         for i = 1, count do
             local x, y = place(i)
-            l, r = math.min(l, x), math.max(r, x + cfg.width)
-            t, b = math.max(t, y), math.min(b, y - cfg.height)
+            l, r = math.min(l, x), math.max(r, x + bw)
+            t, b = math.max(t, y), math.min(b, y - bh)
         end
         w, h = math.max(w, r - l), (t - b) + hang
     elseif cfg.castbar then

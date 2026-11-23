@@ -6,9 +6,25 @@
 -- call, and Blizzard's own /countdown. ZacUI's own /pull and /break
 -- (Zacui_RaidTools) send all of those at once. Each running timer is saved by its end in server time, so
 -- after a reload or a relog the bar comes back with the right time left.
--- On login in a group, ZacUI also asks the group: any other ZacUI client
--- with a timer running (your other characters) answers, so a break that
--- started while this character was logged out still shows up.
+-- A TIMER THAT STARTED WITHOUT YOU (2026-11-22, Zac: "break pull timers
+-- etc. dont show if i join the group late or im logged out when its
+-- started needs to work from ingame timer dbm bigwigs etc."). Logging in,
+-- reloading or joining a group, ZacUI asks for what is running:
+--   * the group, in ZacUI's own words: any ZacUI client with a timer
+--     running answers, whatever started it (DBM, BigWigs, /countdown);
+--   * the group's DBM clients, in DBM's words: DBM answers a group
+--     member's whispered timer request with the time left on its break
+--     bar (and a break BigWigs called is on every DBM client's bar too,
+--     since BigWigs sends its break in DBM's words as well). Nobody says
+--     who runs DBM, so the leader, the assistants and anyone seen sending
+--     DBM messages are asked first, a few at a time, until one answers;
+--   * the raid packs' break status lines, when another raider's sends one;
+--   * the game's own countdown says how much is left of how much when it
+--     reaches a client partway (START_PLAYER_COUNTDOWN's time left and
+--     total), and the bar starts there.
+-- BigWigs itself has nothing to ask: it keeps its break through its own
+-- relog and tells nobody who joins. A break called in a group with only
+-- BigWigs users and no ZacUI client cannot be recovered by anyone.
 
 local ADDON_NAME = ...
 -- Zacui_QoL is a part of ZacUI: one namespace, published by Core_Boot.
@@ -29,6 +45,24 @@ local DBM_PREFIXES = { D4 = true, D4C = true, D5 = true, D5C = true, D5WC = true
 local GROUP_CHANNELS = { RAID = true, PARTY = true, INSTANCE_CHAT = true }
 local KINDS = { "brk", "pull" }        -- top to bottom
 local LABEL = { brk = "Break", pull = "Pull" }
+
+-- WHAT WAS ASKED AND WHAT CAME BACK (2026-11-22, Zac: "the pull timer
+-- stuff still not working"). The last sixty things this file asked, was
+-- told or refused, each with the second it happened: `/zui timers` prints
+-- them, so what the game and the other clients really did can be read
+-- instead of guessed. Written only on those rare moments (never per DBM
+-- message), kept for the session.
+local trace, TRACE_MAX = {}, 60
+local function Trace(fmt, ...)
+    local ok, line = pcall(string.format, fmt, ...)
+    if not ok then line = tostring(fmt) end
+    trace[#trace + 1] = string.format("%.1f  %s", GetTime(), line)
+    if #trace > TRACE_MAX then table.remove(trace, 1) end
+end
+RT.Trace = Trace
+function RT.TraceLines() return trace end
+local function Vis(msg) return (tostring(msg):gsub("\t", "<tab>")) end
+
 local COLOUR = { brk = "blue", pull = "red" }
 
 -- ============================================================
@@ -63,6 +97,8 @@ local function DB()
     if d.pull == nil then d.pull = true end
     if d.brk == nil then d.brk = true end
     if d.sync == nil then d.sync = true end
+    -- (ask the group's DBM clients for a running break as well)
+    if d.askMods == nil then d.askMods = true end
     if d.width == nil then d.width = 240 end
     if d.height == nil then d.height = 20 end
     -- Blizzard's own countdown (the ornate bar /countdown shows and the
@@ -512,7 +548,10 @@ end
 -- ============================================================
 -- STARTING AND STOPPING
 -- ============================================================
-function RT.Set(kind, seconds, sender)
+-- seconds: the time left. total: the timer's whole length when the
+-- source says so and it is more than what is left (the game's countdown
+-- reaching a client partway); the bar then starts part empty.
+function RT.Set(kind, seconds, sender, total)
     local d = DB()
     if not d.enabled then return end
     seconds = tonumber(seconds)
@@ -522,19 +561,41 @@ function RT.Set(kind, seconds, sender)
         localEnd[kind] = nil
     else
         seconds = math.min(seconds, 3600)
+        total = tonumber(total)
+        local dur = (total and total > seconds) and math.min(total, 3600) or seconds
         -- one pull reaches us several ways (countdown, DBM, BigWigs) a
         -- moment apart; the same timer again must not nudge the bar
         local cur, le = d.active[kind], localEnd[kind]
-        if cur and le and cur.dur == seconds and math.abs((le - GetTime()) - seconds) < 1.5 then
+        if cur and le and cur.dur == dur and math.abs((le - GetTime()) - seconds) < 1.5 then
             if not cur.sender and sender then cur.sender = sender cur.class = nil Layout() end
             return
         end
-        d.active[kind] = { endAt = GetServerTime() + seconds, dur = seconds, sender = sender }
+        d.active[kind] = { endAt = GetServerTime() + seconds, dur = dur, sender = sender }
         localEnd[kind] = GetTime() + seconds
     end
     Layout()
     StartTicker()
     Tick()
+end
+
+-- A timer this client missed the start of, told by someone who has it:
+-- seconds left, of dur when known, started by who when known. Only fills
+-- in what this client does not already have (the same timer within three
+-- seconds is left alone, so its bar never jumps).
+function RT.Fill(kind, left, dur, who)
+    local d = DB()
+    if not (d.enabled and LABEL[kind]) then return false end
+    left, dur = tonumber(left), tonumber(dur)
+    if not left or left <= 0 or left > 3600 then return false end
+    local mine = d.active[kind]
+    local now = GetServerTime()
+    if mine and math.abs((mine.endAt - now) - left) < 3 then return false end
+    d.active[kind] = { endAt = now + left, dur = (dur and dur >= left and dur <= 3600) and dur or left,
+        sender = (who and who ~= "") and who or nil }
+    localEnd[kind] = GetTime() + left
+    if Layout() then StartTicker() end
+    Tick()
+    return true
 end
 
 local Short = ns.ShortName
@@ -548,6 +609,7 @@ local function FromDBM(msg, sender)
         if tag == "PT" or tag == "BT" then
             local sec = tonumber(parts[i + 1])
             if sec then
+                Trace("DBM %s %s from %s", tag, tostring(sec), tostring(sender))
                 RT.Set(tag == "PT" and "pull" or "brk", sec, Short(sender))
                 return
             end
@@ -561,6 +623,9 @@ local function FromBigWigs(msg, sender)
     if a ~= "P" then a, b, c = strsplit("\t", msg) end
     local sec = tonumber(c)
     if not sec then return end
+    if b == "Pull" or b == "BWPull" or b == "Break" or b == "BWBreak" then
+        Trace("BigWigs %s %s from %s", tostring(b), tostring(sec), tostring(sender))
+    end
     if b == "Pull" or b == "BWPull" then RT.Set("pull", sec, Short(sender))
     elseif b == "Break" or b == "BWBreak" then RT.Set("brk", sec, Short(sender)) end
 end
@@ -568,28 +633,172 @@ end
 -- The raid packs' own break call: "BREAK:<seconds>:<who>", on the prefix
 -- other raiders' clients send it under (PACK_PREFIX).
 local PACK_PREFIX = "FojjiTimerAddon"
+-- "BREAK_STATUS" / "BREAK_SYNC" carry the seconds LEFT of a break already
+-- running (what a raider's client tells one that missed the start).
 local function FromPackBreak(msg)
     local cmd, value, who = strsplit(":", msg)
+    if cmd and cmd:find("^BREAK") then Trace("raid pack: %s", tostring(msg)) end
     if cmd == "BREAK" then RT.Set("brk", tonumber(value), (who ~= "" and who) or nil)
+    elseif cmd == "BREAK_STATUS" or cmd == "BREAK_SYNC" then
+        local secs = tonumber(value)
+        if secs == 0 then RT.Set("brk", 0)
+        elseif secs then RT.Fill("brk", secs, nil, (who and who ~= "" and who) or nil) end
     elseif cmd == "BREAK_CANCEL" then RT.Set("brk", 0) end
 end
 
 -- ============================================================
 -- SYNC BETWEEN ZACUI CLIENTS
 -- ============================================================
-local function Send(msg, channel, target)
+-- -> true when the client took the message (its own answer where it gives one)
+local function Send(msg, channel, target, prefix)
     -- WoW Forever delivers no addon messages inside an instance (Core_Flavor)
-    if ns.AddonMessagesBlocked and ns.AddonMessagesBlocked() then return end
-    if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        pcall(C_ChatInfo.SendAddonMessage, SYNC, msg, channel, target)
+    if ns.AddonMessagesBlocked and ns.AddonMessagesBlocked() then
+        Trace("NOT SENT (addon messages are blocked here) %s %s -> %s", prefix or SYNC, Vis(msg), tostring(target or channel))
+        return false
     end
+    if C_ChatInfo and C_ChatInfo.SendAddonMessage then
+        local ok, res = pcall(C_ChatInfo.SendAddonMessage, prefix or SYNC, msg, channel, target)
+        -- (true or 0 = taken; any other number is the client's refusal code)
+        local taken = ok and (res == nil or res == true or res == 0)
+        Trace("%s %s %s -> %s (client: %s)", taken and "sent" or "REFUSED", prefix or SYNC, Vis(msg),
+            tostring(target or channel), tostring(res))
+        return taken and true or false
+    end
+    return false
 end
 
 function RT.RequestSync()
     local d = DB()
-    if not (d.enabled and d.sync) then return end
+    if not (d.enabled and d.sync) then return false end
     local ch = ns.GroupChannel()
-    if ch then Send("REQ", ch) end
+    if not ch then Trace("ZacUI request not sent: no group channel yet") return false end
+    return Send("REQ", ch)
+end
+
+-- ============================================================
+-- ASKING THE GROUP'S DBM CLIENTS FOR A RUNNING BREAK
+-- ============================================================
+-- DBM's own way for a client that missed the start (facts from DBM's
+-- source, 2026-11: prefix "D5", every message "<tab>1<tab>TAG<tab>value"):
+-- a group member whispers the request "RT"; a DBM client that is not in a
+-- boss fight and has a break bar up whispers back "BTR3" with the seconds
+-- left, and says nothing otherwise. It answers one request a second from
+-- the same sender. A client without DBM never sees the whisper.
+local MOD_PREFIX = "D5"
+local MOD_REQUEST = "\t1\tRT\t"
+local ASK_EACH, ASK_ROUNDS, ASK_GAP, ASK_TRUST = 3, 3, 2.5, 10
+local modUsers = {}          -- [short name] = true: seen sending DBM messages this session
+local askedAt = {}           -- [short name] = GetTime() of our request
+local askSeq = 0
+
+-- group members worth asking, best first: seen using DBM, the leader,
+-- the assistants, then everyone else; online, not asked in the last ten
+-- seconds. A member from another realm of the cluster is whispered as
+-- Name-Realm (2026-11-22: they were left out, and on a realm cluster that
+-- is most of a raid, the leader often among them). `key` is the name as
+-- an answer's sender comes back shortened, so the two can be matched.
+local function ModCandidates()
+    local list = {}
+    local n = (GetNumGroupMembers and GetNumGroupMembers()) or 0
+    if n <= 0 then return list end
+    local raid = IsInRaid and IsInRaid()
+    local now = GetTime()
+    for i = 1, n do
+        local unit = raid and ("raid" .. i) or ("party" .. i)
+        if UnitExists(unit) and not UnitIsUnit(unit, "player") and UnitIsConnected(unit) then
+            local name, realm = UnitName(unit)
+            if name and name ~= "" and name ~= UNKNOWNOBJECT then
+                local full = (realm and realm ~= "") and (name .. "-" .. realm) or name
+                local key = Short(full) or full
+                if not (askedAt[key] and now - askedAt[key] < ASK_TRUST) then
+                    local score = (modUsers[key] and 4 or 0)
+                        + ((UnitIsGroupLeader and UnitIsGroupLeader(unit)) and 2 or 0)
+                        + ((UnitIsGroupAssistant and UnitIsGroupAssistant(unit)) and 1 or 0)
+                    list[#list + 1] = { name = full, key = key, score = score, order = i }
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.score ~= b.score then return a.score > b.score end
+        return a.order < b.order
+    end)
+    return list
+end
+
+local function AskModsRound(seq, round, rounds)
+    if seq ~= askSeq then return end
+    local d = DB()
+    if not (d.enabled and d.brk and d.askMods) then return end
+    -- a break bar is up (one answered, or it was never missing): done
+    if d.active.brk then return end
+    local grouped = IsInGroup and IsInGroup()
+    local list = grouped and ModCandidates() or {}
+    Trace("DBM round %d of %d: in a group %s, %d members, %d to ask", round, rounds, tostring(grouped and true or false),
+        (GetNumGroupMembers and GetNumGroupMembers()) or 0, #list)
+    for i = 1, math.min(ASK_EACH, #list) do
+        if Send(MOD_REQUEST, "WHISPER", list[i].name, MOD_PREFIX) then
+            askedAt[list[i].key] = GetTime()
+        end
+    end
+    -- (the next round even when nobody could be asked in this one: right
+    -- after a login the roster is still filling)
+    if round < rounds then
+        C_Timer.After(ASK_GAP, function() AskModsRound(seq, round + 1, rounds) end)
+    end
+end
+
+-- rounds: how many times a few more are asked (nil: the full three)
+function RT.AskMods(rounds)
+    askSeq = askSeq + 1
+    AskModsRound(askSeq, 1, tonumber(rounds) or ASK_ROUNDS)
+end
+function RT.ModsAsked() return askedAt end
+
+-- one ask for everything, a moment from now (a login, a reload, joining a
+-- group); a second call inside that moment is the same ask
+local askToken = 0
+function RT.AskSoon(delay, rounds)
+    askToken = askToken + 1
+    local token = askToken
+    C_Timer.After(delay or 3, function()
+        if token ~= askToken then return end
+        Trace("asking (group %s, raid %s, %d members)", tostring(IsInGroup and IsInGroup() and true or false),
+            tostring(IsInRaid and IsInRaid() and true or false), (GetNumGroupMembers and GetNumGroupMembers()) or 0)
+        -- (no group channel yet - a login still loading its roster: once more in five seconds)
+        if not RT.RequestSync() and DB().sync then
+            C_Timer.After(5, function() if token == askToken then RT.RequestSync() end end)
+        end
+        RT.AskMods(rounds)
+    end)
+end
+
+-- a DBM client's whispered answer: taken only from someone this client
+-- asked, in the last ten seconds, who is in the group
+local function FromDBMWhisper(msg, sender)
+    local who = Short(sender)
+    local at = who and askedAt[who]
+    if not (at and GetTime() - at <= ASK_TRUST) then
+        if msg:find("BTR3", 1, true) then Trace("DBM answer from %s NOT taken (not asked in the last %d s): %s", tostring(sender), ASK_TRUST, Vis(msg)) end
+        return
+    end
+    if not (UnitInRaid and UnitInRaid(who) or UnitInParty and UnitInParty(who)) then
+        Trace("DBM whisper from %s NOT taken (not in the group): %s", tostring(sender), Vis(msg))
+        return
+    end
+    Trace("DBM whisper from %s: %s", tostring(sender), Vis(msg))
+    local parts = { strsplit("\t", msg) }
+    for i = 1, #parts - 1 do
+        if parts[i] == "BTR3" then
+            local sec = tonumber(parts[i + 1])
+            if sec and sec > 0 and sec <= 3600 then
+                modUsers[who] = true
+                local took = RT.Fill("brk", sec)
+                Trace("break: %d s left from %s (%s)", sec, who, took and "bar started" or "already had it")
+            end
+            return
+        end
+    end
 end
 
 local function AnswerSync(sender)
@@ -607,23 +816,18 @@ end
 
 local function FromSync(msg, sender)
     if msg == "REQ" then
-        if sender and Short(sender) ~= UnitName("player") then AnswerSync(sender) end
+        if sender and Short(sender) ~= UnitName("player") then
+            Trace("%s asks what is running (ZacUI)", tostring(sender))
+            AnswerSync(sender)
+        end
         return
     end
     local tag, kind, left, dur, who = strsplit("\t", msg)
     if tag ~= "T" or not LABEL[kind] then return end
-    left, dur = tonumber(left), tonumber(dur)
-    if not left or left <= 0 then return end
-    local d = DB()
-    local mine = d.active[kind]
-    local now = GetServerTime()
+    dur = tonumber(dur)
     -- only fill in what this client does not already have
-    if mine and math.abs((mine.endAt - now) - left) < 3 then return end
-    d.active[kind] = { endAt = now + left, dur = (dur and dur > 0) and dur or left,
-        sender = (who ~= "" and who) or nil }
-    localEnd[kind] = GetTime() + left
-    if Layout() then StartTicker() end
-    Tick()
+    local took = RT.Fill(kind, left, (dur and dur > 0) and dur or nil, who)
+    Trace("ZacUI answer from %s: %s %s s left (%s)", tostring(sender), tostring(kind), tostring(left), took and "bar started" or "already had it or not usable")
 end
 
 -- ============================================================
@@ -665,6 +869,7 @@ end
 -- EVENTS
 -- ============================================================
 local ev = CreateFrame("Frame")
+local inGroup = false
 local function OnEvent(_, event, ...)
     if event == "CHAT_MSG_ADDON" then
         -- every addon message in the raid comes here: the prefix and the
@@ -672,7 +877,9 @@ local function OnEvent(_, event, ...)
         local prefix, msg, channel, sender = ...
         if not msg then return end
         local mine = prefix == SYNC or prefix == PACK_PREFIX
-        if not mine and not ((DBM_PREFIXES[prefix] or prefix == "BigWigs") and GROUP_CHANNELS[channel]) then
+        local dbm = DBM_PREFIXES[prefix]
+        if not mine and not ((dbm or prefix == "BigWigs") and GROUP_CHANNELS[channel])
+            and not (dbm and channel == "WHISPER") then
             return
         end
         if not DB().enabled then return end
@@ -681,26 +888,50 @@ local function OnEvent(_, event, ...)
         elseif prefix == PACK_PREFIX then
             FromPackBreak(msg)
         elseif GROUP_CHANNELS[channel] then
-            if DBM_PREFIXES[prefix] then FromDBM(msg, sender)
+            if dbm then
+                -- (who runs DBM here: the first to ask next time)
+                local who = Short(sender)
+                if who then modUsers[who] = true end
+                FromDBM(msg, sender)
             elseif prefix == "BigWigs" then FromBigWigs(msg, sender) end
+        elseif dbm and channel == "WHISPER" then
+            FromDBMWhisper(msg, sender)
         end
         return
     end
     local d = DB()
     if not d.enabled then return end
     if event == "START_PLAYER_COUNTDOWN" then
-        local guid, seconds = ...
-        local who
-        if guid and GetPlayerInfoByGUID then who = select(6, GetPlayerInfoByGUID(guid)) end
-        RT.Set("pull", seconds, who)
+        -- (initiatedBy, timeRemaining, totalTime, informChat, initiatedByName)
+        local guid, seconds, total, _, byName = ...
+        Trace("the game's countdown: %s s left of %s, by %s", tostring(seconds), tostring(total), tostring(byName))
+        local who = (type(byName) == "string" and byName ~= "") and Short(byName) or nil
+        if not who and guid and GetPlayerInfoByGUID then who = select(6, GetPlayerInfoByGUID(guid)) end
+        RT.Set("pull", seconds, who, total)
     elseif event == "CANCEL_PLAYER_COUNTDOWN" then
+        Trace("the game's countdown was cancelled")
         RT.Set("pull", 0)
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- saved timers come back with their time left; then ask the group
+        local login, reload = ...
+        Trace("entering the world (login %s, reload %s)", tostring(login), tostring(reload))
         for kind, t in pairs(d.active) do t._localEnd = nil localEnd[kind] = nil end
         if Layout() then StartTicker() end
         Tick()
-        C_Timer.After(3, RT.RequestSync)
+        inGroup = (IsInGroup and IsInGroup()) and true or false
+        -- (a login or a reload asks all the way round; a loading screen in
+        -- between - messages sent during one are lost - asks once)
+        local rounds
+        if not (login or reload) then rounds = 1 end
+        RT.AskSoon(3, rounds)
+    elseif event == "GROUP_JOINED" or event == "GROUP_ROSTER_UPDATE" then
+        -- joined a group whose timer is already running: ask
+        local now = (IsInGroup and IsInGroup()) and true or false
+        if now and not inGroup then
+            Trace("joined a group (%s)", event)
+            RT.AskSoon(2)
+        end
+        inGroup = now
     end
 end
 
@@ -718,6 +949,8 @@ function RT.Apply()
         ev:RegisterEvent("PLAYER_ENTERING_WORLD")
         pcall(ev.RegisterEvent, ev, "START_PLAYER_COUNTDOWN")
         pcall(ev.RegisterEvent, ev, "CANCEL_PLAYER_COUNTDOWN")
+        pcall(ev.RegisterEvent, ev, "GROUP_JOINED")
+        ev:RegisterEvent("GROUP_ROSTER_UPDATE")
         ev:SetScript("OnEvent", OnEvent)
         if Layout() then StartTicker() end
     else
@@ -731,6 +964,28 @@ function RT.Apply()
         end
     end
 end
+
+-- `/zui timers`: the settings that decide it, what is running, and the
+-- trace above, into the chat window.
+function RT.Report()
+    local d = DB()
+    local function P(line) if ns.Print then ns.Print(line) else print("ZacUI: " .. line) end end
+    P(string.format("Timers: bars %s, break %s, pull %s, ask ZacUI users %s, ask DBM users %s. Client %s. Group %s, raid %s, %d members.",
+        d.enabled and "on" or "OFF", d.brk and "on" or "OFF", d.pull and "on" or "OFF", d.sync and "on" or "OFF",
+        d.askMods and "on" or "OFF", tostring((GetBuildInfo and (GetBuildInfo())) or "?"),
+        tostring(IsInGroup and IsInGroup() and true or false), tostring(IsInRaid and IsInRaid() and true or false),
+        (GetNumGroupMembers and GetNumGroupMembers()) or 0))
+    local now = GetServerTime()
+    for _, kind in ipairs(KINDS) do
+        local t = d.active[kind]
+        P(string.format("  %s: %s", LABEL[kind] or kind, t and string.format("%d s left of %d, by %s", t.endAt - now, t.dur or 0, tostring(t.sender or "?")) or "none running"))
+    end
+    if #trace == 0 then P("  Nothing asked or heard yet this session.") end
+    for _, line in ipairs(trace) do P("  " .. line) end
+    P(string.format("  (now %.1f)", GetTime()))
+end
+ns.SlashCommands = ns.SlashCommands or {}
+ns.SlashCommands.timers = function() RT.Report() end
 
 -- A sample of both bars for 15 seconds, to see and place them.
 function RT.Test()

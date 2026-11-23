@@ -1229,7 +1229,8 @@ end)
 -- Zacui_Bags (ns.BagLook). The preview is a small bag window of fake
 -- items, each slot dressed and painted by the bag's own functions.
 Kit.Keywords("bags", "slot slots size spacing gap border quality colour color quest empty "
-    .. "opacity background window font count stack footer money animation open close fade position anchor corner format gold silver copper")
+    .. "opacity background window font count stack footer money animation open close fade position anchor corner format gold silver copper "
+    .. "pin pins pinned unpin row rail alt shift ctrl key accident")
 
 -- The whole bag window as it opens with a typical set of bags (84 slots:
 -- a backpack and four 16-slot bags), its columns from the settings. The
@@ -1457,6 +1458,27 @@ RegisterPage("Bags", function(L)
             .. "search and Sort on the title bar; a pinned row for what you use most; every section under a "
             .. "heading with its count. The bank window follows. ZacUI's own bag window only. Takes a /reload.",
             { after = function() if ns.AskReload then ns.AskReload("The bag window changes after a reload.") end end })
+        L:EndCard()
+
+        -- (2026-11-22) when the x that unpins an item is there: only on
+        -- purpose as shipped. Nothing saved = Alt.
+        L:Card("Pinned row")
+        Kit.Choice(L, "The x that unpins an item", function()
+            return setmetatable({}, {
+                __index = function(_, k) return BagCfgOf()[k] or (k == "pinX" and "alt") or nil end,
+                __newindex = function(_, k, v)
+                    if k == "pinX" and v == "alt" then v = nil end
+                    BagCfgOf()[k] = v
+                end })
+        end, "pinX", {
+            { text = "Only while I hold Alt", value = "alt" },
+            { text = "Only while I hold Shift", value = "shift" },
+            { text = "Only while I hold Ctrl", value = "ctrl" },
+            { text = "Whenever the mouse is over the item", value = "hover" },
+            { text = "Never", value = "off" },
+        }, "A small x in the corner of a pinned item takes it out of the pinned row (the item stays in your bags). "
+            .. "Tied to a key it cannot be clicked by accident. Whatever you pick here, right-clicking the + at "
+            .. "the end of the row lists everything pinned. Side rail window only.")
         L:EndCard()
 
         L:Card("Grid")

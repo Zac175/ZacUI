@@ -871,6 +871,67 @@ function ns.Hidden(...)
     return false
 end
 
+-- ============================================================
+-- A COOLDOWN THAT BEGAN BEFORE THIS PC STARTED (2026-11-22, Zac:
+-- "hearthstone cd can be wrong in zui bags").
+-- ============================================================
+-- The game keeps a cooldown's start in milliseconds since the PC started,
+-- in a 32 bit number. One that began before that - a hearthstone used,
+-- then the PC restarted; a cooldown started on another computer - comes
+-- back from every cooldown read one turn of that number too late: 2^32 ms
+-- (49.7 days) past where it belongs, far in the future (WoWUIBugs #47).
+-- A Cooldown handed that draws a greyed full swipe with the whole length
+-- on it ("1h" on a hearthstone with ten minutes left); anything counting
+-- with it sees weeks to go. With the turn taken off the start is before
+-- zero, which every "start > 0" test reads as no cooldown at all - so the
+-- corrected reading starts just after zero and ENDS WHEN THE COOLDOWN
+-- REALLY ENDS: the time left, "is it running" and a Cooldown's end are
+-- right (its swipe is measured from the PC's start, not from the use).
+--   ns.CooldownFix(start, duration, ...) -> start, duration, ...
+-- Ordinary readings and hidden values come back exactly as given.
+local CLOCK_TURN = 2 ^ 32 / 1000
+local CLOCK_ZERO = 0.001
+function ns.CooldownFix(start, duration, ...)
+    if issecret ~= nil and (issecret(start) or issecret(duration)) then return start, duration, ... end
+    if type(start) ~= "number" or type(duration) ~= "number" then return start, duration, ... end
+    local now = GetTime()
+    if start <= now + 1 or duration <= 0 then return start, duration, ... end
+    local began = start - CLOCK_TURN
+    if began > now then return start, duration, ... end       -- (not this fault: left alone)
+    local ends = began + duration
+    if ends <= now then return 0, 0, ... end                   -- (over already)
+    if began > 0 then return began, duration, ... end
+    return CLOCK_ZERO, ends - CLOCK_ZERO, ...
+end
+
+-- EVERY COOLDOWN ON SCREEN. The action bars, the game's own windows and
+-- other addons' frames are handed that late start by whoever drives them.
+-- One hook on the Cooldown widget's SetCooldown puts the corrected reading
+-- on in its place. It looks at nothing but the two numbers it was given,
+-- and only a start past "now" (which an ordinary cooldown never has) is
+-- acted on.
+do
+    local okc, probe = pcall(CreateFrame, "Cooldown")
+    local mt = okc and probe and getmetatable(probe)
+    local index = mt and type(mt.__index) == "table" and mt.__index
+    local Set = index and index.SetCooldown
+    if Set and hooksecurefunc then
+        local fixing = false
+        hooksecurefunc(index, "SetCooldown", function(self, start, duration, modRate)
+            if fixing then return end
+            if issecret ~= nil and (issecret(start) or issecret(duration)) then return end
+            if type(start) ~= "number" or start <= GetTime() + 1 then return end
+            local s, d = ns.CooldownFix(start, duration)
+            if s == start then return end
+            fixing = true
+            pcall(Set, self, s, d, modRate)
+            fixing = false
+        end)
+        ns._cooldownHooked = true
+    end
+    if probe and probe.Hide then pcall(probe.Hide, probe) end
+end
+
 function ns.HealthHidden(unit)
     local hp, mx = UnitHealth(unit), UnitHealthMax(unit)
     if issecret ~= nil and (issecret(hp) or issecret(mx)) then return true, hp, mx end

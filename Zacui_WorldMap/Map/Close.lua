@@ -374,6 +374,20 @@ local grain
 -- lays it again only near the box's edge; a zoom or a change of strength, every time)
 local GRAIN_BOX = 1.8           -- the box's half extents, of the view's
 local grainBox = {}             -- { u0, v0, u1, v1, hu =, amount = } as last laid
+-- A VIEW THE GRAIN CANNOT BE LAID ON (2026-11-21, WoW Forever: "ZacUI Map grain:
+-- Texture:SetTextCoord(): TexCoord out of range", once in a session). The tile's size comes from
+-- the view's WIDTH (log of hu); the 11-14 fix took whole tiles off the START of each coordinate,
+-- but its END is start + (box / tile). A view with no width, or far taller than wide - the map
+-- window for a frame between two sizes, or before it is laid out - makes the tile zero or tiny:
+-- the end is then infinite, not a number, or thousands of tiles, and the client refuses it. In
+-- ordinary views the box is 5 to 62 tiles across (GRAIN_BOX * 2 / 0.35, twice that for the
+-- finer octave, six times for the tooth), and as many more down as the window is taller than
+-- wide (123 in a window twice as tall: ui/worldmap/t_grain_coords.lua). So: nothing is laid for
+-- a view that is not a real size, and a layer that would repeat more than GRAIN_TILES_MAX times
+-- either way is left out (there is nothing to see through a view that shape). The next real
+-- view lays it again.
+local GRAIN_TILES_MAX = 512
+local function Real(x) return type(x) == "number" and x == x and x > -math.huge and x < math.huge end
 
 local function UpdateGrain(layer, u, v, hu, hv, amount)
 	if not grain then
@@ -385,7 +399,9 @@ local function UpdateGrain(layer, u, v, hu, hv, amount)
 		end
 	end
 	local gb = grainBox
-	if amount <= 0.01 then
+	local W, H = S.Size()
+	if not (Real(u) and Real(v) and Real(hu) and Real(hv) and Real(amount) and Real(W) and Real(H)
+		and hu > 0 and hv > 0 and W > 0 and H > 0) or amount <= 0.01 then
 		if gb.amount ~= 0 then
 			for _, g in ipairs(grain) do g.tex:Hide() end
 			gb.amount = 0
@@ -394,7 +410,6 @@ local function UpdateGrain(layer, u, v, hu, hv, amount)
 	end
 	if gb.hu == hu and gb.amount == amount and u - hu * 1.2 > gb[1] and u + hu * 1.2 < gb[3]
 		and v - hv * 1.2 > gb[2] and v + hv * 1.2 < gb[4] then return end
-	local W, H = S.Size()
 	local u0, u1, v0, v1 = u - hu * GRAIN_BOX, u + hu * GRAIN_BOX, v - hv * GRAIN_BOX, v + hv * GRAIN_BOX
 	gb[1], gb[2], gb[3], gb[4], gb.hu, gb.amount = u0, v0, u1, v1, hu, amount
 	local want = math.log(hu * 2 * W * 0.35) / math.log(2)      -- a mottle tile ~ a third of the view
@@ -409,10 +424,18 @@ local function UpdateGrain(layer, u, v, hu, hv, amount)
 		-- grain was then not laid at all)
 		local tu0, tv0 = u0 * W / size, v0 * H / size
 		local ku, kv = math.floor(tu0), math.floor(tv0)
-		g.tex:SetTexCoord(tu0 - ku, u1 * W / size - ku, tv0 - kv, v1 * H / size - kv)
-		S.PlaceWorld(g.tex, u0, v0, u1, v1)
-		g.tex:SetAlpha(a)
-		g.tex:SetShown(a > 0.004)   -- (an octave crossfaded out still costs the whole view: hidden)
+		local tu1, tv1 = u1 * W / size - ku, v1 * H / size - kv
+		-- (see A VIEW THE GRAIN CANNOT BE LAID ON)
+		if Real(tu0) and Real(tv0) and Real(tu1) and Real(tv1) and Real(a)
+			and tu1 <= GRAIN_TILES_MAX + 1 and tv1 <= GRAIN_TILES_MAX + 1 then
+			g.tex:SetTexCoord(tu0 - ku, tu1, tv0 - kv, tv1)
+			S.PlaceWorld(g.tex, u0, v0, u1, v1)
+			g.tex:SetAlpha(a)
+			g.tex:SetShown(a > 0.004)   -- (an octave crossfaded out still costs the whole view: hidden)
+		else
+			g.tex:Hide()
+			gb.hu = nil                 -- (not laid: the next view lays the box again)
+		end
 	end
 end
 

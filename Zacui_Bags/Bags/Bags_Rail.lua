@@ -26,8 +26,21 @@
 --                 seen), Alts (opens Bags_Alts' list; only while "alt
 --                 bags" is on)
 --   pinned        a row at the top for what you use most: drop an item
---                 on the "+" tile to pin it (again to take it out). By
---                 item id, in bags.pinned; "Hide" folds the row away
+--                 on the "+" tile to pin it. By item id, in bags.pinned;
+--                 "Hide" folds the row away. Taking one out (2026-11-22,
+--                 Zac: "pinned stuff in bags needs an easy way to remove
+--                 pinned items"): the small x in a pinned item's corner;
+--                 or right-click the "+" tile for the list of everything
+--                 pinned - also what is pinned and not in your bags -
+--                 and "Unpin everything" (which asks first); dropping a
+--                 pinned item on the "+" still works.
+--                 THE X ONLY COMES UP ON PURPOSE (the same evening, Zac:
+--                 "less intrusive so i dont maybe accidnetly click
+--                 something and have it unpinned"): bags.pinX, nil /
+--                 "alt" = only while Alt is held over the item (shipped),
+--                 "shift" / "ctrl" the same with that key, "hover" =
+--                 whenever the mouse is over it, "off" = never (the "+"
+--                 tile's list is then the way)
 --   headings      every section under a quiet label with its count
 --   free slots    in the Kind view, folded into one tile you drop onto
 --   the count     "61 / 80" beside the title; the footer is the money's
@@ -494,7 +507,7 @@ function Rail.Attach(view)
     if view.key == "inventory" then
         local plus = CreateFrame("Button", nil, grid)
         plus:SetFrameLevel(grid:GetFrameLevel() + 6)
-        plus:RegisterForClicks("LeftButtonUp")
+        plus:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         local bg = plus:CreateTexture(nil, "BACKGROUND")
         bg._zui_own = true
         bg:SetAllPoints()
@@ -511,12 +524,20 @@ function Rail.Attach(view)
         plus:_zPaint()
         local function Drop() Rail.PinCursor(view) end
         plus:SetScript("OnReceiveDrag", Drop)
-        plus:SetScript("OnClick", Drop)
+        plus:SetScript("OnClick", function(self, button)
+            -- (an item in hand is pinned or unpinned with either button)
+            if button == "RightButton" and not (GetCursorInfo and GetCursorInfo() == "item") then
+                GameTooltip:Hide()
+                Rail.PinMenu(view, self)
+            else
+                Drop()
+            end
+        end)
         plus:SetScript("OnEnter", function(self)
             self._zHot = true
             self:_zPaint()
             RailTip(self, "Pinned items", "Drop an item here to keep it in this row, whatever else the bag "
-                .. "is showing. Drop a pinned item here to take it out again.")
+                .. "is showing.\n\n" .. Rail.PinXHelp())
         end)
         plus:SetScript("OnLeave", function(self)
             self._zHot = nil
@@ -525,6 +546,50 @@ function Rail.Attach(view)
         end)
         plus:Hide()
         view.railPlus = plus
+
+        -- the x in a pinned item's corner: one button, moved to whichever
+        -- pinned item the mouse is over (our own frame over the corner;
+        -- the item's own click is untouched)
+        local x = UI.CloseX(grid, 14, function(self)
+            local id = self._zPinId
+            self:Hide()
+            GameTooltip:Hide()
+            -- (a click only counts while the x was meant to be there:
+            -- the key let go between the x showing and the click)
+            if id and Rail.PinXWanted() then Rail.Unpin(view, id) end
+        end)
+        x:SetFrameLevel(grid:GetFrameLevel() + 30)
+        local xbg = x:CreateTexture(nil, "BACKGROUND")
+        xbg._zui_own = true
+        xbg:SetAllPoints()
+        xbg:SetTexture(FLAT)
+        xbg:SetVertexColor(0, 0, 0, 0.75)
+        x:HookScript("OnEnter", function(self)
+            RailTip(self, "Unpin", "Takes this item out of the pinned row. It stays in your bags.")
+        end)
+        x:HookScript("OnLeave", function(self)
+            GameTooltip:Hide()
+            Rail.PinXCheck(view)
+        end)
+        x:Hide()
+        view.railX = x
+
+        -- the key going down or up with the mouse already over a pinned
+        -- item (listened to only while the window is open)
+        local watch = CreateFrame("Frame", nil, grid)
+        watch:SetScript("OnEvent", function() Rail.PinXSync(view) end)
+        local function Listen(on)
+            if on then watch:RegisterEvent("MODIFIER_STATE_CHANGED")
+            else watch:UnregisterEvent("MODIFIER_STATE_CHANGED") end
+        end
+        frame:HookScript("OnShow", function() Listen(true) end)
+        frame:HookScript("OnHide", function()
+            Listen(false)
+            view.railOver = nil
+            x:Hide()
+        end)
+        if frame:IsShown() then Listen(true) end
+        view.railXWatch = watch
     end
 
     -- over the folded free tile: how many are free (it takes no mouse,
@@ -571,6 +636,179 @@ function Rail.PinCursor(view)
     c.railPinsHidden = nil
     Relayout(view)
     return true
+end
+
+-- TAKING A PIN OUT ---------------------------------------------------
+-- one item
+function Rail.Unpin(view, id)
+    id = tonumber(id)
+    local pins = Pinned()
+    if not (id and pins[id]) then return false end
+    pins[id] = nil
+    if view.railX then view.railX:Hide() end
+    Relayout(view)
+    return true
+end
+-- all of them
+function Rail.UnpinAll(view)
+    local pins = Pinned()
+    local n = 0
+    for id in pairs(pins) do pins[id] = nil n = n + 1 end
+    if view.railX then view.railX:Hide() end
+    if n > 0 then Relayout(view) end
+    return n
+end
+-- ...asked first: one slip in the list would otherwise empty the row
+function Rail.AskUnpinAll(view)
+    local n = 0
+    for _, on in pairs(Pinned()) do if on then n = n + 1 end end
+    if n == 0 then return false end
+    if not UI.Confirm then Rail.UnpinAll(view) return true end
+    UI.Confirm({
+        title = "Pinned items",
+        text = (n == 1) and "Unpin the one pinned item? It stays in your bags."
+            or ("Unpin all " .. n .. " pinned items? They stay in your bags."),
+        acceptText = "Unpin everything",
+        destructive = true,
+        onAccept = function() Rail.UnpinAll(view) end,
+    })
+    return true
+end
+-- everything pinned, by name: { id, name, have } - `have` false for an
+-- item that is pinned and not in the bags (its pin shows nowhere, so
+-- this list is the only place it can be taken out)
+function Rail.PinnedList(view)
+    local have = {}
+    for _, bag in ipairs(view and view.bagList or {}) do
+        for slot = 1, Bags.Slots(bag) do
+            local key = ItemKey(Bags.Item(bag, slot))
+            if key then have[key] = true end
+        end
+    end
+    local out = {}
+    for id, on in pairs(Pinned()) do
+        if on and tonumber(id) then
+            local name = GetItemInfo and (GetItemInfo(id)) or nil
+            out[#out + 1] = { id = tonumber(id), name = name or ("Item " .. id), have = have[tonumber(id)] or false }
+        end
+    end
+    table.sort(out, function(a, b)
+        if a.have ~= b.have then return a.have end
+        if a.name ~= b.name then return a.name < b.name end
+        return a.id < b.id
+    end)
+    return out
+end
+-- the "+" tile's right-click menu, as the rows the shared menu draws
+function Rail.PinMenuItems(view)
+    local list = Rail.PinnedList(view)
+    local items = { { text = "Pinned items", isTitle = true } }
+    if #list == 0 then
+        items[#items + 1] = { text = "Nothing is pinned. Drop an item on the +.", disabled = true }
+        return items
+    end
+    for _, e in ipairs(list) do
+        items[#items + 1] = {
+            text = "Unpin " .. e.name .. (e.have and "" or "  (not in your bags)"),
+            keepOpen = false,
+            func = function() Rail.Unpin(view, e.id) end,
+        }
+    end
+    items[#items + 1] = { separator = true }
+    items[#items + 1] = { text = "Unpin everything", func = function() Rail.AskUnpinAll(view) end }
+    return items
+end
+function Rail.PinMenu(view, anchor)
+    if not UI.ContextMenu then return end
+    UI.ContextMenu(Rail.PinMenuItems(view), { anchor = anchor })
+end
+
+-- WHEN THE X COMES UP (bags.pinX; nothing saved = Alt). A key's own
+-- click on an item does something in the game (Shift links or splits,
+-- Ctrl tries it on), but the x is our own button over the corner, so the
+-- key only decides whether it is there.
+local PINX_KEY = {
+    alt   = { name = "Alt",   down = function() return IsAltKeyDown and IsAltKeyDown() end },
+    shift = { name = "Shift", down = function() return IsShiftKeyDown and IsShiftKeyDown() end },
+    ctrl  = { name = "Ctrl",  down = function() return IsControlKeyDown and IsControlKeyDown() end },
+}
+Rail.PINX_MODES = { "alt", "shift", "ctrl", "hover", "off" }
+function Rail.PinXMode()
+    local v = Cfg().pinX
+    if v == "hover" or v == "off" or PINX_KEY[v] then return v end
+    return "alt"
+end
+-- is the x allowed on screen this moment
+function Rail.PinXWanted()
+    local mode = Rail.PinXMode()
+    if mode == "off" then return false end
+    if mode == "hover" then return true end
+    return PINX_KEY[mode].down() and true or false
+end
+-- how to take a pin out, in words (the "+" tile's tooltip)
+function Rail.PinXHelp()
+    local mode = Rail.PinXMode()
+    local list = "right-click here for the list of everything pinned"
+    if mode == "off" then return "To take one out: " .. list .. "." end
+    if mode == "hover" then return "To take one out: the x in its corner, or " .. list .. "." end
+    return "To take one out: hold " .. PINX_KEY[mode].name .. " with the mouse over it and click the x in "
+        .. "its corner, or " .. list .. "."
+end
+
+-- the x over the pinned item under the mouse
+function Rail.PinXShow(view, btn)
+    local x = view.railX
+    if not (x and btn and btn._zPinId) then return end
+    view.railOver = btn
+    if not Rail.PinXWanted() then
+        x:Hide()
+        return
+    end
+    x._zPinId, x._zFor = btn._zPinId, btn
+    x:ClearAllPoints()
+    x:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -1, -1)
+    x:Show()
+end
+-- the key went down or up (or the setting changed): the x for the pinned
+-- item the mouse is already over comes or goes
+function Rail.PinXSync(view)
+    local x = view.railX
+    if not x then return end
+    if not Rail.PinXWanted() then
+        if x:IsShown() then
+            x:Hide()
+            if GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == x then GameTooltip:Hide() end
+        end
+        return
+    end
+    local btn = view.railOver
+    if btn and btn:IsShown() and btn._zPinId and btn.IsMouseOver and btn:IsMouseOver() then
+        Rail.PinXShow(view, btn)
+    end
+end
+-- gone once the mouse is over neither that item nor the x (looked at a
+-- moment after either is left, so going from the item to the x keeps it)
+function Rail.PinXCheck(view)
+    local x = view.railX
+    if not (x and x:IsShown()) then return end
+    C_Timer.After(0.05, function()
+        if not x:IsShown() then return end
+        local btn = x._zFor
+        local over = (x.IsMouseOver and x:IsMouseOver())
+            or (btn and btn:IsShown() and btn._zPinId == x._zPinId and btn.IsMouseOver and btn:IsMouseOver())
+        if not over then x:Hide() end
+    end)
+end
+-- a slot's button says when the mouse comes and goes (once per button)
+local function HookPinHover(view, btn)
+    if btn._zPinHooked or not btn.HookScript then return end
+    btn._zPinHooked = true
+    btn:HookScript("OnEnter", function(self) if self._zPinId then Rail.PinXShow(view, self) end end)
+    btn:HookScript("OnLeave", function(self)
+        -- (the x keeps the item it is on while the mouse is on the x)
+        if view.railOver == self and not (view.railX and view.railX:IsShown()) then view.railOver = nil end
+        Rail.PinXCheck(view)
+    end)
 end
 
 -- a section heading: its name, its count, a hairline (and, on the pinned
@@ -635,7 +873,12 @@ local function Model(view)
                 local item = Bags.Item(bag, slot)
                 local code
                 if item then m.used = m.used + 1 end
-                if pinsOn and item and pins[ItemKey(item) or 0] then
+                local pinKey = pinsOn and item and ItemKey(item) or nil
+                if pinKey and not pins[pinKey] then pinKey = nil end
+                -- (what the x in its corner would take out; nil on every other slot)
+                btn._zPinId = pinKey
+                if pinKey then
+                    HookPinHover(view, btn)
                     m.pinned[#m.pinned + 1] = btn
                     code = "p"
                 elseif mode == "new" then

@@ -167,21 +167,24 @@ local function PreviewLayout(cfg, P)
         people[#people + 1] = d
     end
     local sp = pcfg.spacing or 4
-    local colH = 5 * pcfg.height + 4 * sp
+    -- (the box a party slot really draws: the look's own under a game look)
+    local pw, ph = pcfg.width, pcfg.height
+    if ns.GroupBox then pw, ph = ns.GroupBox("party", pcfg) end
+    local colH = 5 * ph + 4 * sp
     local gap = cfg.gap or 4
-    local total = pcfg.width + gap + cfg.width
+    local total = pw + gap + cfg.width
     local left = (cfg.side == "LEFT")
     local x0, y0 = -total / 2, colH / 2
     local partyX = left and (x0 + cfg.width + gap) or x0
-    local targetX = left and x0 or (x0 + pcfg.width + gap)
+    local targetX = left and x0 or (x0 + pw + gap)
     return people, function(i)
         if i <= COUNT then
             -- beside party<i>: the column's i+1-th cell, centred on it
-            local cy = y0 - i * (pcfg.height + sp) - pcfg.height / 2
+            local cy = y0 - i * (ph + sp) - ph / 2
             return targetX, cy + cfg.height / 2
         end
         local r = i - COUNT
-        return partyX, y0 - (r - 1) * (pcfg.height + sp)
+        return partyX, y0 - (r - 1) * (ph + sp)
     end
 end
 

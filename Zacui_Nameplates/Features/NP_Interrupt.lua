@@ -144,6 +144,9 @@ local function CooldownLeft(sp)
         if ok then start, dur = s, d end
     end
     if start == nil or dur == nil or Sec(start) or Sec(dur) then return nil end
+    -- (a cooldown that began before this PC started: Core_Flavor's correction)
+    local Z = _G.ZacUI
+    if Z and Z.CooldownFix then start, dur = Z.CooldownFix(start, dur) end
     if start == 0 or dur <= 1.5 then return 0 end
     local left = start + dur - GetTime()
     return left > 0 and left or 0

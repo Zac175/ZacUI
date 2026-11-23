@@ -242,35 +242,64 @@ local function IsParty(frame)
     return (mt and mt.__index == party) and true or false
 end
 
-function K.For(frame)
-    if not frame then return nil end
-    local kit, look = K.Active()
-    if not kit then return nil end
-    local own
-    if frame.isGroupUnit then
-        -- (2026-11-08) the party wears the game's small party frame: the
-        -- classic kit's small frame art (UI-SmallTargetingFrame, the party
-        -- frame's own layout), a modern kit's small frame. Raid stays bars.
-        if not IsParty(frame) then return nil end
-        own = "pet"
-    else
-        local key = KeyOf(frame)
-        if not key and frame.unit then key = frame.unit end
-        own = key and KIND[key]
-    end
-    if not own then return nil end
+-- the geometry a kind of frame wears under this kit ("pet" on a party slot)
+local function Geom(kit, own, slot)
     -- (a kit without pet art draws the pet on its small frame)
     local kind = (own == "pet" and not kit.pet) and "mini" or own
     -- (a party slot: the kit's party frame where it has one, and this
     -- client has its art)
-    if frame.isGroupUnit and kit.party and AtlasOK(kit.party.atlas) then kind = "party" end
+    if slot and kit.party and AtlasOK(kit.party.atlas) then kind = "party" end
     local G = kit[kind]
     -- a modern kit whose art this client lacks: the classic kit, whole
     if G and G.atlas and not AtlasOK(G.atlas) then
         kit, kind = CLASSIC, own
         G = CLASSIC[kind]
     end
-    return G, kit, kind, look
+    return G, kit, kind
+end
+
+function K.For(frame)
+    if not frame then return nil end
+    local kit, look = K.Active()
+    if not kit then return nil end
+    local own, slot
+    -- A PARTY SLOT'S STAND-IN IS A PARTY SLOT (2026-11-21, Zac on move
+    -- mode's sample party under WoW Forever: "if this is what the party
+    -- frames actually look like its wrong"). A frame that carries the
+    -- party's settings and is no header child - move mode's samples, the
+    -- settings preview's, the party beside its targets - drew ZacUI's own
+    -- layout while the real slots wore the kit. No live frame but a party
+    -- slot carries those settings, so the settings say what it is.
+    if frame.isGroupUnit or IsParty(frame) then
+        -- (2026-11-08) the party wears the game's small party frame: the
+        -- classic kit's small frame art (UI-SmallTargetingFrame, the party
+        -- frame's own layout), a modern kit's small frame. Raid stays bars.
+        if not IsParty(frame) then return nil end
+        own, slot = "pet", true
+    else
+        local key = KeyOf(frame)
+        if not key and frame.unit then key = frame.unit end
+        own = key and KIND[key]
+    end
+    if not own then return nil end
+    local G, k2, kind = Geom(kit, own, slot)
+    return G, k2, kind, look
+end
+
+-- THE BOX A GROUP'S SLOTS REALLY DRAW: the kit's box for the party under a
+-- game look (the kit pass sizes each slot to it, whatever width and height
+-- are saved), the saved width and height otherwise. Everything that lays
+-- slots out without the header - move mode's samples, the settings
+-- preview, the drag handle - asks here, so it stands where the real slots
+-- stand.
+function ns.GroupBox(kind, cfg)
+    local w, h = cfg and cfg.width or 0, cfg and cfg.height or 0
+    if kind ~= "party" then return w, h end
+    local kit = K.Active()
+    if not kit then return w, h end
+    local G = Geom(kit, "pet", true)
+    if G and G.w and G.h then return G.w, G.h end
+    return w, h
 end
 
 -- ----------------------------------------------------------------------------

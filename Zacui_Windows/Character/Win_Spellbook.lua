@@ -248,6 +248,9 @@ local function UpdateCooldown(row)
     else
         start, duration, enable = GetSpellCooldown(e.slot, e.book)
     end
+    -- (a cooldown that began before this PC started: Core_Flavor's correction)
+    local Z = _G.ZacUI
+    if Z and Z.CooldownFix then start, duration = Z.CooldownFix(start, duration) end
     if CooldownFrame_Set then
         CooldownFrame_Set(cd, start or 0, duration or 0, enable or 0)
     elseif start and duration and duration > 0 then

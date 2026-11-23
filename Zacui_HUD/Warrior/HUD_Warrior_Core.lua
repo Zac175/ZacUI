@@ -313,6 +313,32 @@ function WH.TrinketBuffIcon(b)
     local item = b and b.name and WH.trinketIconItem[b.name:lower()]
     return (item and ItemIcon(item)) or (b and b.icon)
 end
+-- WHICH SLOT A TRINKET BUFF CAME FROM (2026-11-22, Zac: "trinket 2 only
+-- shows cooldown, not active time like trinket 1 ... when i show trinket
+-- 1 and 2, and click 2, trinket 1 is the buff time"). A buff belongs to
+-- the slot whose trinket's own use effect has its name (GetItemSpell: the
+-- spell a trinket casts when used - Earthstrike casts Earthstrike), or
+-- whose trinket is the one a buff of another name is known to come from:
+-- the list above (Arcane Shroud from the Fetish) and the procs below.
+-- buff name, lower case -> the item it comes from
+WH.TRINKET_PROC_ITEMS = {
+    ["insight of the qiraji"] = 21670,      -- Badge of the Swarmguard's stacking proc
+}
+-- -> 13, 14, or nil when neither equipped trinket is where it came from
+-- (a trinket swapped out with its buff still running)
+function WH.TrinketBuffSlot(name)
+    if type(name) ~= "string" then return nil end
+    local key = name:lower()
+    local item = WH.trinketIconItem[key] or WH.TRINKET_PROC_ITEMS[key]
+    local S = WH.State          -- (declared further down this file)
+    if not S then return nil end
+    for slot = 13, 14 do
+        local t = (slot == 13) and S.trinket13 or S.trinket14
+        if t.itemId and (t.useName == key or (item and item == t.itemId)) then return slot end
+    end
+    return nil
+end
+
 local function ResolveTrinketBuffs()
     for spell, item in pairs(WH.TRINKET_BUFF_ITEMS) do
         local name = (GetSpellInfo and GetSpellInfo(spell)) or WH.TRINKET_BUFF_FALLBACK[spell]
@@ -1051,10 +1077,22 @@ local function UpdateMisc()
     for slot = 13, 14 do
         local t = (slot == 13) and S.trinket13 or S.trinket14
         t.texture = GetInventoryItemTexture and GetInventoryItemTexture("player", slot) or nil
+        -- which trinket it is and what its use effect is called (asked
+        -- again a few times while the client has not loaded the item yet)
+        local id = GetInventoryItemID and GetInventoryItemID("player", slot) or nil
+        if ns.IsSecret(id) then id = nil end
+        if id ~= t.itemId then t.itemId, t.useName, t.useAsk = id, nil, 0 end
+        if id and t.useName == nil and (t.useAsk or 0) < 10 and GetItemSpell then
+            t.useAsk = (t.useAsk or 0) + 1
+            local use = GetItemSpell(id)
+            if type(use) == "string" and not ns.IsSecret(use) and use ~= "" then t.useName = use:lower() end
+        end
         if GetInventoryItemCooldown then
             local start, duration, enable = GetInventoryItemCooldown("player", slot)
             -- (hidden on WoW Forever: read as ready)
             if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 1 end
+            -- (began before this PC started: Core_Flavor)
+            if ns.CooldownFix then start, duration = ns.CooldownFix(start, duration) end
             t.start, t.duration, t.enable = start or 0, duration or 0, enable or 0
         end
     end

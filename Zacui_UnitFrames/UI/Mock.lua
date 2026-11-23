@@ -29,12 +29,19 @@ local function fillMock(f, label, hp)
     if f.Health then
         f.Health:SetMinMaxValues(0, 1); f.Health:SetValue(hp)
         local hc = f.cfg
-        if hc and not hc.healthClassColor and hc.healthColor then
+        if f._zKitOn and ns.HealthColorFor then
+            -- (under a game look the slot wears the game's colours: Kit.lua)
+            f.Health:SetStatusBarColor(ns.HealthColorFor(hc, true, select(2, UnitClass("player"))))
+        elseif hc and not hc.healthClassColor and hc.healthColor then
             f.Health:SetStatusBarColor(hc.healthColor[1], hc.healthColor[2], hc.healthColor[3])
         else
             f.Health:SetStatusBarColor(0.35, 0.65, 0.35)  -- stand-in for class color (no real unit here)
         end
-        if f.Health.text then f.Health.text:SetText(math.floor(hp * 100) .. "%") end
+        -- (the number only where the real slot shows one: nothing with the health text off)
+        if f.Health.text then
+            local mode = (hc and hc.healthText) or "percent"
+            f.Health.text:SetText(mode == "none" and "" or (math.floor(hp * 100) .. "%"))
+        end
     end
     -- Incoming-heal preview: two sample chips (a direct heal and a dimmed HoT)
     -- so the move-mode preview shows what the real display looks like. Mocks have
@@ -52,7 +59,9 @@ local function fillMock(f, label, hp)
     if f.Name then
         f.Name:SetText(label)
         local nc = f.cfg
-        if nc and not nc.nameClassColor and nc.nameColor then
+        if f._zKitOn and ns.NameColorFor then
+            f.Name:SetTextColor(ns.NameColorFor(nc, true, select(2, UnitClass("player"))))
+        elseif nc and not nc.nameClassColor and nc.nameColor then
             f.Name:SetTextColor(nc.nameColor[1], nc.nameColor[2], nc.nameColor[3])
         else
             f.Name:SetTextColor(0.9, 0.9, 0.9)
@@ -90,6 +99,10 @@ function ns.GroupLayout(kind, cfg, chatRow, honourPlayer)
     local dir        = (cfg.columnGrowth == "LEFT") and -1 or 1
     local colSpacing = cfg.columnSpacing or 0
     local spacing    = cfg.spacing or 0
+    -- (the party's slots under a game look are the look's own box, not the
+    -- saved width and height: Kit.lua's ns.GroupBox)
+    local boxW, boxH = cfg.width, cfg.height
+    if ns.GroupBox then boxW, boxH = ns.GroupBox(kind, cfg) end
 
     -- place(idx) -> x, y, label. Grouped raid mirrors Groups.lua's
     -- positionHeaders(): one column per group, wrapping to a new block-row
@@ -121,13 +134,13 @@ function ns.GroupLayout(kind, cfg, chatRow, honourPlayer)
         local skip = cfg.showPlayer and 0 or 1
         count = cfg.showPlayer and 5 or 4
         place = function(idx)
-            return (idx - 1) * (cfg.width + gap), 0, PARTY_NAMES[idx + skip] or ("Party " .. idx)
+            return (idx - 1) * (boxW + gap), 0, PARTY_NAMES[idx + skip] or ("Party " .. idx)
         end
     elseif kind == "party" then
         local skip = (honourPlayer and not cfg.showPlayer) and 1 or 0
         count = 5 - skip
         place = function(idx)
-            local y = (idx - 1) * (cfg.height + spacing)
+            local y = (idx - 1) * (boxH + spacing)
             return 0, growUp and y or -y, PARTY_NAMES[idx + skip] or ("Party " .. idx)
         end
     else

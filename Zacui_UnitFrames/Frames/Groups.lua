@@ -125,7 +125,11 @@ ns.StyleGroupChild = styleChild
 local function ensureMover(host, kind, cfg, spanW)
     if host.mover then return host.mover end
     local m = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    m:SetSize(math.max(spanW or cfg.width, 90), 22)
+    -- (over the slots as they really draw: the look's own box for the party
+    -- under a game look, Kit.lua's ns.GroupBox)
+    local bw = cfg.width
+    if ns.GroupBox then bw = ns.GroupBox(kind, cfg) end
+    m:SetSize(math.max(spanW or bw, 90), 22)
     m:SetPoint("BOTTOMLEFT", host, "TOPLEFT", 0, 2)
     m:SetFrameStrata("HIGH")
     m:SetMovable(true)
@@ -227,7 +231,9 @@ local function buildHeader(name, kind, cfg, container, groupFilter)
     h:SetAttribute("groupFilter", groupFilter)
 
     -- Secure per-child snippet: size + clicks, then bridge to styling.
-    h:SetAttribute("initialConfigFunction", ns.ChildConfigSnippet(cfg))
+    local bw, bh = cfg.width, cfg.height
+    if ns.GroupBox then bw, bh = ns.GroupBox(kind, cfg) end
+    h:SetAttribute("initialConfigFunction", ns.ChildConfigSnippet(cfg, bw, bh))
 
     return h
 end
@@ -235,7 +241,12 @@ end
 -- The per-child snippet, rebuilt whenever the size changes so children the
 -- header makes later come out at the new size. Sizes keep two decimals:
 -- a raid fitted to the chat window's width is rarely a whole number.
-function ns.ChildConfigSnippet(cfg)
+-- w, h: the box the slots really draw when that is not the saved width and
+-- height (the party under a game look, Kit.lua's ns.GroupBox). The header
+-- sizes itself from its first child and centres every child on that width,
+-- so a child made at the saved size and then given the look's box sat off
+-- to one side until the next roster change laid the header out again.
+function ns.ChildConfigSnippet(cfg, w, h)
     return ([[
         self:SetWidth(%.2f)
         self:SetHeight(%.2f)
@@ -248,7 +259,7 @@ function ns.ChildConfigSnippet(cfg)
             cc:SetAttribute("clickcast_button", self)
             cc:RunAttribute("clickcast_register")
         end
-    ]]):format(cfg.width, cfg.height)
+    ]]):format(w or cfg.width, h or cfg.height)
 end
 
 -- Cheap, re-appliable layout attributes: row growth, sort, and (flat raid only)
@@ -412,23 +423,30 @@ function ns.SpawnHeader(kind)
     -- snippet for children made later, and nudge each header to re-lay.
     container.ApplySize = function(self)
         if InCombatLockdown() then return false end
+        -- (the box the slots really draw: the saved width and height, or the
+        -- look's own box for the party under a game look - which the kit
+        -- pass gives each slot, so sizing them to the saved one here only
+        -- to have the kit size them back left the header laid out for the
+        -- wrong width)
+        local bw, bh = cfg.width, cfg.height
+        if ns.GroupBox then bw, bh = ns.GroupBox(kind, cfg) end
         for _, h in ipairs(self.headers) do
             local changed = false
             for _, child in ipairs({ h:GetChildren() }) do
                 local w, ht = child:GetWidth(), child:GetHeight()
-                if math.abs((w or 0) - cfg.width) > 0.01 or math.abs((ht or 0) - cfg.height) > 0.01 then
-                    child:SetSize(cfg.width, cfg.height)
+                if math.abs((w or 0) - bw) > 0.01 or math.abs((ht or 0) - bh) > 0.01 then
+                    child:SetSize(bw, bh)
                     changed = true
                 end
             end
-            if changed or self._sizeW ~= cfg.width or self._sizeH ~= cfg.height then
-                h:SetAttribute("initialConfigFunction", ns.ChildConfigSnippet(cfg))
+            if changed or self._sizeW ~= bw or self._sizeH ~= bh then
+                h:SetAttribute("initialConfigFunction", ns.ChildConfigSnippet(cfg, bw, bh))
                 h:SetAttribute("point", h:GetAttribute("point"))
             end
         end
-        self._sizeW, self._sizeH = cfg.width, cfg.height
+        self._sizeW, self._sizeH = bw, bh
         if self.mover then
-            local span = cfg.width
+            local span = bw
             if grouped then
                 local cols = math.max(1, math.min(8, cfg.maxColumns or 8))
                 span = cols * cfg.width + (cols - 1) * (cfg.columnSpacing or 0)
@@ -438,6 +456,7 @@ function ns.SpawnHeader(kind)
         return true
     end
     container._sizeW, container._sizeH = cfg.width, cfg.height
+    if ns.GroupBox then container._sizeW, container._sizeH = ns.GroupBox(kind, cfg) end
 
     container.LeanRestyle = function(self)
         if not InCombatLockdown() then self:ApplySize() end
@@ -652,7 +671,10 @@ function ns.FitRaidToChat()
         -- the preview shows the party row along the top as well: the raid
         -- grid goes under it
         if preview and ns.partyChatRow and l and ns.db.party then
-            t = t - (ns.db.party.height or 0) - 6
+            -- (the row as tall as its slots really are: Kit.lua's ns.GroupBox)
+            local ph = ns.db.party.height or 0
+            if ns.GroupBox then ph = select(2, ns.GroupBox("party", ns.db.party)) or ph end
+            t = t - ph - 6
         end
         if l and r - l > 40 and t - b > 40 then
             local cols = math.max(1, math.min(8, cfg.maxColumns or 8))

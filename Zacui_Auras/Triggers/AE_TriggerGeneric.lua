@@ -915,11 +915,20 @@ local function GCDInfo()
 end
 G.GCDInfo = GCDInfo
 
+-- (a cooldown that began before this PC started comes back with its start
+-- far in the future: ZacUI's correction, Core_Flavor)
+local function ClockFix(start, dur)
+    local Z = _G.ZacUI
+    if Z and Z.CooldownFix then return Z.CooldownFix(start, dur) end
+    return start, dur
+end
+
 -- the cooldown of a spell, with the global cooldown told apart
 local function SpellCD(spell, showgcd)
     local ok, start, dur, enabled = pcall(GetSpellCooldown, spell)
     if not ok or start == nil then return nil end
     start, dur = start or 0, dur or 0
+    start, dur = ClockFix(start, dur)
     local gStart, gDur = GCDInfo()
     local isGCD = dur > 0 and gDur > 0 and math.abs(start - gStart) < 0.01 and math.abs(dur - gDur) < 0.01
     local gcdCooldown = false
@@ -1193,7 +1202,8 @@ local function ItemCooldown(item)
     if not id then return 0, 0, 1 end
     local ok, start, dur, enabled = pcall(fn, id)
     if not ok then return 0, 0, 1 end
-    return start or 0, dur or 0, enabled
+    start, dur = ClockFix(start or 0, dur or 0)
+    return start, dur, enabled
 end
 
 local function ChosenItem(tr)
@@ -1228,6 +1238,7 @@ local function ItemCD(slot)
                 local s = tonumber(tr.itemSlot) or 13
                 start, dur, enabled = GetInventoryItemCooldown("player", s)
                 if Secret(start, dur) or Secret(enabled) then start, dur, enabled = 0, 0, 1 end   -- (WoW Forever)
+                start, dur = ClockFix(start, dur)
                 v.icon = GetInventoryItemTexture("player", s)
                 local link = GetInventoryItemLink("player", s)
                 v.name = link and link:match("%[(.-)%]") or nil
@@ -1286,6 +1297,7 @@ local function ReadyKind(slot)
                 local s = tonumber(tr.itemSlot) or 13
                 start, dur = GetInventoryItemCooldown("player", s)
                 if Secret(start, dur) then start, dur = 0, 0 end   -- (WoW Forever)
+                start, dur = ClockFix(start, dur)
                 icon = GetInventoryItemTexture("player", s)
                 local link = GetInventoryItemLink("player", s)
                 name = link and link:match("%[(.-)%]") or nil

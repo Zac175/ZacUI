@@ -244,8 +244,14 @@ function W.Cooldown(id)
     if not (l and CC and CC.GetContainerItemCooldown) then return 0, 0 end
     local s, d = CC.GetContainerItemCooldown(l[1], l[2])
     s, d = tonumber(s) or 0, tonumber(d) or 0
-    -- a start from before this session's clock reads as hours: brought back
-    if s > GetTime() + 1 then s = s - 4294967.296 end
+    -- a start from before this PC started reads as hours: brought back
+    -- (Core_Flavor's ns.CooldownFix - it keeps the start above zero, which
+    -- the "s > 0" tests on this reading need)
+    if ns.CooldownFix then
+        s, d = ns.CooldownFix(s, d)
+    elseif s > GetTime() + 1 then
+        s = s - 4294967.296
+    end
     return s, d
 end
 

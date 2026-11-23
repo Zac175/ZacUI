@@ -208,6 +208,11 @@ local STOCK = { ACTIONBUTTON = "ActionButton", MULTIACTIONBAR1BUTTON = "MultiBar
 local NumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
 local SlotItem = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
 local SlotCD = (C_Container and C_Container.GetContainerItemCooldown) or GetContainerItemCooldown
+-- (a cooldown that began before this PC started: Core_Flavor's correction)
+if SlotCD and ns.CooldownFix then
+    local raw, Fix = SlotCD, ns.CooldownFix
+    SlotCD = function(bag, slot) return Fix(raw(bag, slot)) end
+end
 local cdBag, cdSlot
 local air = nil
 local watchUntil = 0

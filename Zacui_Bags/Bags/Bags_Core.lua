@@ -91,11 +91,15 @@ local function QuestInfo(bag, slot)
     return false
 end
 
+-- (ns.CooldownFix: a cooldown that began before this PC started comes back
+-- with a start far in the future - a hearthstone greyed with "1h" on it;
+-- Core_Flavor)
+local Fix = ns.CooldownFix or function(...) return ... end
 local function Cooldown(bag, slot)
     if C and C.GetContainerItemCooldown then
-        return C.GetContainerItemCooldown(bag, slot)
+        return Fix(C.GetContainerItemCooldown(bag, slot))
     end
-    if GetContainerItemCooldown then return GetContainerItemCooldown(bag, slot) end
+    if GetContainerItemCooldown then return Fix(GetContainerItemCooldown(bag, slot)) end
     return 0, 0, 0
 end
 

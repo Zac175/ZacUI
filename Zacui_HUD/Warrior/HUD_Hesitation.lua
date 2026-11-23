@@ -30,6 +30,11 @@ local GetTime = GetTime
 local GetSpellInfo = GetSpellInfo
 -- (WoW Forever: the HUD's reader, which never hands back a hidden cooldown)
 local GetSpellCooldown = (issecretvalue ~= nil and ns.HUD and ns.HUD.GetSpellCooldown) or GetSpellCooldown
+-- (a cooldown that began before this PC started: Core_Flavor's correction)
+if ns.CooldownFix and GetSpellCooldown then
+    local raw, Fix = GetSpellCooldown, ns.CooldownFix
+    GetSpellCooldown = function(a, b) return Fix(raw(a, b)) end
+end
 local IsUsableSpell = IsUsableSpell
 local IsSpellInRange = IsSpellInRange
 local UnitExists, UnitCanAttack, UnitIsDeadOrGhost = UnitExists, UnitCanAttack, UnitIsDeadOrGhost
@@ -790,6 +795,7 @@ local function CdRemaining(e, now)
     if e.slot then
         s, d, en = GetInventoryItemCooldown("player", e.slot)
         if ns.Hidden(s, d, en) then return 0 end  -- (hidden on WoW Forever: unknown, so ready)
+        if ns.CooldownFix then s, d = ns.CooldownFix(s, d) end
         if en == 0 then return nil end           -- a trinket with nothing to use
     else
         s, d = GetSpellCooldown(e.name)

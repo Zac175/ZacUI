@@ -1447,10 +1447,9 @@ local AURA_DEFS = {
     -- the second trinket slot (2026-11-19, Zac: "for the hud it needs to
     -- show trinket 1 and 2 ... i want slot 2 off by default and only slot
     -- 1 showing but some people want it the other way around"): its icon
-    -- with its cooldown, beside the first. Off until ticked (`add`); either
-    -- slot can be the one shown, or both. A trinket's buff that is up
-    -- still shows through Trinket 1's icon while that one is on, whichever
-    -- slot it came from (the buff list is by name, not by slot).
+    -- beside the first. Off until ticked (`add`); either slot can be the
+    -- one shown, or both. Each icon shows ITS OWN trinket's buff while
+    -- that is up and its cooldown after (SplitTrinketBuffs below).
     { key = "trinket2",   kind = "trinket", slot = 14, add = true, label = "Trinket 2" },
     { key = "hs",         kind = "queued", queued = "hsQueued", icon = HS_ICON },
     { key = "cleave",     kind = "queued", queued = "cleaveQueued", icon = CLEAVE_ICON },
@@ -1484,6 +1483,11 @@ local AURA_DEFS = {
     { key = "ssBuff",     kind = "buff", buff = "sweeping" },
 }
 AURA_DEFS = Compact(AURA_DEFS)
+-- the two trinket slots' entries, by slot
+local TRINKET_DEF = {}
+for _, def in ipairs(AURA_DEFS) do
+    if def.kind == "trinket" then TRINKET_DEF[def.slot or 13] = def end
+end
 
 local auraIcons = {}
 local BS_REM_ICON = (GetSpellTexture and GetSpellTexture(6673)) or 132333
@@ -1630,21 +1634,58 @@ local function HasSalv()
     return (n1 and S.buffs[n1:lower()]) or (n2 and S.buffs[n2:lower()]) or nil
 end
 
--- Active trinket buffs (WA showClones: one icon per simultaneous proc).
-local trinketBuffList = {}
-local function TrinketBuffs()
-    wipe(trinketBuffList)
-    for _, name in ipairs(WH.TRINKET_BUFFS) do
-        local b = S.buffs[name:lower()]
-        if b then trinketBuffList[#trinketBuffList + 1] = b end
+-- THE RUNNING TRINKET BUFFS, EACH ON ITS OWN TRINKET'S ICON (2026-11-22,
+-- Zac: "trinket 2 only shows cooldown, not active time like trinket 1 ...
+-- when i show trinket 1 and 2, and click 2, trinket 1 is the buff time").
+-- They used to be one list by name, all shown through Trinket 1's icon;
+-- Trinket 2's icon never showed anything but its cooldown. Now:
+--   * a buff goes on the icon of the slot its trinket is in
+--     (WH.TrinketBuffSlot: the trinket's own use effect, or a proc known
+--     to come from it) - so any on-use trinket shows its active time, not
+--     only the six names on the list;
+--   * when that slot's icon is switched off it goes on the other one, so
+--     a running buff is never lost for having only one icon shown;
+--   * a buff from neither equipped trinket (swapped out while running)
+--     goes on Trinket 1's icon, or Trinket 2's when that is the one shown;
+--   * more than one on an icon: the first on it, the rest beside it.
+local trinketBuffsBySlot = { [13] = {}, [14] = {} }
+local trinketSeen = {}
+local splitOn13, splitOn14 = false, false
+-- own: true puts only a buff whose own trinket's icon is shown (so an
+-- icon's own buffs come before one it carries for the other slot)
+local function PutTrinketBuff(b, own)
+    if not b or trinketSeen[b] then return end
+    local slot = WH.TrinketBuffSlot and WH.TrinketBuffSlot(b.name) or nil
+    local shown = (slot == 13 and splitOn13) or (slot == 14 and splitOn14)
+    if own and not shown then return end
+    if not shown then
+        if slot == 14 then slot = 13 elseif slot == 13 then slot = 14 else slot = splitOn13 and 13 or 14 end
     end
-    return trinketBuffList
+    trinketSeen[b] = true
+    local list = trinketBuffsBySlot[slot]
+    list[#list + 1] = b
+end
+local function SplitTrinketBuffs(on13, on14)
+    wipe(trinketBuffsBySlot[13]) wipe(trinketBuffsBySlot[14]) wipe(trinketSeen)
+    splitOn13, splitOn14 = on13 and true or false, on14 and true or false
+    if not (splitOn13 or splitOn14) then return end
+    for pass = 1, 2 do
+        local own = (pass == 1)
+        -- (each slot's own use buff first: it is the one on the icon itself)
+        for slot = 13, 14 do
+            local t = (slot == 13) and S.trinket13 or S.trinket14
+            if t.useName then PutTrinketBuff(S.buffs[t.useName], own) end
+        end
+        for _, name in ipairs(WH.TRINKET_BUFFS) do PutTrinketBuff(S.buffs[name:lower()], own) end
+    end
 end
 
--- Pooled clone frames (frame 1 is the regular "trinket1" icon).
--- The pool only grows: frames persist once created and are hidden, not freed.
-local function GetTrinketClone(i)
-    local key = "trinketClone" .. i
+-- Pooled clone frames (frame 1 is the slot's regular icon), a pool for
+-- each slot. The pool only grows: frames persist once created and are
+-- hidden, not freed.
+local function CloneKey(i, slot) return ((slot == 14) and "trinket2Clone" or "trinketClone") .. i end
+local function GetTrinketClone(i, slot)
+    local key = CloneKey(i, slot)
     local icon = auraIcons[key]
     if not icon then
         icon = W.CreateIcon(auraAnchor, { width = 30, height = 30,
@@ -1659,10 +1700,10 @@ local function GetTrinketClone(i)
     return icon
 end
 
-local function HideTrinketClones(fromIndex)
+local function HideTrinketClones(fromIndex, slot)
     local i = fromIndex
-    while auraIcons["trinketClone" .. i] do
-        auraIcons["trinketClone" .. i]:Hide()
+    while auraIcons[CloneKey(i, slot)] do
+        auraIcons[CloneKey(i, slot)]:Hide()
         i = i + 1
     end
 end
@@ -1821,8 +1862,8 @@ local function UpdateAuraIcon(icon, def)
         icon.buffRef = nil
         return true
     elseif def.kind == "trinket" then
-        -- No-buff case only: slot 13 icon + cd swipe/desat. Active buffs
-        -- are handled as clones in RefreshAuraRow.
+        -- No-buff case only: the slot's icon + cd swipe/desat. Its
+        -- running buffs are put on it (and beside it) in AuraHandle.
         local t = (def.slot == 14) and S.trinket14 or S.trinket13
         if not t.texture then return false end
         icon:SetIconTexture(t.texture)
@@ -1981,7 +2022,7 @@ local function AuraHandle(def, cfg)
         end
         if off then
             icon:Hide()
-            if def.kind == "trinket" and def.slot ~= 14 then HideTrinketClones(1) end
+            if def.kind == "trinket" then HideTrinketClones(1, def.slot or 13) end
             return
         end
         icon:SetIconTexture(D.AuraDefPreviewTex(def) or QUESTION_ICON)
@@ -1991,27 +2032,21 @@ local function AuraHandle(def, cfg)
         icon:SetText("p", "")
         icon:SetText("s", "")
         placeIcon(icon, def.key)
-        if def.kind == "trinket" and def.slot ~= 14 then HideTrinketClones(1) end
+        if def.kind == "trinket" then HideTrinketClones(1, def.slot or 13) end
         return
     end
-    -- the second slot: its own icon and cooldown, nothing else
-    if def.kind == "trinket" and def.slot == 14 then
-        if not off and UpdateAuraIcon(icon, def) then
-            placeIcon(icon, def.key)
-        else
-            W.SetShownAnimated(icon, false, true)
-        end
-        return
-    end
+    -- a trinket slot: its own running buffs (SplitTrinketBuffs, done once
+    -- for the row before the icons), its cooldown when none is up
     if def.kind == "trinket" then
+        local slot = def.slot or 13
         local clonesUsed = 0
         if off then
             icon:Hide()
         else
-            local buffs = TrinketBuffs()
+            local buffs = trinketBuffsBySlot[slot]
             if #buffs > 0 then
                 for i, b in ipairs(buffs) do
-                    local f = (i == 1) and icon or GetTrinketClone(i - 1)
+                    local f = (i == 1) and icon or GetTrinketClone(i - 1, slot)
                     ShowTrinketBuff(f, b)
                     placeIcon(f, def.key .. i)
                 end
@@ -2022,7 +2057,7 @@ local function AuraHandle(def, cfg)
                 W.SetShownAnimated(icon, false, true)
             end
         end
-        HideTrinketClones(clonesUsed + 1)
+        HideTrinketClones(clonesUsed + 1, slot)
         return
     end
     local visible = (not off)
@@ -2065,6 +2100,8 @@ local function RefreshAuraRow(cfg)
         EnsureCustomAuraIcons(cfg)
         -- the Battle Shout reminder's slot only when it is set to live here
         local docked = ns.BuffRem and ns.BuffRem.Opt and ns.BuffRem.Opt("battleshout", "hudDock") == true
+        -- which trinket icon each running trinket buff goes on, once for the row
+        SplitTrinketBuffs(not WH.IsOff("buffs", TRINKET_DEF[13], cfg), not WH.IsOff("buffs", TRINKET_DEF[14], cfg))
         for _, def in ipairs(AURA_DEFS) do
             if def.kind == "shoutRem" and docked and not auraIcons[def.key] then
                 auraIcons[def.key] = MakeAuraIcon(auraAnchor, def)

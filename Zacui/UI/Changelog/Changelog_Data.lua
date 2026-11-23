@@ -28,6 +28,31 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.19",
+        date = "2026-11-22",
+        title = "Timers that catch up when you join late, and easier bag pins",
+        titles = { retail = "Timers that catch up when you join late" },
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "Pull and break timers: join a group late, or log in while one is running, and the bar catches up. A running break is asked from the group's ZacUI and DBM users, a pull countdown from its ZacUI users.",
+                    "/zui timers shows what the pull and break timers asked for and what came back, for when a bar does not show.",
+                    { "Bags: take an item out of the pinned row with the x in its corner while you hold Alt, or right-click the + for a list of everything pinned. The Bags page, Look tab, picks the key.", feature = "bags" },
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "A cooldown that began before your PC was restarted showed as a full, greyed cooldown on bag items, bars and trackers. It shows the time really left.",
+                    { "Warrior HUD: the second trinket's icon shows its active time, and each trinket icon shows its own trinket's buff. Any trinket you use shows its active time.", feature = "hud_warrior" },
+                    "Party frames under the Classic, WoW Forever and Blizzard styles: the samples in move mode and in the settings look like the real frames, and the real ones no longer sit off to one side after a size change.",
+                    { "Seamless map: an error that could come up while the map window changed size.", feature = "worldmap" },
+                },
+            },
+        },
+    },
+    {
         version = "3.0.18",
         date = "2026-11-20",
         title = "A chat window that stays put in raids",

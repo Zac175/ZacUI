@@ -69,6 +69,8 @@ end)
 -- HUD.PlainCD(start, duration) does the same for a read made elsewhere.
 function HUD.PlainCD(start, duration)
     if ns.Hidden(start, duration) then return 0, 0 end
+    -- (a cooldown that began before this PC started: Core_Flavor)
+    if ns.CooldownFix then return ns.CooldownFix(start, duration) end
     return start, duration
 end
 if issecretvalue ~= nil then
@@ -113,6 +115,18 @@ if issecretvalue ~= nil then
     end
     GetContainerItemCooldown_C = Keep(GetContainerItemCooldown_C)
     HUD.GetContainerItemCooldown = GetContainerItemCooldown_C
+end
+-- A cooldown that began before this PC started comes back with its start
+-- far in the future (Core_Flavor's ns.CooldownFix): every HUD's spell and
+-- bag-item read goes through the correction.
+if ns.CooldownFix then
+    local Fix = ns.CooldownFix
+    local spell, item = HUD.GetSpellCooldown, GetContainerItemCooldown_C
+    if spell then HUD.GetSpellCooldown = function(a, b) return Fix(spell(a, b)) end end
+    if item then
+        GetContainerItemCooldown_C = function(a, b) return Fix(item(a, b)) end
+        HUD.GetContainerItemCooldown = GetContainerItemCooldown_C
+    end
 end
 
 HUD.IsUsableSpell = IsUsableSpell or (C_Spell and C_Spell.IsSpellUsable)

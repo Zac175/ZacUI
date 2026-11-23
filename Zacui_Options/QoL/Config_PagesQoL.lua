@@ -1490,13 +1490,22 @@ local function TimersTab(L, QoL)
     TCheck("pull", "  Pull timers")
     TCheck("hideBlizz", "  Hide Blizzard's own countdown",
         "One pull timer instead of two: Blizzard's ornate bar and its big numbers are hidden.")
-    TCheck("sync", "Ask the group when you log in",
-        "Your other characters running ZacUI answer with any timer they "
-        .. "have, so a break that started while you were logged out still "
-        .. "shows up.")
     Check(L, t, "sender", "Show who started it", "The caller's name, in their class colour, after the label.")
     L:Desc("Raid mods has its own pull-timer text too (Combat > Raid mods > Pull timers); "
         .. "keep one of the two on so a pull is not counted twice.")
+    L:EndCard()
+
+    L:Card("A timer that started without you")
+    L:Desc("When you log in, reload or join a group, ZacUI asks for what is already running.")
+    TCheck("sync", "Ask the group's ZacUI users",
+        "Anyone in the group running ZacUI answers with the pull or break "
+        .. "timer they have, whatever started it.")
+    TCheck("askMods", "Ask the group's DBM users for a running break",
+        "DBM tells a group member how long is left on its break bar. A break "
+        .. "called from BigWigs is on DBM users' bars too. The leader and "
+        .. "assistants are asked first.")
+    L:Desc("A break in a group where nobody runs DBM or ZacUI cannot be asked for: "
+        .. "BigWigs does not answer.")
     L:EndCard()
 
     L:Card("Look")

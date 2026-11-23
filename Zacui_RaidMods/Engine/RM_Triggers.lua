@@ -579,7 +579,7 @@ end
 -- 18 slots and the five bags again when the item moved or the bags
 -- changed (BAG_UPDATE_DELAYED / PLAYER_EQUIPMENT_CHANGED wipe this).
 local itemLoc = {}
-local function ItemCooldown(item)
+local function ItemCooldownRaw(item)
     local GetNum = C_Container and C_Container.GetContainerNumSlots or GetContainerNumSlots
     local GetId = C_Container and C_Container.GetContainerItemID or GetContainerItemID
     local GetCd = C_Container and C_Container.GetContainerItemCooldown or GetContainerItemCooldown
@@ -609,6 +609,11 @@ local function ItemCooldown(item)
         end
     end
     return 0, 0, 1
+end
+-- (a cooldown that began before this PC started: Core_Flavor's correction)
+local function ItemCooldown(item)
+    if ns.CooldownFix then return ns.CooldownFix(ItemCooldownRaw(item)) end
+    return ItemCooldownRaw(item)
 end
 
 local function EvalItem(e)

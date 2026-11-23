@@ -721,6 +721,7 @@ local function UpdateCooldown(b)
     if not b.hasItem then cd:Hide() return end
     local start, duration, enable = GetInventoryItemCooldown("player", b.slotId)
     if ns.Hidden(start, duration, enable) then start, duration, enable = 0, 0, 0 end   -- (WoW Forever)
+    if ns.CooldownFix then start, duration = ns.CooldownFix(start, duration) end       -- (began before this PC started)
     if CooldownFrame_Set then
         CooldownFrame_Set(cd, start or 0, duration or 0, enable or 0)
     elseif start and duration and duration > 0 then

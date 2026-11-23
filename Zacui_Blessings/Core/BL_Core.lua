@@ -435,6 +435,7 @@ function BL.ScanMe()
             if IsSpellKnown and IsSpellKnown(id) then
                 local start, duration = GetSpellCooldown(id)
                 if ns.Hidden(start, duration) then start, duration = 0, 0 end   -- (hidden on WoW Forever)
+                if ns.CooldownFix then start, duration = ns.CooldownFix(start, duration) end   -- (began before this PC started)
                 p.cd[i] = { start = start or 0, duration = duration or 0 }
             end
         end
