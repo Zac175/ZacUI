@@ -725,7 +725,8 @@ local LOG_ONLY = {
     out_hit = true, out_spell = true, out_dot = true, out_miss = true, out_heal = true, out_hot = true,
     out_interrupt = true, out_dispel = true,
     pet_hit = true, pet_miss = true, pet_in = true, pet_heal = true,
-    n_kb = true, n_buff = true, n_buff_fade = true, n_debuff = true, n_debuff_fade = true, n_extra = true,
+    n_kb = true, n_buff = true, n_buff_fade = true, n_debuff = true, n_debuff_fade = true,
+    -- (n_extra is not here: on Forever it comes from COMBAT_TEXT_UPDATE)
     overpower = true, revenge = true,
 }
 local function Offered(key) return not (S.FOREVER and LOG_ONLY[key]) end

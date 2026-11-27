@@ -2,7 +2,7 @@
 ## Title: ZacUI |cff33ff99Options|r
 ## Notes: ZacUI's settings window and its pages. Loads by itself the first time you open the settings (/zui).
 ## Author: Zac
-## Version: 3.0.19
+## Version: 3.0.20
 ## IconTexture: Interface\AddOns\ZacUI\Media\addonIcon
 ## X-Category: Interface Enhancements
 ## Dependencies: Zacui
@@ -27,6 +27,7 @@ Options.lua
 
 # ---------- ZacUI: the window, the search, the preview strip, the core pages ----------
 Core\Config_Search.lua
+Core\Config_SearchData.lua
 Core\Config_SearchBox.lua
 Core\Config_Preview.lua
 Core\Config_Window.lua

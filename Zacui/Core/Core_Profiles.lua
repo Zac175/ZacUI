@@ -569,6 +569,61 @@ end)
 -- ============================================================
 -- EXPORT / IMPORT
 -- ============================================================
+-- THE SCREEN A STRING WAS MADE ON (2026-11-24). Places are saved in the
+-- interface's own units, so a layout made on one screen shape or UI scale
+-- can sit differently on another. An exported string carries its
+-- screen under "_made" (not a profile key: nothing applies it, and a
+-- ZacUI from before this simply ignores it); Import hands it back as a
+-- third value and ScreenNote says, in a sentence, when this screen
+-- differs enough to matter. w, h: the screen in pixels; s: the UI scale;
+-- uw, uh: the interface's size in its own units; v: the ZacUI that made it.
+local function ScreenFacts()
+    local w, h
+    if type(GetPhysicalScreenSize) == "function" then w, h = GetPhysicalScreenSize() end
+    local up = _G.UIParent
+    local s = up and up.GetEffectiveScale and up:GetEffectiveScale() or nil
+    local uw = up and up.GetWidth and up:GetWidth() or nil
+    local uh = up and up.GetHeight and up:GetHeight() or nil
+    local function N(v, places)
+        if type(v) ~= "number" or (ns.IsSecret and ns.IsSecret(v)) or v <= 0 then return nil end
+        local m = 10 ^ (places or 0)
+        return math.floor(v * m + 0.5) / m
+    end
+    local out = { w = N(w), h = N(h), s = N(s, 3), uw = N(uw), uh = N(uh), v = ns.ZUI and ns.ZUI.VERSION or nil }
+    if not (out.w and out.h) and not (out.uw and out.uh) then return nil end
+    return out
+end
+
+local function ScreenText(m)
+    if type(m) ~= "table" then return nil end
+    local parts = {}
+    if tonumber(m.w) and tonumber(m.h) then parts[#parts + 1] = string.format("%d x %d", m.w, m.h) end
+    if tonumber(m.s) then parts[#parts + 1] = string.format("UI scale %d%%", math.floor(m.s * 100 + 0.5)) end
+    if #parts == 0 then return nil end
+    return table.concat(parts, ", ")
+end
+
+-- nil when the string says nothing about its screen or the two match;
+-- otherwise what to tell the player before they import
+local function ScreenNote(made, here)
+    if type(made) ~= "table" then return nil end
+    here = here or ScreenFacts()
+    if type(here) ~= "table" then return nil end
+    local differs = false
+    -- the interface's own size is what a saved place is measured in
+    if tonumber(made.uw) and tonumber(made.uh) and tonumber(here.uw) and tonumber(here.uh) then
+        if math.abs(made.uw - here.uw) / here.uw > 0.02 or math.abs(made.uh - here.uh) / here.uh > 0.02 then differs = true end
+    elseif tonumber(made.w) and tonumber(made.h) and tonumber(here.w) and tonumber(here.h) then
+        if math.abs(made.w / made.h - here.w / here.h) > 0.01 then differs = true end
+        if tonumber(made.s) and tonumber(here.s) and math.abs(made.s - here.s) > 0.02 then differs = true end
+    end
+    if not differs then return nil end
+    local a, b = ScreenText(made), ScreenText(here)
+    if not (a and b) then return nil end
+    return "It was made on a different screen (" .. a .. "; yours is " .. b
+        .. "). Pieces placed near the edges may sit differently: check them in Edit Mode afterwards."
+end
+
 local function Export(name, sectionKeys)
     local snap
     if name then
@@ -582,6 +637,7 @@ local function Export(name, sectionKeys)
     else
         snap = Snapshot(sectionKeys)
     end
+    snap._made = ScreenFacts()
     local body = Base64Encode(Serialize(snap))
     return string.format("ZacUI:%d:%s:%s", FORMAT_VERSION, Checksum(body), body)
 end
@@ -612,17 +668,22 @@ local function UnpackString(prefix, text)
     return Deserialize(raw)
 end
 
--- A profile string, any version: returns the snapshot (data only).
+-- A profile string, any version: returns the snapshot (data only), then
+-- nil, then the screen it was made on when the string says (taken out of
+-- the snapshot, so nothing stores or applies it).
 local function Import(text)
     local snap, err = UnpackString("ZacUI", text)
     if not snap then return nil, err end
     if type(snap) ~= "table" then return nil, "payload is not a table" end
+    local made = snap._made
+    snap._made = nil
+    if type(made) ~= "table" then made = nil end
     local known = false
     for _, key in ipairs(PROFILE_KEYS) do
         if snap[key] ~= nil then known = true end
     end
     if not known then return nil, "the profile contains no ZacUI settings" end
-    return snap
+    return snap, nil, made
 end
 
 -- shared with later ZacUI files
@@ -649,6 +710,9 @@ ns.Profiles = {
     Rename = Rename,
     ResetSections = ResetSections,
     Save = Save,
+    ScreenFacts = ScreenFacts,
+    ScreenNote = ScreenNote,
+    ScreenText = ScreenText,
     SectionsIn = SectionsIn,
     Serialize = Serialize,
     Snapshot = Snapshot,
@@ -853,7 +917,7 @@ local function DescribeProfile(text, info, deep)
         info.ready = true
         info.lines[#info.lines + 1] = "A large string - " .. #text .. " characters."
     else
-        local snap, err = P.Import(text)
+        local snap, err, made = P.Import(text)
         if not snap then
             info.problem = tostring(err)
             return
@@ -862,6 +926,12 @@ local function DescribeProfile(text, info, deep)
         info.ready = true
         info.sections = P.SectionsIn(snap)
         info.lines[#info.lines + 1] = "Carries: " .. SectionNames(info.sections)
+        -- the screen it was made on, and a word when this one differs
+        info.made = made
+        local where = P.ScreenText(made)
+        if where then info.lines[#info.lines + 1] = "Made on: " .. where end
+        info.screenNote = P.ScreenNote(made)
+        if info.screenNote then info.lines[#info.lines + 1] = info.screenNote end
     end
     info.actions = {
         { id = "apply", label = "Apply to this character", reload = true,

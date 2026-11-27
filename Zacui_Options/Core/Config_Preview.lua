@@ -568,6 +568,11 @@ local function FontEpochNow()
     local f = ZacUIDB and ZacUIDB.font or {}
     return tostring(f.name) .. "/" .. tostring(f.delta) .. "/" .. tostring(f.outline)
 end
+-- A folded menu's rows are all the widest label and this much. (24 is what
+-- a button asks for its own label in the settings window: at 20 the widest
+-- row alone grew by itself and stood 4 px proud of the others - seen in
+-- the game on the unit frames' list, "Targets".)
+local MENU_PAD = 24
 local function MeasureRow(row)
     local epoch = FontEpochNow()
     if row._zMeasured == epoch then return end
@@ -582,8 +587,8 @@ local function MeasureRow(row)
     if row.pick then row.pickNat = widest + 26 end
     if row.menu and row.menuButtons then
         local n = 0
-        for _, mb in pairs(row.menuButtons) do mb:SetWidth(widest + 20) n = n + 1 end
-        row.menu:SetWidth(widest + 28)
+        for _, mb in pairs(row.menuButtons) do mb:SetWidth(widest + MENU_PAD) n = n + 1 end
+        row.menu:SetWidth(widest + MENU_PAD + 8)
     end
 end
 
@@ -1208,7 +1213,7 @@ local function BuildRow(e)
         row.pick:Hide()
         row.menu = Popup(e)
         row.menuButtons = {}
-        local mw = widest + 20
+        local mw = widest + MENU_PAD
         for i, m in ipairs(modes) do
             local id = m.id
             local mb = SmallButton(row.menu, m.label or id, mw, function() SelectMode(e, id) end)

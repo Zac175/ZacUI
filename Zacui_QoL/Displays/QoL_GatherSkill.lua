@@ -20,6 +20,13 @@
 -- world-object tooltips; on the older clients the tooltip's OnShow, which
 -- returns at once for a unit or an item tooltip. Off, it returns at once.
 -- A hidden line (Forever) is left untouched.
+--
+-- CORPSES (2026-11-24; its own tick, off unless ticked). A corpse you can
+-- skin says "Skinnable" on its tooltip (or "Requires Herbalism" / "Mining"
+-- / "Engineering" for the ones gathered that way). The skill it needs
+-- comes from the creature's level: 1 up to level 10, ten a level from 11
+-- to 20, five times the level from 21 on. That line gets the number, in
+-- the same four colours. A level the game hides (a skull) gets none.
 
 local ADDON_NAME = ...
 local ns = _G.ZacUI
@@ -33,6 +40,7 @@ QoL.GatherSkill = G
 
 local OWN_ID = "gather_skill"
 local HERB, MINE = "herb", "mine"
+local SKIN, ENGI = "skin", "engi"
 
 -- herb ITEM id -> the skill its node needs
 G.HERBS = {
@@ -63,6 +71,8 @@ G.ORES = {
 local KIND = {
     [HERB] = { line = 182, spells = { 2366, 2368, 3570, 11993 }, english = "Herbalism" },
     [MINE] = { line = 186, spells = { 2575, 2576, 3564, 10248 }, english = "Mining" },
+    [SKIN] = { line = 393, spells = { 8613, 8617, 8618, 10768 }, english = "Skinning" },
+    [ENGI] = { line = 202, spells = { 4036, 4037, 4038, 12656 }, english = "Engineering" },
 }
 
 local function Hidden(v) return ns.IsSecret and ns.IsSecret(v) or false end
@@ -78,6 +88,7 @@ end
 G.DB = DB
 local function Allowed() return not (ns.FeatureOn and not ns.FeatureOn(OWN_ID)) end
 function G.On() return Allowed() and QoL.enabled == true and DB().enabled == true end
+function G.CorpsesOn() return Allowed() and QoL.enabled == true and DB().corpses == true end
 
 -- ============================================================
 -- THE NODES
@@ -212,10 +223,76 @@ function G.Decorate(tt)
     return false
 end
 
+-- ============================================================
+-- CORPSES
+-- ============================================================
+-- the skill a creature of that level needs to be skinned (or gathered)
+function G.CorpseNeed(level)
+    if type(level) ~= "number" or level < 1 then return nil end
+    if level <= 10 then return 1 end
+    if level <= 20 then return (level - 10) * 10 end
+    return level * 5
+end
+
+-- the game's own line on a corpse -> the profession it asks for
+local function CorpseKinds()
+    local out = {}
+    local function add(text, kind) if type(text) == "string" and text ~= "" then out[text] = kind end end
+    add(_G.UNIT_SKINNABLE_LEATHER, SKIN)
+    add(_G.UNIT_SKINNABLE_HERB, HERB)
+    add(_G.UNIT_SKINNABLE_ROCK, MINE)
+    add(_G.UNIT_SKINNABLE_BOLTS, ENGI)
+    return out
+end
+local corpseKinds
+
+-- adds the skill to a corpse tooltip's "Skinnable" line; true when it did
+function G.DecorateCorpse(tt, unit)
+    if not G.CorpsesOn() or not tt or not tt.NumLines then return false end
+    if not unit and tt.GetUnit then
+        local _, u = tt:GetUnit()
+        unit = u
+    end
+    if Hidden(unit) then return false end
+    unit = unit or "mouseover"
+    if not (UnitExists and UnitExists(unit)) then return false end
+    local level = UnitLevel and UnitLevel(unit)
+    if Hidden(level) then return false end
+    local need = G.CorpseNeed(level)
+    if not need then return false end
+    corpseKinds = corpseKinds or CorpseKinds()
+    for i = 2, tt:NumLines() do
+        local fs = Line(tt, i)
+        local text = fs and fs:GetText()
+        if type(text) == "string" and not Hidden(text) then
+            local kind = corpseKinds[text]
+            if kind then
+                fs:SetText(string.format("%s (%d)", text, need))
+                local skill = G.Skill(kind)
+                if skill and skill >= need then fs:SetTextColor(G.Odds(skill, need)) end
+                if tt.Show then tt:Show() end
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local hooked = false
 local function Hook()
     if hooked or not GameTooltip then return end
     hooked = true
+    -- corpses: the unit tooltip
+    if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType
+        and Enum.TooltipDataType.Unit then
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Unit, function(tt)
+            if tt == GameTooltip and G.CorpsesOn() then pcall(G.DecorateCorpse, tt) end
+        end)
+    elseif GameTooltip.HasScript and GameTooltip:HasScript("OnTooltipSetUnit") then
+        GameTooltip:HookScript("OnTooltipSetUnit", function(tt)
+            if G.CorpsesOn() then pcall(G.DecorateCorpse, tt) end
+        end)
+    end
     if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType
         and Enum.TooltipDataType.Object then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Object, function(tt)
@@ -234,8 +311,8 @@ end
 G.Hooked = function() return hooked end
 
 function G.Apply()
-    if not G.On() then return end
-    if not nodes then G.Build() end
+    if not (G.On() or G.CorpsesOn()) then return end
+    if G.On() and not nodes then G.Build() end
     Hook()
 end
 if Allowed() then
@@ -277,10 +354,22 @@ AddTab("tooltips", "general", "General", function(L)
     L:Row(sample, 18)
     L:Desc("Herbs read their names from the game in your language; ore nodes are matched by their English names. "
         .. "Classic and Outland nodes.")
+    local wc = UI.Checkbox(L.current, "Show the skill a corpse needs to be skinned", d.corpses == true, function(v)
+        d.corpses = v and true or nil
+        if QoL.enabled then G.Apply() end
+        if ns.RefreshConfig then ns.RefreshConfig() end
+    end, { tooltip = "On a corpse's tooltip, the game's \"Skinnable\" line gets the skinning skill that creature needs, "
+        .. "in the same four colours. The same for corpses that ask for Herbalism, Mining or Engineering." })
+    L:Row(wc, 17)
+    local sample2 = UI.Font(L.current, UI.F.LABEL, { text = "" })
+    sample2:SetText("Skinnable " .. C(1, 0.5, 0.25) .. "(275)|r   "
+        .. C(1, 1, 0) .. "(275)|r   " .. C(0.25, 0.75, 0.25) .. "(275)|r   " .. C(0.5, 0.5, 0.5) .. "(275)|r")
+    L:Row(sample2, 18)
     if not QoL.enabled then L:Desc("The Quality of life part is not running, so this is not either.") end
     L:EndCard()
 end)
 
 if ns.AddMenuKeywords then
-    ns.AddMenuKeywords("tooltips", "gathering herb herbalism ore mining node skill required level tooltip")
+    ns.AddMenuKeywords("tooltips", "gathering herb herbalism ore mining node skill required level tooltip "
+        .. "skinning skinnable corpse leather skin")
 end

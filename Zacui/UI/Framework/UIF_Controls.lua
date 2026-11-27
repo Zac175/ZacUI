@@ -1986,6 +1986,32 @@ function UI.Dropdown(parent, opts)
     local open = false
     local offset = 0
 
+    -- THE LIST IS AS WIDE AS ITS LONGEST CHOICE NEEDS (2026-11-25, the
+    -- in-game audit: rows cut short in open lists). Never narrower than
+    -- the box, at most DD_LIST_MAX; measured once when the list opens (all
+    -- the choices, not only the rows in view, so it keeps one width while
+    -- it scrolls). A row a picker dresses in a face of its own can ask for
+    -- more and gets it. A choice longer than the widest list is cut and
+    -- shows whole on hover.
+    local DD_LIST_MAX = 420
+    local ROW_PAD = (set and 8 or 6) + 16 + 4 + 2      -- label inset, its right gap, the row's own insets, slack
+    local listW                                        -- nil while shut
+    local measure
+    local function MeasureItems(items)
+        if not measure then
+            measure = set and UI.SFont(menu, S.F_VALUE, { justify = "LEFT" }) or UI.Font(menu, F.LABEL, { justify = "LEFT" })
+            measure:Hide()
+        end
+        local need = 0
+        for _, item in ipairs(items) do
+            measure:SetText(type(item) == "table" and item.text or tostring(item))
+            local w = measure.GetUnboundedStringWidth and measure:GetUnboundedStringWidth() or measure:GetStringWidth() or 0
+            if w > need then need = w end
+        end
+        measure:SetText("")
+        return need + ROW_PAD
+    end
+
     local rail = menu:CreateTexture(nil, "ARTWORK")
     rail._zui_own = true
     rail:SetTexture(FLAT)
@@ -1995,6 +2021,7 @@ function UI.Dropdown(parent, opts)
 
     local function Close()
         open = false
+        listW = nil
         menu:Hide()
         arrow:SetTexCoord(0, 1, 0, 1)
         if dd._zSet and dd._zPaint then dd:_zPaint() end
@@ -2008,6 +2035,7 @@ function UI.Dropdown(parent, opts)
         local total = #items
         local shown = math.min(total, MAX_ROWS)
         offset = math.max(0, math.min(offset, total - shown))
+        if listW == nil then listW = MeasureItems(items) end
         -- selected() returns the DISPLAY text (it is what the closed box
         -- shows). Comparing a row's value against it only ever matched
         -- when label and value happened to be identical, so entries like
@@ -2061,6 +2089,7 @@ function UI.Dropdown(parent, opts)
                     end
                     self.hl:Hide()
                 end)
+                UI.TruncTip(row.label, row)     -- (longer than the widest list: whole on hover)
                 rows[i] = row
             end
             row:SetPoint("TOPLEFT", menu, "TOPLEFT", set and 1 or 2, (set and -4 or -2) - (i - 1) * ROW)
@@ -2089,7 +2118,17 @@ function UI.Dropdown(parent, opts)
             row:Show()
         end
         for i = shown + 1, #rows do rows[i]:Hide() end
-        menu:SetSize(dd:GetWidth() or width, math.max(shown, 1) * ROW + (set and 7 or 4))
+        if opts.decorate then
+            -- (a row in a face of its own: what it needs as it is drawn)
+            for i = 1, shown do
+                local l = rows[i].label
+                local w = (l.GetUnboundedStringWidth and l:GetUnboundedStringWidth() or 0) + ROW_PAD
+                if w > listW then listW = w end
+            end
+        end
+        local menuW = dd:GetWidth() or width
+        if listW and listW > menuW then menuW = math.floor(math.min(listW, math.max(menuW, DD_LIST_MAX)) + 0.5) end
+        menu:SetSize(menuW, math.max(shown, 1) * ROW + (set and 7 or 4))
 
         -- position rail: thumb-length proportional, slid by offset
         if total > shown then
@@ -2119,6 +2158,11 @@ function UI.Dropdown(parent, opts)
     dd:SetScript("OnClick", function(self)
         if open then Close() return end
         if UI._openDropdown and UI._openDropdown ~= self then UI._openDropdown.Close() end
+        -- THE LIST IS THE BOX'S SIZE ON THE SCREEN. It hangs on UIParent,
+        -- which a window's own scale does not reach: under a window at 75%
+        -- the list stood a third bigger than its box (seen in the game).
+        local es, ps = self:GetEffectiveScale(), UIParent:GetEffectiveScale()
+        if es and ps and ps > 0 and es > 0 then menu:SetScale(es / ps) end
         -- open with the current selection in view, not page one
         offset = 0
         local n, shown, items, selected = Build()
@@ -2148,7 +2192,7 @@ function UI.Dropdown(parent, opts)
         open = true
         UI._openDropdown = self
     end)
-    menu:SetScript("OnHide", function() open = false end)
+    menu:SetScript("OnHide", function() open = false listW = nil end)
 
     UI.Hover(dd, "bg", "hover")
     if look then

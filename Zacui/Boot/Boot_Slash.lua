@@ -100,6 +100,13 @@ SlashCmdList["ZACUI"] = function(msg)
         -- Need help? Zac's Discord name, ready to copy
         if ns.UI and ns.UI.ShowContact then ns.UI.ShowContact() else Print("Need help? Message Zac on Discord: Zac12") end
         return
+    elseif cmd == "report" or cmd == "bug" or cmd == "suggest" or cmd == "idea" or cmd == "site" or cmd == "web" or cmd == "website" then
+        -- the site: a link to copy, already filled in with this version
+        -- and game version (UIF_Dialogs ns.SiteLink)
+        local kind = (cmd == "report" or cmd == "bug") and "report" or ((cmd == "suggest" or cmd == "idea") and "suggest" or "site")
+        if ns.UI and ns.UI.ShowContact then ns.UI.ShowContact(kind)
+        elseif ns.SiteLink then Print(ns.SiteLink(kind)) end
+        return
     elseif cmd == "raid" or cmd == "summary" then
         -- the raid summary: the last raid (or /zui raid n, counted back)
         if ns.FeatureOn and not ns.FeatureOn("raid_summary") then

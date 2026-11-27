@@ -5,6 +5,15 @@
 --   BoE          "BoE" at the top of gear that binds when equipped and is
 --                not bound yet: what you can still sell or hand on
 -- Each its own switch, both off by default (Bags > General, "Text on gear").
+--   Cannot use   (2026-11-24) an item you cannot use - the wrong class or
+--                armour, too high a level, a skill you lack, a recipe you
+--                cannot learn or already know - has its icon tinted (red
+--                unless you pick another colour). Its own switch, off by
+--                default (Bags > General, "Items you cannot use"). Known
+--                by what the game itself prints in red on the item's
+--                tooltip, read once per item and kept until your level,
+--                skills or spells change. A broken item's red durability
+--                line does not count.
 -- Part of ZacUI (the bags part); load order is set by the TOC.
 --
 -- HOW: the bag window calls Bags.SlotExtra(btn, item, bag, slot) after it
@@ -140,14 +149,157 @@ function BX.Paint(btn, item, bag, slot)
     end
 end
 
+-- ============================================================
+-- ITEMS YOU CANNOT USE (bags.unusableTint; nothing saved = off)
+-- ============================================================
+BX.UNUSABLE_COLOR = { r = 1, g = 0.25, b = 0.25 }
+local function BagCfg() local b = ZacUIDB and ZacUIDB.bags return type(b) == "table" and b or EMPTY end
+function BX.TintOn() return Allowed() and BagCfg().unusableTint == true end
+function BX.TintKnown() return BagCfg().unusableKnown ~= false end
+function BX.TintColor()
+    local c = BagCfg().unusableColor
+    if type(c) ~= "table" then c = BX.UNUSABLE_COLOR end
+    return c.r or c[1] or 1, c.g or c[2] or 0.25, c.b or c[3] or 0.25
+end
+
+-- the game's red (RED_FONT_COLOR is 1, 0.125, 0.125)
+local function IsRed(r, g, b)
+    return type(r) == "number" and type(g) == "number" and type(b) == "number" and r > 0.95 and g < 0.2 and b < 0.2
+end
+local durabilityHead
+local function Ignored(text)
+    -- a broken item's "Durability 0 / 60" is red too: the item is still yours to use
+    if durabilityHead == nil then
+        local t = _G.DURABILITY_TEMPLATE
+        durabilityHead = type(t) == "string" and t:match("^(.-)%s*%%") or false
+        if durabilityHead == "" then durabilityHead = false end
+    end
+    if durabilityHead and text:sub(1, #durabilityHead) == durabilityHead then return true end
+    if not BX.TintKnown() and text == _G.ITEM_SPELL_KNOWN then return true end
+    return false
+end
+
+local scanTip
+local function ScanTip()
+    if scanTip == nil then
+        local okT, t = pcall(CreateFrame, "GameTooltip", "ZacUIBagScanTip", nil, "GameTooltipTemplate")
+        scanTip = okT and t or false
+    end
+    return scanTip or nil
+end
+
+-- true / false, or nil while the item's tooltip is not there to read
+local function Scan(link)
+    -- the newer clients hand a tooltip's lines over as data
+    local TI = _G.C_TooltipInfo
+    if TI and type(TI.GetHyperlink) == "function" then
+        local okD, data = pcall(TI.GetHyperlink, link)
+        local lines = okD and type(data) == "table" and data.lines
+        if type(lines) ~= "table" or #lines == 0 then return nil end
+        for _, line in ipairs(lines) do
+            for _, side in ipairs({ { line.leftText, line.leftColor }, { line.rightText, line.rightColor } }) do
+                local text, c = side[1], side[2]
+                if Hidden(text) or Hidden(c) then return nil end
+                if type(text) == "string" and text ~= "" and type(c) == "table" then
+                    local r, g, b = c.r, c.g, c.b
+                    if Hidden(r) or Hidden(g) or Hidden(b) then return nil end
+                    if IsRed(r, g, b) and not Ignored(text) then return true end
+                end
+            end
+        end
+        return false
+    end
+    local tip = ScanTip()
+    if not (tip and tip.SetHyperlink) then return nil end
+    tip:SetOwner(WorldFrame or UIParent, "ANCHOR_NONE")
+    tip:ClearLines()
+    if not pcall(tip.SetHyperlink, tip, link) then return nil end
+    local n = tip:NumLines() or 0
+    if n == 0 then return nil end
+    for i = 1, n do
+        for _, side in ipairs({ "TextLeft", "TextRight" }) do
+            local fs = _G["ZacUIBagScanTip" .. side .. i]
+            local text = fs and fs:GetText()
+            if Hidden(text) then return nil end
+            if type(text) == "string" and text ~= "" and (side == "TextLeft" or fs:IsShown()) then
+                local r, g, b = fs:GetTextColor()
+                if Hidden(r) then return nil end
+                if IsRed(r, g, b) and not Ignored(text) then return true end
+            end
+        end
+    end
+    return false
+end
+
+local unusable = {}    -- link -> true / false
+function BX.Unusable(link)
+    if type(link) ~= "string" or Hidden(link) then return false end
+    local u = unusable[link]
+    if u ~= nil then return u end
+    local okS, got = pcall(Scan, link)
+    if not okS or got == nil then return false end     -- not readable yet: asked again next paint
+    unusable[link] = got
+    return got
+end
+function BX.ForgetUsable() wipe(unusable) end
+
+function BX.PaintUsable(btn, item)
+    local icon = btn._zIcon
+    if not icon then return end
+    if BX.TintOn() and item and BX.Unusable(item.link) then
+        icon:SetVertexColor(BX.TintColor())
+        btn._zCannotUse = true
+    elseif btn._zCannotUse then
+        icon:SetVertexColor(1, 1, 1)
+        btn._zCannotUse = nil
+    end
+end
+
 if Allowed() then
-    function Bags.SlotExtra(btn, item, bag, slot) BX.Paint(btn, item, bag, slot) end
+    function Bags.SlotExtra(btn, item, bag, slot)
+        BX.Paint(btn, item, bag, slot)
+        BX.PaintUsable(btn, item)
+    end
 end
 
 local function Repaint()
     if ns.BagLook and ns.BagLook.Changed then pcall(ns.BagLook.Changed) end
 end
 BX.Repaint = Repaint
+
+-- What you can use changes with your level, your skills and the recipes
+-- you know: the answers are thrown away then and the open window painted
+-- again, once, half a second after the last such event. Listened for only
+-- while the tint is on.
+local watch, watchQueued
+local WATCH = { "PLAYER_LEVEL_UP", "SKILL_LINES_CHANGED", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "NEW_RECIPE_LEARNED" }
+function BX.ApplyWatch()
+    local on = BX.TintOn()
+    if on and not watch then
+        watch = CreateFrame("Frame")
+        watch:SetScript("OnEvent", function()
+            if watchQueued then return end
+            watchQueued = true
+            C_Timer.After(0.5, function()
+                watchQueued = false
+                BX.ForgetUsable()
+                if BX.TintOn() then Repaint() end
+            end)
+        end)
+    end
+    if not watch then return end
+    for _, e in ipairs(WATCH) do
+        if on then pcall(watch.RegisterEvent, watch, e) else pcall(watch.UnregisterEvent, watch, e) end
+    end
+end
+if Allowed() then
+    local boot = CreateFrame("Frame")
+    boot:RegisterEvent("PLAYER_LOGIN")
+    boot:SetScript("OnEvent", function(self)
+        self:UnregisterAllEvents()
+        BX.ApplyWatch()
+    end)
+end
 
 -- ============================================================
 -- THE CARD: Bags > General
@@ -195,9 +347,42 @@ function BX.Card(L)
             { sample = "115  BoE", after = function() Repaint() end })
     end
     L:EndCard()
+
+    -- ITEMS YOU CANNOT USE
+    L:Card("Items you cannot use")
+    local function BagTable()
+        ZacUIDB.bags = type(ZacUIDB.bags) == "table" and ZacUIDB.bags or {}
+        return ZacUIDB.bags
+    end
+    local t = UI.Checkbox(L.current, "Tint items you cannot use", BX.TintOn(), function(v)
+        BagTable().unusableTint = v and true or nil
+        BX.ApplyWatch()
+        Changed()
+    end, { tooltip = "The wrong class or armour, too high a level, a skill you do not have, a recipe you cannot learn: "
+        .. "whatever the game prints in red on the item's tooltip. The icon takes the colour below." })
+    L:Row(t, 17)
+    if Kit then
+        local col = Kit.Color(L, "Tint", BagTable, "unusableColor", function()
+            return BX.UNUSABLE_COLOR.r, BX.UNUSABLE_COLOR.g, BX.UNUSABLE_COLOR.b, 1
+        end, { after = Repaint })
+        local known = UI.Checkbox(L.current, "Recipes you already know count too", BX.TintKnown(), function(v)
+            BagTable().unusableKnown = (not v) and false or nil
+            BX.ForgetUsable()
+            Changed()
+        end, { tooltip = "A recipe, pattern or plan the game marks \"Already known\" is tinted as well." })
+        L:Row(known, 17)
+        -- (both already have their rows: dimmed while the tick is off, not laid out again)
+        if UI.SetEnabled then
+            local why = 'Needs "Tint items you cannot use" turned on.'
+            UI.SetEnabled(col, BX.TintOn(), why)
+            UI.SetEnabled(known, BX.TintOn(), why)
+        end
+    end
+    L:EndCard()
 end
 if Allowed() and ns.AddPageTab then ns.AddPageTab("bags", "general", "General", function(L) BX.Card(L) end) end
 
 if ns.AddMenuKeywords then
-    ns.AddMenuKeywords("bags", "item level ilvl gear boe bind on equip bound text slot")
+    ns.AddMenuKeywords("bags", "item level ilvl gear boe bind on equip bound text slot "
+        .. "unusable cannot use red tint class armor level requirement recipe known learn")
 end

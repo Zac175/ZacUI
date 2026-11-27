@@ -1108,14 +1108,30 @@ function AB.ApplyText(btn, fs, el, hidden, key, cfg)
     if not (fs and el) then return end
     if AB.KitOf and AB.KitOf(btn) and AB.TextIsShipped(el, key, cfg) then
         -- the game look's own text: the template's, untouched
+        fs.zShipped = true
         fs:SetAlpha(hidden and 0 or 1)
         return
     end
     local sh = StockShadow(fs)
     local has = AB.TextShadowDefault(sh)
+    fs.zShipped = nil
     if ns.ApplyFontSpec then
-        ns.ApplyFontSpec(fs, AB.FontSpecOf(el, key), { size = 12, outline = "outline", shadow = has,
-            shadowX = has and sh[1] or 1, shadowY = has and sh[2] or -1 })
+        local spec = AB.FontSpecOf(el, key)
+        local defs = { size = 12, outline = "outline", shadow = has,
+            shadowX = has and sh[1] or 1, shadowY = has and sh[2] or -1 }
+        ns.ApplyFontSpec(fs, spec, defs)
+        -- the key corner is fitted again when ZacUI's font changes (a
+        -- re-dress puts the look's size back; AB.FitKey, below)
+        if key == "hotkey" and ns.TrackHouseFont then
+            local redo
+            redo = function(s)
+                ns.ApplyFontSpec(s, spec, defs)
+                ns.TrackHouseFont(s, redo)
+                s.zFitBase, s.zFitNow, s.zFitKey = nil, nil, nil
+                AB.FitKey(s)
+            end
+            ns.TrackHouseFont(fs, redo)
+        end
     else
         local path = (el.font and ns.ResolveFontPath and ns.ResolveFontPath(el.font)) or STANDARD_TEXT_FONT
         local size = AB.TextSize(el, key) or 12
@@ -1130,6 +1146,8 @@ function AB.ApplyText(btn, fs, el, hidden, key, cfg)
     fs.zAnchorDef = def
     ns.ApplyAnchor(fs, AnchorSpec(cfg, key), def, Resolver(btn))
     fs:SetAlpha(hidden and 0 or 1)
+    -- (the size just given is the look's own: the fit starts from it)
+    fs.zFitBase, fs.zFitNow, fs.zFitKey = nil, nil, nil
 end
 
 -- The template gives the corner texts fixed boxes (32x10, 36x10) that a
@@ -1144,6 +1162,60 @@ function AB.FitText(btn, width)
             if fs.SetMaxLines then fs:SetMaxLines(1) end
         end
     end
+    if btn.zHotkey then
+        btn.zHotkey.zFitBox = width or AB.BUTTON
+        AB.FitKey(btn.zHotkey)
+    end
+end
+
+-- A KEY NAME WIDER THAN ITS BUTTON ("C-WU" at 12 needs 36.5 of a 36
+-- button and was drawn "C-..."): the text steps its size down, to 8 at the
+-- least, until the whole name shows. A name that fits is never touched;
+-- one too long even at 8 (the game's own "Ctrl-Mouse Wheel Up") keeps its
+-- size and is cut as before. core.keyFit == false turns it off (Advanced >
+-- Keys; nothing saved = on). Called wherever the text, its font or its
+-- box changes; the answer for one text, size and box is remembered, so a
+-- repeat costs one comparison. A drawn text needs 2 more than
+-- GetUnboundedStringWidth answers.
+local KEY_FIT_MIN, KEY_FIT_SLACK = 8, 2
+-- (WoW Forever hands some sizes and texts back hidden; a hidden one cannot
+-- be compared, so the fit leaves that text alone. The whole fit also runs
+-- guarded: it is called from the buttons' own update, in fights too, and
+-- must never be the thing that stops a bar.)
+local function Hidden(v) return issecretvalue ~= nil and issecretvalue(v) and true or false end
+local FitKeyNow
+function AB.FitKey(fs)
+    if not (fs and fs.GetFont and fs.GetUnboundedStringWidth) then return end
+    pcall(FitKeyNow, fs)
+end
+FitKeyNow = function(fs)
+    local path, size, flags = fs:GetFont()
+    if not (path and size) or Hidden(size) or Hidden(path) then return end
+    -- a size that is not the one left here last time is the look's own
+    if not fs.zFitBase or not fs.zFitNow or math.abs(fs.zFitNow - size) > 0.01 then fs.zFitBase = size end
+    local base = fs.zFitBase
+    local box = fs.zFitBox or fs:GetWidth() or 0
+    local text = fs:GetText() or ""
+    if Hidden(box) or Hidden(text) or Hidden(fs:GetUnboundedStringWidth()) then return end
+    local core = AB._core or (AB.active and AB.CoreCfg()) or nil
+    local want = base
+    if not fs.zShipped and box > 1 and text ~= "" and not (core and core.keyFit == false) then
+        local memo = text .. "\031" .. base .. "\031" .. box .. "\031" .. path .. "\031" .. (flags or "")
+        if fs.zFitKey ~= memo then
+            local use = base
+            if math.abs(size - use) > 0.01 then fs:SetFont(path, use, flags) size = use end
+            while use - 1 >= KEY_FIT_MIN and (fs:GetUnboundedStringWidth() or 0) + KEY_FIT_SLACK > box do
+                use = use - 1
+                fs:SetFont(path, use, flags)
+                size = use
+            end
+            if (fs:GetUnboundedStringWidth() or 0) + KEY_FIT_SLACK > box then use = base end
+            fs.zFitKey, fs.zFitWant = memo, use
+        end
+        want = fs.zFitWant or base
+    end
+    if math.abs(size - want) > 0.01 then fs:SetFont(path, want, flags) end
+    fs.zFitNow = want
 end
 
 -- The 1px border every skinned button carries (ns.AddPixelBorder), in

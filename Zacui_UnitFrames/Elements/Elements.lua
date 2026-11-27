@@ -877,6 +877,9 @@ function ns.StyleElements(frame)
     pb:SetStatusBarTexture(barT)
     pb.bg:SetColorTexture(uc(db.colors.powerBg, 0, 0, 0, 0.6))
     pb:SetShown(powerOn)
+    -- (the layout above is the one with the strip: "no power" starts over)
+    frame._pwrEmpty = nil
+    if cfg.powerHideEmpty then ns.PowerEmptyApply(frame) end
 
     -- Name strip + text (on the overlay, above the bars)
     local strip, nm = frame.NameStrip, frame.Name
@@ -1986,12 +1989,42 @@ function ns.PowerColor(ptoken, ptype)
     return PBC and ((ptoken and PBC[ptoken]) or (ptype and PBC[ptype])) or POWER_FALLBACK
 end
 
+-- A UNIT WITH NO POWER AT ALL (2026-11-24; cfg.powerHideEmpty, off unless
+-- ticked: Unit frames > a frame > "Hide the power bar on a unit that has
+-- none"). Most beasts and critters have no mana, rage or energy
+-- (UnitPowerMax 0): their strip is an empty bar. With the tick, the strip
+-- is hidden for such a unit and the health bar takes its room; the next
+-- unit with power gets both back. Only the bar's own point moves (it is
+-- not a protected frame), so this is fine in a fight. Not under a game
+-- look's kit (the strip is part of that art) and never on a value the
+-- game hides. max: the unit's power maximum when the caller has it.
+function ns.PowerEmptyApply(frame, max)
+    local cfg, pb, hb = frame.cfg, frame.Power, frame.Health
+    if not (cfg and pb and hb) then return end
+    local want = false
+    if cfg.power and cfg.powerHideEmpty and not frame._zKitKind then
+        if max == nil then
+            local unit = frame.unit
+            if unit and UnitExists(unit) then max = UnitPowerMax(unit) end
+        end
+        if max ~= nil and not (issecretvalue ~= nil and issecretvalue(max)) and max == 0 then want = true end
+    end
+    if want == (frame._pwrEmpty or false) then return end
+    frame._pwrEmpty = want or nil
+    local Z = _G.ZacUI
+    local px = Z and Z.Pixel and Z.Pixel.One(frame) or 1
+    local powerH = (cfg.power and ns.db.power.height) or 0
+    pb:SetShown((cfg.power and not want) and true or false)
+    hb:SetPoint("BOTTOM", frame, "BOTTOM", 0, (want and 0 or powerH) + px)
+end
+
 function ns.UpdatePower(frame)
     if not frame.Power or (frame.cfg and not frame.cfg.power and not frame._zKitKind) then return end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return end
     local ptype, ptoken = UnitPowerType(unit)
     local cur, max = UnitPower(unit), UnitPowerMax(unit)
+    if frame._pwrEmpty or (frame.cfg and frame.cfg.powerHideEmpty) then ns.PowerEmptyApply(frame, max) end
     if issecretvalue ~= nil and (issecretvalue(cur) or issecretvalue(max)) then
         -- WoW Forever may hide power too: the bar straight from the values
         local Z, pb = _G.ZacUI, frame.Power

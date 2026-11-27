@@ -1020,6 +1020,12 @@ local function Build()
         tw:SetPoint("LEFT", help, "RIGHT", 10, 0)
         tw:SetFrameLevel(nav:GetFrameLevel() + 5)
         window.twitchButton = tw
+        -- the site, after Twitch (2026-11-24): what changed, bug reports,
+        -- suggestions
+        local web = UI.ContactButton(tb, 20, "site")
+        web:SetPoint("LEFT", tw, "RIGHT", 10, 0)
+        web:SetFrameLevel(nav:GetFrameLevel() + 5)
+        window.siteButton = web
     end
 
     -- EDIT MODE: the sidebar's one fixed row (EllesmereUI's Unlock Mode

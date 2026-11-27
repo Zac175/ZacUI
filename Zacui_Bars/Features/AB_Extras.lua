@@ -36,6 +36,7 @@ local function Hotkey(fs, key, hidden)
         fs:SetText(AB.ShortKey(key))
         fs:Show()
         fs:SetAlpha(1)
+        if AB.FitKey then AB.FitKey(fs) end     -- (a name wider than its box: AB_Core)
     else
         fs:SetText("")
         fs:SetAlpha(0)

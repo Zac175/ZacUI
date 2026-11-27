@@ -524,12 +524,15 @@ RegisterPage("Profiles", function(L)
     ButtonRow(L, {
         { "Apply to this character", function()
             if Import.Redirect(importBox:GetText(), "profile") then return end
-            local snap, err = Profiles.Import(Import.Clean(importBox:GetText()))
+            local snap, err, made = Profiles.Import(Import.Clean(importBox:GetText()))
             if not snap then Print("Import failed: " .. tostring(err)) return end
             local carried = Profiles.SectionsIn(snap)
+            -- (Core_Profiles ScreenNote: only when the string's screen differs from this one)
+            local screen = Profiles.ScreenNote and Profiles.ScreenNote(made)
             UI.Confirm({ title = "Import", acceptText = "Import",
                 text = "This string carries: " .. SectionLabels(carried) .. ". Those sections replace this "
-                    .. "character's; everything else stays. A reload follows.",
+                    .. "character's; everything else stays. A reload follows."
+                    .. (screen and ("\n\n" .. screen) or ""),
                 onAccept = function()
                     LoadThenReload("Imported", function()
                         local ok, applyErr = Profiles.Apply(snap)
@@ -540,13 +543,15 @@ RegisterPage("Profiles", function(L)
         end, width = 170 },
         { "Save as new profile", function()
             if Import.Redirect(importBox:GetText(), "profile") then return end
-            local snap, err = Profiles.Import(Import.Clean(importBox:GetText()))
+            local snap, err, made = Profiles.Import(Import.Clean(importBox:GetText()))
             if not snap then Print("Import failed: " .. tostring(err)) return end
             local n = Trim(importName:GetText())
             if n == "" then Print("Give the new profile a name first.") return end
             if Profiles.Store()[n] then Print("'" .. n .. "' already exists.") return end
             Profiles.Store()[n] = snap
             Print("Saved '" .. n .. "' (" .. SectionLabels(Profiles.SectionsIn(snap)) .. "). Switch a character to it above.")
+            local screen = Profiles.ScreenNote and Profiles.ScreenNote(made)
+            if screen then Print(screen) end
             importBox:SetText("")
             RefreshConfig()
         end, width = 150 },

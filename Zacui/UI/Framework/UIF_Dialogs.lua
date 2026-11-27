@@ -790,6 +790,30 @@ end
 -- for Ctrl+C. The name cannot be typed over; Escape closes it.
 ns.CONTACT_DISCORD = "Zac12"
 ns.CONTACT_TWITCH = "twitch.tv/zac984"
+-- THE SITE (2026-11-24): newest versions, what changed, bug reports and
+-- suggestions. One address, here only. A link built by ns.SiteLink carries
+-- the addon, this version and this game version, so the site's form opens
+-- already filled in.
+ns.SITE = "https://zac175.github.io/"
+ns.ICON_LINK = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\chain"
+-- the site's own picture (2026-11-24, Zac: "more of a support icon"): a headset
+ns.ICON_SUPPORT = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\support"
+-- kind: "report" (a problem), "suggest" (a feature), anything else = what changed
+function ns.SiteLink(kind)
+    local v = tostring((ns.ZUI and ns.ZUI.VERSION) or "")
+    local game = (ns.DetectFlavor and ns.DetectFlavor()) or ""
+    if kind == "report" then
+        return ns.SITE .. "#/report?addon=zacui&v=" .. v .. "&game=" .. game
+    elseif kind == "suggest" then
+        return ns.SITE .. "#/suggest?addon=zacui&game=" .. game
+    end
+    return ns.SITE .. "#/changelog/zacui"
+end
+local SITE_KINDS = {
+    report  = { title = "Report a problem", desc = "Open this link in your browser. It knows your version." },
+    suggest = { title = "Suggest a feature", desc = "Open this link in your browser." },
+    site    = { title = "ZacUI on the web", desc = "What changed, bug reports and suggestions. Open this link in your browser." },
+}
 ns.ICON_TWITCH = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\twitch"
 ns.ICON_DISCORD = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\discord"
 local contact
@@ -828,18 +852,30 @@ local function BuildContact()
     return f
 end
 
--- kind: nil (Discord: Zac's name to message) or "twitch" (his channel)
+-- kind: nil (Discord: Zac's name to message), "twitch" (his channel), or
+-- a link to the site: "report", "suggest", "site"
 function UI.ShowContact(kind)
     local f = contact or BuildContact()
     local eb = f.editBox
     local tw = kind == "twitch"
-    f._zText = tw and ns.CONTACT_TWITCH or ns.CONTACT_DISCORD
-    f:SetTitle(tw and "Watch on Twitch" or "Need help?", tw and "Zac's channel" or "Message Zac on Discord")
-    if f.titleIcon then f.titleIcon:SetTexture(tw and ns.ICON_TWITCH or ns.ICON_DISCORD) end
+    local site = SITE_KINDS[kind]
+    if site then
+        f._zText = ns.SiteLink(kind)
+        f:SetTitle(site.title, site.desc)
+        if f.titleIcon then f.titleIcon:SetTexture(ns.ICON_SUPPORT) end
+        if f.hint then f.hint:SetText("Ctrl+C to copy, then paste it into your browser") end
+    else
+        f._zText = tw and ns.CONTACT_TWITCH or ns.CONTACT_DISCORD
+        f:SetTitle(tw and "Watch on Twitch" or "Need help?", tw and "Zac's channel" or "Message Zac on Discord")
+        if f.titleIcon then f.titleIcon:SetTexture(tw and ns.ICON_TWITCH or ns.ICON_DISCORD) end
+        if f.hint then f.hint:SetText("Ctrl+C to copy") end
+    end
     eb:SetText(f._zText)
     UI.OpenWindow(f)
     f:Raise()
     eb:SetFocus()
+    -- a long link shows from its start; all of it is selected either way
+    if eb.SetCursorPosition then eb:SetCursorPosition(0) end
     eb:HighlightText()
     return f
 end
@@ -855,7 +891,7 @@ function UI.ContactButton(parent, size, kind)
     local t = b:CreateTexture(nil, "ARTWORK")
     t._zui_own = true
     t:SetAllPoints()
-    t:SetTexture(kind == "twitch" and ns.ICON_TWITCH or ns.ICON_DISCORD)
+    t:SetTexture(kind == "twitch" and ns.ICON_TWITCH or kind == "site" and ns.ICON_SUPPORT or ns.ICON_DISCORD)
     b._zIcon = t
     b._zPaint = function(self)
         if self._zHot then
@@ -870,6 +906,9 @@ function UI.ContactButton(parent, size, kind)
     b:SetScript("OnClick", function() UI.ShowContact(kind) end)
     if kind == "twitch" then
         UI.Tooltip(b, "Watch on Twitch", ns.CONTACT_TWITCH .. ". Click to copy the link.")
+    elseif kind == "site" then
+        -- (2026-11-24, Zac: "a button next the twitch and discord buttons as well")
+        UI.Tooltip(b, "ZacUI on the web", "What changed, report a problem, suggest a feature. Click to copy the link.")
     else
         UI.Tooltip(b, "Need help?", "Message Zac on Discord: " .. ns.CONTACT_DISCORD .. ". Click to copy the name.")
     end

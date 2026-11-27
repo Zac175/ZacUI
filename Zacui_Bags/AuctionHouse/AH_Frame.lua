@@ -78,6 +78,20 @@ local function CreateList(parent, columns, opts)
             cat = "text", key = "gold", justify = col.justify or "LEFT" })
         fs:SetPoint("LEFT", col.x, 0)
         fs:SetWidth(col.w)
+        -- A HEADING IS NEVER CUT (2026-11-25, /rcaudit zui in the game:
+        -- "Auctions" in its 50-wide column was shortened in the wider
+        -- fonts). One wider than its column keeps the edge its column is
+        -- aligned to and takes the room on the other side.
+        local need = fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth()
+        if type(need) == "number" and need == need and need + 2 > col.w then
+            local w = math.ceil(need) + 2
+            fs:SetWidth(w)
+            local j = col.justify or "LEFT"
+            if j ~= "LEFT" then
+                fs:ClearAllPoints()
+                fs:SetPoint("LEFT", col.x - (j == "RIGHT" and (w - col.w) or math.floor((w - col.w) / 2)), 0)
+            end
+        end
     end
 
     local scroll, child, bar = UI.ScrollArea(list)

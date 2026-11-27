@@ -769,6 +769,15 @@ local function TabGeneral(L)
         show[#show + 1] = { "Fade out of range", function() return cfg.rangeFade end, function(v) cfg.rangeFade = v end }
     end
     Checks(L, show, 4)
+    -- (Elements ns.PowerEmptyApply; a frame that shows other units: your own always has power)
+    if not group and key ~= "player" then
+        Checks(L, {
+            { "Hide the power bar on a unit that has none", function() return cfg.powerHideEmpty end,
+              function(v) cfg.powerHideEmpty = v and true or nil end,
+              "Most beasts and critters have no mana, rage or energy, so their power bar is an empty strip. "
+              .. "Ticked: for such a unit the strip is hidden and the health bar takes its room. Needs \"Power bar\" ticked." },
+        }, 1)
+    end
     Drops(L, { label = "Health text", items = HEALTH_TEXT,
         get = function() return cfg.healthText end, set = function(v) cfg.healthText = v end })
     L:Desc("Switching a frame on or off, and the party and raid layout, take a reload; everything else changes at once.")

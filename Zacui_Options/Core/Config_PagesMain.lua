@@ -236,9 +236,11 @@ ns.LookCard = LookCard
 -- GENERAL
 -- ============================================================
 RegisterPage("General", function(L)
+    -- (2026-11-25, /rcaudit zui in the game: the three-sentence line was
+    -- cut at the header's two lines. It also still said "flat dark" and
+    -- "Classic Era", neither true of every look or game any more.)
     L:Header("ZacUI",
-        "A flat dark skin for the Classic Era interface. Every module is "
-        .. "independent - turn off anything you would rather keep stock. "
+        "Every module is independent: turn off anything you would rather keep stock. "
         .. "Diagnostics, the shared voice and the reset switch are here too.")
 
     -- the tour and quick setup (UI/Tutorial)
@@ -258,10 +260,15 @@ RegisterPage("General", function(L)
     if UI.ShowContact then
         local card = L:Card("Need help?")
         L:Desc("Message Zac on Discord: " .. (ns.CONTACT_DISCORD or "Zac12")
-            .. ". The button shows the name ready to copy.")
+            .. ". Something broken, or something missing? The other two buttons give you a link to the "
+            .. "site's form, already filled in with your version.")
         local b = UI.Button(card, "Discord", { width = 120, onClick = function() UI.ShowContact() end,
             tooltip = "Shows Zac's Discord name selected, ready for Ctrl+C." })
-        L:Flow({ b }, 8, 6)
+        local rp = UI.Button(card, "Report a problem", { width = 150, onClick = function() UI.ShowContact("report") end,
+            tooltip = "A link to copy into your browser. /zui report does the same." })
+        local sg = UI.Button(card, "Suggest a feature", { width = 150, onClick = function() UI.ShowContact("suggest") end,
+            tooltip = "A link to copy into your browser. /zui suggest does the same." })
+        L:Flow({ b, rp, sg }, 8, 6)
         L:EndCard()
     end
 

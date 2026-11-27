@@ -28,6 +28,40 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.20",
+        date = "2026-11-25",
+        title = "A website for reports and ideas, and lists that show every choice whole",
+        sections = {
+            {
+                type = "added",
+                items = {
+                    "ZacUI has a website: what changed in every version, bug reports and feature suggestions. /zui report and /zui suggest give you the link with your version filled in. So do the buttons under Need help? on the Overview page and the headset button beside Discord and Twitch.",
+                    { "Action bars: a key name too long for its button is drawn a little smaller so the whole name shows. A tick under Keys turns it off.", feature = "bars" },
+                    "Tooltips: a skinnable corpse can show the skinning skill it needs. Off until you turn it on.",
+                    { "Bags: items you cannot use can be tinted. Off until you turn it on.", feature = "bags" },
+                    "Unit frames: the power bar can hide on a target that has no mana, rage or energy. Off until you turn it on.",
+                    "Profiles: an exported profile remembers the screen it was made on, and importing it on a different screen says so.",
+                    { "Scrolling text: the extra attacks line (Windfury) is offered on WoW Forever, and /zui combattext lists what the game reports there.", only = "forever" },
+                },
+            },
+            {
+                type = "changed",
+                items = {
+                    "Dropdown lists are as wide as their longest choice, so nothing in an open list is cut short.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    "Searching the settings made the game stutter. It no longer does.",
+                    "Dropdown lists opened bigger or smaller than their box when the settings window was not at 100%.",
+                    "Settings window: two page descriptions were cut short, and one row in the unit frames preview's list stuck out.",
+                    { "Auction house: the Auctions column heading was cut short.", feature = "auction" },
+                },
+            },
+        },
+    },
+    {
         version = "3.0.19",
         date = "2026-11-22",
         title = "Timers that catch up when you join late, and easier bag pins",

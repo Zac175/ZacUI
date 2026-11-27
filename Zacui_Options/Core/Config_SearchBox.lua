@@ -42,7 +42,7 @@ local DEBOUNCE = 0.12
 
 local window, nav, host, eb, popup, api
 local rows = {}
-local lastQuery, lastResults, lastHits = "", {}, {}
+local lastQuery, lastResults, lastHits, lastBest = "", {}, {}, {}
 local shown = {}      -- the results on the rows now
 local sel = 1
 local serial = 0
@@ -59,6 +59,9 @@ function Box.Selected() return shown[sel] end
 
 -- Best result on one page, for a sidebar row clicked while searching.
 function Box.BestFor(itemId)
+    -- (the search notes each page's best line on its way; the list itself
+    -- is only the top of the ranking)
+    if lastBest and lastBest[itemId] then return lastBest[itemId] end
     for _, r in ipairs(lastResults) do
         if r.item == itemId then return r end
     end
@@ -221,11 +224,12 @@ end
 -- ============================================================
 local function Run(text)
     lastQuery = text or ""
-    lastResults, lastHits = Search.Run(lastQuery)
+    lastResults, lastHits, lastBest = Search.Run(lastQuery)
 end
 
 local function Clear()
-    lastQuery, lastResults, lastHits = "", {}, {}
+    if Search.CancelSliced then Search.CancelSliced() end
+    lastQuery, lastResults, lastHits, lastBest = "", {}, {}, {}
     for k in pairs(shown) do shown[k] = nil end
     sel = 1
     Hide()
@@ -237,9 +241,15 @@ local function OnIndexed()
     if not (window and window:IsShown()) then return end
     local text = eb:GetText() or ""
     if not text:find("%S") then return end
-    Run(text)
-    if api and api.BuildNav then api.BuildNav() end
-    if popup:IsShown() or eb:HasFocus() then Draw() end
+    -- (a slice a frame, like the search a key starts; whichever of the
+    -- two started last is the one that answers)
+    local mine = serial
+    Search.RunSliced(text, function(results, hits, best)
+        if mine ~= serial or not (window and window:IsShown()) then return end
+        lastQuery, lastResults, lastHits, lastBest = text, results, hits, best
+        if api and api.BuildNav then api.BuildNav() end
+        if popup:IsShown() or eb:HasFocus() then Draw() end
+    end)
 end
 
 -- Typing waits a beat before searching, so a fast word is one search,
@@ -257,10 +267,15 @@ local function OnChanged()
             return
         end
         Search.EnsureIndex(OnIndexed)
-        Run(text)
-        sel = 1
-        if api and api.BuildNav then api.BuildNav() end
-        Draw()
+        -- (2026-11-25) the search itself is spread over frames; the list
+        -- and the sidebar are drawn once, when it is through
+        Search.RunSliced(text, function(results, hits, best)
+            if mine ~= serial or not (window and window:IsShown()) then return end
+            lastQuery, lastResults, lastHits, lastBest = text, results, hits, best
+            sel = 1
+            if api and api.BuildNav then api.BuildNav() end
+            Draw()
+        end)
     end)
 end
 

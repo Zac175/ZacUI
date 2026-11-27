@@ -12,6 +12,9 @@
 --   WoW Classic Forever: there is no combat log there. Hits and heals
 --     you take come from UNIT_COMBAT (the event the game's own floating
 --     text uses); your own outgoing numbers are not available there yet.
+--     Extra attacks (Windfury, Hand of Justice...) come from
+--     COMBAT_TEXT_UPDATE, which says "EXTRA_ATTACKS" - a kind the game's
+--     own text never draws.
 --   Both: the notices that come from chat or from your own state
 --     (combat, skill-ups, reputation, honor, money, loot).
 local ns = _G.ZacUI
@@ -63,7 +66,7 @@ local EVENTS = {
     { key = "n_debuff",     cat = "note", label = "Debuffs you get",       area = "notification", fmt = "[%s]",  c = { 1, 0.4, 0.4 }, off = true },
     { key = "n_debuff_fade", cat = "note", label = "Debuffs that fade",    area = "notification", fmt = "-[%s]", c = { 1, 0.4, 0.4 }, off = true },
     { key = "n_power",      cat = "note", label = "Rage, energy and mana gains", area = "notification", fmt = "+%a %p", c = { 0.4, 0.6, 1 }, off = true },
-    { key = "n_extra",      cat = "note", label = "Extra attacks",         area = "notification", fmt = "+%a extra attack", c = { 1, 1, 1 }, off = true, size = 18 },
+    { key = "n_extra",      cat = "note", label = "Extra attacks (Windfury)", area = "notification", fmt = "+%a extra attack", c = { 1, 1, 1 }, off = true, size = 18 },
     { key = "n_cp_full",    cat = "note", label = "Combo points full",     area = "notification", fmt = "%a combo points", c = { 1, 0.8, 0.2 } },
     { key = "n_skill",      cat = "note", label = "Skill gains",           area = "notification", fmt = "%s: %a", c = { 0.4, 0.6, 1 } },
     { key = "n_rep",        cat = "note", label = "Reputation",            area = "notification", fmt = "%x %s", c = { 0.55, 0.55, 1 } },
@@ -551,6 +554,72 @@ local function OnUnitCombat(unit, action, descriptor, amount)
 end
 
 -- ============================================================
+-- COMBAT_TEXT_UPDATE (WoW Classic Forever) - extra attacks
+-- ============================================================
+-- The event the game's own floating text is fed by. Its one value is the
+-- kind of line ("HEAL", "EXTRA_ATTACKS"...); the numbers behind it come
+-- from C_CombatText.GetCurrentEventInfo() and may be hidden in a fight.
+-- (Blizzard's CombatText.lua, 1.60.1: the "EXTRA_ATTACKS" kind has no
+-- setting of its own and is never drawn, which is why a Windfury proc
+-- shows nothing there.) Used for that one kind only - hits and heals
+-- stay on UNIT_COMBAT, so nothing shows twice. Every kind heard is
+-- counted for /zui combattext.
+local heard, heardOrder = {}, {}
+S.CombatTextHeard, S.CombatTextKinds = heard, heardOrder
+
+local function OnCombatText(kind)
+    if secret and secret(kind) then kind = "(hidden)" end
+    if type(kind) ~= "string" then return end
+    if not heard[kind] then
+        heard[kind] = 0
+        heardOrder[#heardOrder + 1] = kind
+    end
+    heard[kind] = heard[kind] + 1
+    if kind ~= "EXTRA_ATTACKS" then return end
+
+    local n
+    local get = (C_CombatText and C_CombatText.GetCurrentEventInfo) or GetCurrentCombatTextEventInfo
+    if get then
+        local ok, a = pcall(get)
+        if ok then n = a end
+    end
+    if n ~= nil and secret and secret(n) then
+        -- a count we may not read is shown as it is, or left out
+        if not S.EventOn("n_extra") then return end
+        local ok, text = pcall(function() return "+" .. n .. " extra attack" end)
+        if not ok then text = "Extra attack" end
+        local r, g, b = S.EventColor("n_extra")
+        pcall(S.Display, S.EventArea("n_extra"), text, { r = r, g = g, b = b,
+            size = S.EventSize("n_extra"), sound = S.EventSound("n_extra"), soundKey = "n_extra" })
+        return
+    end
+    Show("n_extra", { amount = tonumber(n) or 1 })
+end
+
+-- /zui combattext: what the game's combat text has sent this session.
+function S.CombatTextReport()
+    local function P(line) if ns.Print then ns.Print(line) else print("ZacUI: " .. line) end end
+    if not S.FOREVER then
+        P("Combat text: this game version has a combat log, and the lines are read from it. "
+            .. "Extra attacks (Windfury) is " .. (S.EventOn("n_extra") and "on." or "OFF: tick it in Combat Text, Events."))
+        return
+    end
+    P("Combat text: scrolling text " .. (S.IsOn() and "on" or "OFF") .. ", extra attacks (Windfury) "
+        .. (S.EventOn("n_extra") and "on" or "OFF") .. ". Kinds the game has sent this session:")
+    if #heardOrder == 0 then
+        P("  none yet. Take a hit or a heal, then type this again.")
+        return
+    end
+    for _, kind in ipairs(heardOrder) do
+        P(string_format("  %s: %d", kind, heard[kind]))
+    end
+    if not heard.EXTRA_ATTACKS then P("  No EXTRA_ATTACKS yet: the game has not reported an extra attack.") end
+end
+ns.SlashCommands = ns.SlashCommands or {}
+ns.SlashCommands.combattext = function() S.CombatTextReport() end
+ns.SlashCommands.sct = ns.SlashCommands.combattext
+
+-- ============================================================
 -- CHAT AND STATE
 -- ============================================================
 -- a game message like "Your skill in %s has increased to %d." as a
@@ -617,6 +686,8 @@ local function Arm()
         end
     else
         if on then ev:RegisterUnitEvent("UNIT_COMBAT", "player") else ev:UnregisterEvent("UNIT_COMBAT") end
+        -- (pcall: an event name a client does not know is an error)
+        if on then pcall(ev.RegisterEvent, ev, "COMBAT_TEXT_UPDATE") else pcall(ev.UnregisterEvent, ev, "COMBAT_TEXT_UPDATE") end
     end
 end
 S.ArmEvents = Arm
@@ -627,6 +698,8 @@ ev:SetScript("OnEvent", function(self, event, ...)
         OnCombatLog()
     elseif event == "UNIT_COMBAT" then
         OnUnitCombat(...)
+    elseif event == "COMBAT_TEXT_UPDATE" then
+        OnCombatText(...)
     elseif event == "PLAYER_REGEN_DISABLED" then
         Show("n_combat_in", {})
     elseif event == "PLAYER_REGEN_ENABLED" then

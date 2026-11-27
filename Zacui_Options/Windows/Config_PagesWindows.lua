@@ -197,10 +197,11 @@ local function Color(L, key, label, cat, ckey, alpha, desc)
 end
 
 RegisterPage(PAGE_ID, function(L)
+    -- (2026-11-25, /rcaudit zui in the game: the long list of windows was
+    -- cut at the header's two lines)
     L:Header("Game windows",
-        "The look of ZacUI's own windows - the character sheet, spellbook, talents, "
-        .. "professions, merchant, mailbox, social, quest log and the rest: how big "
-        .. "they are, their colours, their titles and how they open.")
+        "ZacUI's own windows - character sheet, spellbook, talents, mailbox, quest log "
+        .. "and the rest: their size, colours, titles and how they open.")
 
     local db = Kit.DB()
 

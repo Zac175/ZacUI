@@ -132,6 +132,7 @@ function AB.UpdateHotkeys(self)
     else
         fs:SetText(text)
         fs:Show()
+        AB.FitKey(fs)       -- (a name wider than the button: AB_Core)
     end
     local cfg = self.zCfg
     -- keybind mode shows every key, a hidden key text too

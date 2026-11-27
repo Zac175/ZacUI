@@ -288,6 +288,10 @@ KeysCard = function(L, A, p)
     for _, st in ipairs(A.KEY_STYLES or {}) do styles[#styles + 1] = { text = st.label, value = st.id } end
     Dropdown(L, "Key text", styles, function() return c.keyStyle or "short" end,
         function(v) c.keyStyle = (v ~= "short") and v or nil end, 260)
+    Check(L, "Shrink a key name that does not fit its button", function() return c.keyFit ~= false end,
+        function(v) if v then c.keyFit = nil else c.keyFit = false end end,
+        "A key name wider than its button, C-WU on a small button for one, is drawn a little smaller "
+        .. "so the whole name shows. Off: it is cut short with dots.")
     Check(L, "Range dot on buttons with no key", function() return c.rangeDot ~= false end,
         function(v) if v then c.rangeDot = nil else c.rangeDot = false end end,
         "The game's dot in the key corner that turns red out of range.")
