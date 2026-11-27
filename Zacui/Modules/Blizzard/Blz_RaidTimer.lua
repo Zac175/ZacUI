@@ -36,6 +36,22 @@
 --     the first time this character enters combat. A game version that
 --     gives addons no combat log (WoW Forever) cannot see a kill, so it
 --     keeps the old rule.
+--   * THE CLOCK STARTS AT THE FIRST BLOW, NOT AT BEING IN COMBAT
+--     (2026-11-27, Zac, with the raid's log: "my raid timer was still off
+--     ... by like 40 seconds", "we do bloodrage mrp logout and when we log
+--     back in we bloodrage but normally dont pull till the bloodrage is
+--     done". Checked against that log: every one of the fifteen kills was
+--     16.5 to 17.5 s late and the clear read 39:39 against the log's
+--     39:22 - the run had started at the Bloodrage, 16.6 s before the
+--     first boss was pulled; Bloodrage puts a Warrior in combat and the
+--     raid never left it before the pull.) While a run is pending the
+--     combat log is watched for the first line between the raid and an
+--     enemy - a hit, a miss, a debuff, a spell cast at it, either way
+--     round - and that moment (the line's own time stamp, the one a log
+--     site reads) is where the run counts from once it is confirmed.
+--     A boss pulled before any such line starts it at the pull. Until
+--     then the dimmed clock stands at 0:00. Being in combat with nothing
+--     hostile in it - Bloodrage, a potion, a buff - is not the start.
 --   * Each boss kill (ENCOUNTER_END, success) is a split.
 --   * Runs are compared within one RAID CONFIG: the instance plus the
 --     Readycheck raid config active for it ("Naxxramas | Speed"). A
@@ -164,16 +180,46 @@ end
 -- ---- a pending run (see the head of this file)
 local HOSTILE = COMBATLOG_OBJECT_REACTION_HOSTILE or 0x00000040
 local NPC = COMBATLOG_OBJECT_TYPE_NPC or 0x00000800
+-- (this character, its party or its raid - and their pets)
+local OURS = (COMBATLOG_OBJECT_AFFILIATION_MINE or 0x00000001) + (COMBATLOG_OBJECT_AFFILIATION_PARTY or 0x00000002)
+    + (COMBATLOG_OBJECT_AFFILIATION_RAID or 0x00000004)
 local band = bit and bit.band
 local Watch
--- the fight had a kill, or a boss in it: the pending run is the run
+-- the fight had a kill, or a boss in it: the pending run is the run, and
+-- it counts from the first blow of that fight (see the head of this file)
 local function Confirm(r)
     if not (r and r.pending) then return end
     r.pending = nil
+    if r.contact then r.start = r.contact end
+    r.contact = nil
     Watch(false)
     T.Paint()
 end
 T.Confirm = function() Confirm(Run()) end
+local function IsEnemy(flags)
+    return type(flags) == "number" and band ~= nil and band(flags, HOSTILE) ~= 0 and band(flags, NPC) ~= 0
+end
+local function IsOurs(flags)
+    return type(flags) == "number" and band ~= nil and band(flags, OURS) ~= 0
+end
+-- The first line between the raid and an enemy in a pending fight. Only
+-- listened for until it has come (the lines it reads are the busy ones).
+local CONTACT = { "SWING_DAMAGE", "SWING_MISSED", "RANGE_DAMAGE", "RANGE_MISSED", "SPELL_DAMAGE", "SPELL_MISSED",
+    "SPELL_PERIODIC_DAMAGE", "SPELL_AURA_APPLIED", "SPELL_CAST_SUCCESS" }
+local function OnContact(stamp, _, _, _, _, srcFlags, _, _, _, destFlags)
+    local r = Run()
+    if not (r and r.pending) or r.contact then
+        ns.CLEU.Off("RaidTimer.contact")
+        return
+    end
+    if (IsEnemy(srcFlags) and IsOurs(destFlags)) or (IsEnemy(destFlags) and IsOurs(srcFlags)) then
+        -- (the line's own time: the clock a combat log is written with)
+        local now = time()
+        r.contact = (type(stamp) == "number" and math.abs(stamp - now) < 5) and stamp or now
+        ns.CLEU.Off("RaidTimer.contact")
+        T.Paint()
+    end
+end
 -- one death out of the combat log (ns.CLEU hands over the event's values)
 local function OnDeath(_, _, _, _, _, _, _, _, _, destFlags)
     local r = Run()
@@ -188,8 +234,14 @@ Watch = function(on)
         T.watching = false
         return
     end
-    if on then ns.CLEU.On("RaidTimer.pending", "UNIT_DIED", OnDeath)
-    else ns.CLEU.Off("RaidTimer.pending") end
+    if on then
+        ns.CLEU.On("RaidTimer.pending", "UNIT_DIED", OnDeath)
+        local r = Run()
+        if r and r.pending and not r.contact then ns.CLEU.On("RaidTimer.contact", CONTACT, OnContact) end
+    else
+        ns.CLEU.Off("RaidTimer.pending")
+        ns.CLEU.Off("RaidTimer.contact")
+    end
     T.watching = on and true or false
 end
 -- anyone of the raid still fighting (asked when this character's own
@@ -233,7 +285,11 @@ function T.OnCombat(sure)
     if r and r.pending then
         if r.inst == inst and T.watching then
             -- the pending fight goes on; a boss pulled in it settles it
-            if sure then Confirm(r) end
+            -- (pulled before anyone touched an enemy: the pull is the start)
+            if sure then
+                if not r.contact then r.start = time() end
+                Confirm(r)
+            end
             return
         end
         -- (a pending run nothing is listening for - left over from another
@@ -353,8 +409,11 @@ function T.Paint()
         elseif not r.newBest and best then txt = txt .. "  " .. Delta(r.total - best.total) end
         Tick(false)
     else
-        -- (a pending run's clock is dimmed: it may yet turn out not to be the start)
-        local clock = "|cff" .. Hex(r.pending and GetColor("text", "gray") or normal) .. Clock(time() - r.start) .. "|r"
+        -- (a pending run's clock is dimmed: it may yet turn out not to be
+        -- the start - and it stands at 0:00 until the first blow)
+        local since = time() - r.start
+        if r.pending and SeesKills() then since = r.contact and (time() - r.contact) or 0 end
+        local clock = "|cff" .. Hex(r.pending and GetColor("text", "gray") or normal) .. Clock(since) .. "|r"
         local last = r.order[#r.order]
         if last then
             local gray = GetColor("text", "gray")
@@ -377,7 +436,7 @@ function T.Tooltip(w)
     GameTooltip:AddLine("Raid timer", 1, 0.82, 0)
     GameTooltip:AddLine(r.key, 0.6, 0.6, 0.6)
     if r.pending then
-        GameTooltip:AddLine("Counting from this fight's start. It becomes the run at the first kill or boss pull; "
+        GameTooltip:AddLine("Counting from this fight's first blow. It becomes the run at the first kill or boss pull; "
             .. "a fight that ends with nothing killed does not start it.", 0.9, 0.9, 0.9, true)
     end
     if #r.order == 0 then

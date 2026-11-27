@@ -1207,6 +1207,17 @@ local function OnMiss(kind, _, now)
     if kind == "DODGE" then S.lastDodge = now end
 end
 
+-- An item that starts your swing over (Oil of Immolation, Classic Era and
+-- Burning Crusade: HUD.ResetsSwing): both hands begin a full swing again.
+local function OnOwnCast(spellId)
+    if not HUD.ResetsSwing(spellId) then return end
+    local now = GetTime()
+    local mhSpeed, ohSpeed = UnitAttackSpeed("player")
+    local sw = S.swing
+    if (sw.mh.duration or 0) > 0 then sw.mh.start, sw.mh.duration = now, mhSpeed or sw.mh.duration end
+    if sw.hasOH and (sw.oh.duration or 0) > 0 then sw.oh.start, sw.oh.duration = now, ohSpeed or sw.oh.duration end
+end
+
 -- Core ticker (0.2s): consumes dirty flags, refreshes the snapshot and
 -- repaints the display. Only runs for warriors with the HUD enabled.
 -- Out of combat with no attackable target nothing is moving, so the work
@@ -1369,6 +1380,7 @@ RegisterHotEvents = function()
     ev:RegisterEvent("SPELL_UPDATE_COOLDOWN")
     ev:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
     pcall(ev.RegisterUnitEvent, ev, "UNIT_ATTACK_SPEED", "player")
+    ev:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
 end
 UnregisterHotEvents = function()
     ns.CLEU.Off("WarriorHUD.core")
@@ -1381,9 +1393,10 @@ UnregisterHotEvents = function()
     ev:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
     ev:UnregisterEvent("UPDATE_SHAPESHIFT_FORM")
     ev:UnregisterEvent("UNIT_ATTACK_SPEED")
+    ev:UnregisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 end
 
-ev:SetScript("OnEvent", function(_, event, arg1)
+ev:SetScript("OnEvent", function(_, event, arg1, _, arg3)
     if event == "PLAYER_LOGIN" then
         local _, class = UnitClass("player")
         S.isWarrior = class == "WARRIOR"
@@ -1427,6 +1440,8 @@ ev:SetScript("OnEvent", function(_, event, arg1)
         dirty.bags = true
     elseif event == "UNIT_ATTACK_SPEED" then
         RescaleSwing()
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        OnOwnCast(arg3)
     elseif event == "SPELLS_CHANGED" then
         dirty.spells = true
     elseif event == "CHARACTER_POINTS_CHANGED" or event == "PLAYER_TALENT_UPDATE" then

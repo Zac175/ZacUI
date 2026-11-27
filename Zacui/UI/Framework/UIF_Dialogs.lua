@@ -794,7 +794,7 @@ ns.CONTACT_TWITCH = "twitch.tv/zac984"
 -- suggestions. One address, here only. A link built by ns.SiteLink carries
 -- the addon, this version and this game version, so the site's form opens
 -- already filled in.
-ns.SITE = "https://zac175.github.io/"
+ns.SITE = "https://zacaddons.com/"
 ns.ICON_LINK = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\chain"
 -- the site's own picture (2026-11-24, Zac: "more of a support icon"): a headset
 ns.ICON_SUPPORT = (ns.MEDIA or "Interface\\AddOns\\ZacUI\\Media\\") .. "Icons\\support"

@@ -2822,7 +2822,9 @@ RegisterPage("Chat", function(L)
             end, { width = 300 })
             L:Add(f, 6)
             L:Desc("A fight that ends with nothing killed - running past trash to get into position - does not "
-                .. "start the clock. The other choice starts it the moment you are first in combat.")
+                .. "start the clock, and the clock counts from that fight's first blow: being in combat before "
+                .. "the pull (Bloodrage, a potion) adds nothing. The other choice starts it the moment you are "
+                .. "first in combat.")
         end
         -- how its clock reads (chat.formats.raidClock; nothing saved = 23:45)
         local T = C.RaidMode and C.RaidMode.Timer

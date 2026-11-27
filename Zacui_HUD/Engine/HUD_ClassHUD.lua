@@ -498,6 +498,10 @@ function Engine:OnPowerEvent(event, spellId)
         end
         self.lastPower = cur
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        if HUD.ResetsSwing(spellId) and S.swing.duration > 0 then   -- (Oil of Immolation: the swing starts over)
+            local mhSpeed = UnitAttackSpeed("player")
+            S.swing.start, S.swing.duration = GetTime(), mhSpeed or S.swing.duration
+        end
         if spellId == 5019 and S.wand.active then     -- Shoot
             local speed = PlainNumber(UnitRangedDamage and UnitRangedDamage("player") or 0)
             if speed and speed > 0 then S.wand.start, S.wand.duration = GetTime(), speed end

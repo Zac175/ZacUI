@@ -28,6 +28,27 @@ local ADDON_NAME, ns = ...
 
 ns.CHANGELOG = {
     {
+        version = "3.0.21",
+        date = "2026-11-27",
+        title = "The website's new address, a raid timer that waits for the pull, and Oil of Immolation on the swing timer",
+        titles = { forever = "The website's new address, and a raid timer that waits for the pull", retail = "The website's new address, and a raid timer that waits for the pull" },
+        sections = {
+            {
+                type = "changed",
+                items = {
+                    "The website has a new address: zacaddons.com. The report, suggest and website buttons, and /zui report and /zui suggest, now open it.",
+                },
+            },
+            {
+                type = "fixed",
+                items = {
+                    { "Raid timer: a buff or ability used before the pull (a Bloodrage, say) started the clock early. It now starts at the first hit on an enemy.", feature = "raid_clear_timer" },
+                    { "Swing timer: using Oil of Immolation starts your swing over, and the swing bar now shows that.", only = { "era", "tbc" } },
+                },
+            },
+        },
+    },
+    {
         version = "3.0.20",
         date = "2026-11-25",
         title = "A website for reports and ideas, and lists that show every choice whole",

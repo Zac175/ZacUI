@@ -210,6 +210,30 @@ function HUD.UntimedSwing(barF)
     end
 end
 
+-- Items whose use starts your swing over (Classic Era and Burning Crusade):
+-- Oil of Immolation (Zac, 2026-11-27, seen in the game). The spell an item
+-- casts is asked of the game (GetItemSpell), so no spell number is assumed;
+-- the game may not know the item until it has been seen, so it is asked
+-- again on later casts until it answers.
+local SWING_RESET_ITEMS = { 8956 }   -- Oil of Immolation
+local swingResetSpell, swingResetAsked = {}, 0
+function HUD.ResetsSwing(spellId)
+    if not spellId then return false end
+    local fl = ns.Flavor and ns.Flavor()
+    if fl ~= "era" and fl ~= "tbc" then return false end
+    if swingResetSpell[spellId] then return true end
+    if swingResetAsked < #SWING_RESET_ITEMS then
+        local get = GetItemSpell or (C_Item and C_Item.GetItemSpell)
+        swingResetAsked = 0
+        for _, item in ipairs(SWING_RESET_ITEMS) do
+            local id
+            if get then id = select(2, get(item)) end
+            if id then swingResetSpell[id] = true; swingResetAsked = swingResetAsked + 1 end
+        end
+    end
+    return swingResetSpell[spellId] == true
+end
+
 -- A living enemy target the player can attack.
 function HUD.TargetAttackable()
     return (UnitExists("target") and UnitCanAttack("player", "target")
